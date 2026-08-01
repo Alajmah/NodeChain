@@ -1,0 +1,63 @@
+[project]
+name = "nodechain"
+version = "3.5.1"
+description = "NodeChain — Autonomous AI systems from composable Harness Nodes"
+requires-python = ">=3.11"
+dependencies = [
+    # Core
+    "pydantic>=2.0",
+    "jsonschema>=4.0",
+    "pyyaml>=6.0",
+
+    # LLM
+    "anthropic>=0.40",
+    "openai>=1.0",
+
+    # Academic search adapters (all REST — httpx only)
+    "httpx>=0.27",
+    "tenacity>=8.0",
+
+    # Local vector store + memory
+    "chromadb>=0.5",
+
+    # State persistence
+    # sqlite3 is stdlib — no dependency needed
+
+    # CLI
+    "click>=8.2,<9",
+    "rich>=13.0",
+
+    # Local API server (v2.59.0)
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+
+    # Audit bundle signing
+    "cryptography>=42.0",
+
+    # v3.5.0: semver range matching for adapter retry attestation
+    "packaging>=24.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+nodechain = "nodechain.cli.main:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nodechain"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "native_sandbox: v2.77 native OS sandbox enforcement tests. Skip by default; run only on the designated Linux verification host as root with NODECHAIN_NATIVE_RUNNER=1. Missing capability there fails (not skips).",
+]

@@ -1,0 +1,6 @@
+{
+  "type": "object",
+  "properties": {
+    "test_all": { "type": "boolean", "default": true }
+  }
+}

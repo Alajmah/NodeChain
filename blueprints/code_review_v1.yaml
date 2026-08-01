@@ -1,0 +1,69 @@
+chain_id: code-review-v1
+name: Code Review Assistant
+version: "1.0.0"
+description: >-
+  Read-only governed code review. Inspects developer artifacts under explicit
+  file/tool grants, produces review findings with file/line provenance, and
+  emits an auditable trace without mutating the repository.
+goal: >-
+  Review code changes for correctness, security, style, and performance issues
+  under governed read-only authority. Produce a structured review report with
+  traceable findings.
+
+nodes:
+  - node_id: code_review_request
+    node_type: model
+    position: 1
+    config:
+      model_required: true
+      max_cost_usd: 0.10
+
+  - node_id: file_reader
+    node_type: deterministic
+    position: 2
+    config:
+      allowed_paths:
+        - "src/nodechain/**/*.py"
+      git_access: read_only
+      side_effects: []
+
+  - node_id: code_analyzer
+    node_type: model
+    position: 3
+    config:
+      model_required: true
+      max_cost_usd: 0.20
+
+  - node_id: finding_classifier
+    node_type: deterministic
+    position: 4
+    config:
+      side_effects: []
+
+  - node_id: review_report_generator
+    node_type: model
+    position: 5
+    config:
+      model_required: true
+      max_cost_usd: 0.10
+
+connections:
+  - from_node: code_review_request
+    from_port: code_review_goal
+    to_node: file_reader
+    to_port: code_review_goal
+
+  - from_node: file_reader
+    from_port: code_artifacts
+    to_node: code_analyzer
+    to_port: code_artifacts
+
+  - from_node: code_analyzer
+    from_port: review_findings
+    to_node: finding_classifier
+    to_port: review_findings
+
+  - from_node: finding_classifier
+    from_port: classified_findings
+    to_node: review_report_generator
+    to_port: classified_findings

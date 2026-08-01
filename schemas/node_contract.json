@@ -1,0 +1,124 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "nodechain://schemas/node_contract",
+  "title": "NodeContract",
+  "description": "Declares what a node requires and produces. The runtime validates compatibility between connected nodes at load time.",
+  "type": "object",
+  "required": ["contract_id", "node_id", "version", "entry", "exit"],
+  "properties": {
+    "contract_id": {
+      "type": "string",
+      "description": "Unique contract identifier"
+    },
+    "node_id": {
+      "type": "string",
+      "description": "Node this contract belongs to"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semantic version"
+    },
+    "entry": {
+      "type": "object",
+      "required": ["input_type", "schema_ref"],
+      "properties": {
+        "input_type": {
+          "type": "string",
+          "description": "Semantic type name of the expected input"
+        },
+        "schema_ref": {
+          "type": "string",
+          "description": "Reference to the JSON schema for this type"
+        },
+        "required_fields": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Fields that must be present in input"
+        },
+        "optional_fields": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Fields that are accepted but not required"
+        }
+      }
+    },
+    "exit": {
+      "type": "object",
+      "required": ["output_type", "schema_ref"],
+      "properties": {
+        "output_type": {
+          "type": "string",
+          "description": "Semantic type name of the produced output"
+        },
+        "schema_ref": {
+          "type": "string",
+          "description": "Reference to the JSON schema for this type"
+        },
+        "guaranteed_fields": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Fields guaranteed to be present in output"
+        },
+        "possible_fields": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Fields that may be present depending on execution"
+        },
+        "error_type": {
+          "type": "string",
+          "description": "Semantic type of error output"
+        }
+      }
+    },
+    "side_effects": {
+      "type": "object",
+      "properties": {
+        "declared": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["effect_type", "target"],
+            "properties": {
+              "effect_type": {
+                "type": "string",
+                "enum": ["external_call", "memory_read", "memory_write", "tool_invocation"]
+              },
+              "target": { "type": "string" },
+              "optional": { "type": "boolean", "default": false }
+            }
+          }
+        }
+      }
+    },
+    "requirements": {
+      "type": "object",
+      "properties": {
+        "model_required": {
+          "type": "boolean",
+          "default": false
+        },
+        "model_capabilities": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "tools_required": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "memory_access": {
+          "type": "string",
+          "enum": ["none", "read", "write", "read_write"]
+        },
+        "trust_level": {
+          "type": "string",
+          "enum": ["trusted", "sandboxed", "untrusted"]
+        },
+        "max_cost_usd": {
+          "type": "number"
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,72 @@
+suite_id: security_audit_eval
+suite_version: "1.0.0"
+target_type: package
+target_ref: "nodechain://packages/security_audit"
+description: >
+  Structural evaluation of the security audit package. Verifies
+  contract validity for all 7 nodes, audit scoring semantics,
+  finding aggregation, and evidence reference completeness.
+
+metrics:
+  - correctness
+  - contract_validity
+  - finding_completeness
+  - evidence_referencing
+  - audit_scoring
+
+thresholds:
+  correctness: 1.0
+  contract_validity: 1.0
+  finding_completeness: 1.0
+  evidence_referencing: 1.0
+  audit_scoring: 1.0
+
+cases:
+  - case_id: inventory-contract-valid
+    description: AssetInventoryCollector has valid contract
+    expected_output:
+      node_id: asset_inventory_collector
+      contract_id: audit.inventory.v1
+      guaranteed_fields: [assets, asset_count, inventory_digest, timestamp]
+
+  - case_id: trust-auditor-contract-valid
+    description: TrustPostureAuditor has valid contract
+    expected_output:
+      node_id: trust_posture_auditor
+      contract_id: audit.trust.v1
+      guaranteed_fields: [findings, finding_count, trust_score, timestamp]
+
+  - case_id: registry-auditor-contract-valid
+    description: RegistryPostureAuditor has valid contract
+    expected_output:
+      node_id: registry_posture_auditor
+      contract_id: audit.registry.v1
+      guaranteed_fields: [findings, finding_count, registry_score, timestamp]
+
+  - case_id: evidence-auditor-contract-valid
+    description: EvidenceChainAuditor has valid contract
+    expected_output:
+      node_id: evidence_chain_auditor
+      contract_id: audit.evidence.v1
+      guaranteed_fields: [findings, finding_count, evidence_score, timestamp]
+
+  - case_id: sandbox-auditor-contract-valid
+    description: SandboxPolicyAuditor has valid contract
+    expected_output:
+      node_id: sandbox_policy_auditor
+      contract_id: audit.sandbox.v1
+      guaranteed_fields: [findings, finding_count, sandbox_score, timestamp]
+
+  - case_id: deployment-auditor-contract-valid
+    description: DeploymentRiskAuditor has valid contract
+    expected_output:
+      node_id: deployment_risk_auditor
+      contract_id: audit.deployment.v1
+      guaranteed_fields: [findings, finding_count, deployment_score, timestamp]
+
+  - case_id: report-writer-contract-valid
+    description: AuditReportWriter has valid contract with audit score
+    expected_output:
+      node_id: audit_report_writer
+      contract_id: audit.report.v1
+      guaranteed_fields: [audit_score, overall_grade, findings, finding_count, report_digest, timestamp]

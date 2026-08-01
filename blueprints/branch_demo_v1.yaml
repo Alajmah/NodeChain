@@ -1,0 +1,72 @@
+# Synthetic Branch Demo Blueprint
+# Demonstrates quorum branch scheduling via the mock provider.
+#
+# Usage:
+#   nodechain run "test query" -b blueprints/branch_demo_v1.yaml --provider mock
+#
+# 7-node chain with a 3-branch quorum fork at domain_classifier.
+
+chain_id: branch-demo-v1
+name: Branch Demo Chain
+version: "1.0"
+description: >
+  Synthetic blueprint demonstrating quorum branch scheduling.
+  Uses mock provider for deterministic, reproducible execution.
+goal: Demonstrate quorum branch scheduling with mock provider
+
+nodes:
+  - node_id: goal_interpreter
+    node_type: model
+    position: 1
+
+  - node_id: domain_classifier
+    node_type: model
+    position: 2
+
+  - node_id: bio_search
+    node_type: search
+    position: 3
+
+  - node_id: tech_search
+    node_type: search
+    position: 3
+
+  - node_id: med_search
+    node_type: search
+    position: 3
+
+  - node_id: evidence_joiner
+    node_type: join
+    position: 4
+
+  - node_id: response_generator
+    node_type: model
+    position: 5
+
+connections:
+  - from_node: goal_interpreter
+    from_port: output
+    to_node: domain_classifier
+    to_port: input
+
+  - from_node: evidence_joiner
+    from_port: output
+    to_node: response_generator
+    to_port: input
+
+branches:
+  - branch_id: domain_branch
+    from_node: domain_classifier
+    branches:
+      bio: [bio_search]
+      tech: [tech_search]
+      med: [med_search]
+
+joins:
+  - join_id: evidence_join
+    to_node: evidence_joiner
+    from_branches: [bio, tech, med]
+    wait_for: quorum
+    quorum_count: 2
+    cancellation_after_quorum: cancel
+    merge_strategy: merge

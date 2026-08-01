@@ -1,0 +1,52 @@
+# Composition Plan: Cross-Domain Assessment
+# Composes incident response and security audit chains into one orchestration
+
+plan_id: cross_domain_assessment_v1
+type: composition_plan
+description: >-
+  Composes incident response triage with security audit assessment.
+  Runs severity triage first, then uses incident context to inform
+  a security posture audit, and finally generates a combined assessment.
+
+aggregation_strategy: merge_all
+
+sub_chains:
+  - chain_id: severity_triager
+    blueprint_path: blueprints/incident_response_v1.yaml
+    inputs:
+      detected: true
+      anomalies:
+        - type: configuration_drift
+          source: monitoring
+      severity_hint: warning
+    depends_on: []
+    failure_mode: propagate
+
+  - chain_id: remediation_decisioner
+    blueprint_path: blueprints/incident_response_v1.yaml
+    inputs:
+      severity: "@severity_triager.severity"
+      requires_remediation: "@severity_triager.requires_remediation"
+    depends_on:
+      - severity_triager
+    failure_mode: propagate
+
+  - chain_id: trust_posture_auditor
+    blueprint_path: blueprints/security_audit_v1.yaml
+    inputs: {}
+    depends_on: []
+    failure_mode: default
+    default_output:
+      trust_score: 100
+      findings: []
+
+  - chain_id: audit_report_writer
+    blueprint_path: blueprints/security_audit_v1.yaml
+    inputs:
+      trust_audit: "@trust_posture_auditor"
+      incident_context: "@severity_triager"
+      remediation_mode: "@remediation_decisioner.remediation_mode"
+    depends_on:
+      - trust_posture_auditor
+      - remediation_decisioner
+    failure_mode: propagate

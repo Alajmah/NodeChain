@@ -1,0 +1,66 @@
+suite_id: proxmox_deployment_eval
+suite_version: "1.0.0"
+target_type: deployment
+target_ref: "nodechain://adapters/proxmox_api"
+description: >
+  Verifies the Proxmox deployment pipeline: upload, promote, apply,
+  rollback, release history, and known-good recovery.
+
+metrics:
+  - correctness
+  - contract_validity
+  - invariant_compliance
+  - policy_compliance
+  - trace_completeness
+  - cost
+
+thresholds:
+  correctness: 1.0
+
+cases:
+  - case_id: artifact-upload
+    description: Upload artifact with digest and size evidence
+    expected_output:
+      action: upload_artifact
+      digest_verified: true
+      staging_used: true
+
+  - case_id: artifact-promote
+    description: Promote staged artifact to final path
+    expected_output:
+      action: promote_artifact
+      promotion_performed: true
+      final_digest_matches: true
+
+  - case_id: artifact-apply
+    description: Apply promoted artifact with service-state evidence
+    expected_output:
+      action: apply_artifact
+      activation_verified: true
+      service_state: running
+
+  - case_id: rollback-on-failure
+    description: Automatic rollback when apply fails
+    expected_output:
+      rollback_attempted: true
+      rollback_triggered_by: apply_failure
+      final_deployment_state: rolled_back
+
+  - case_id: release-history-resolution
+    description: Release history resolves latest known-good
+    expected_output:
+      resolve_release_by: latest_known_good
+      release_history_present: true
+
+  - case_id: rollback-provenance
+    description: Rollback target verified as previously applied
+    expected_output:
+      rollback_to_known_good: true
+      previous_release_verified: true
+      rollback_provenance_status: verified
+
+  - case_id: rollback-assurance-chain
+    description: Rollback target has full assurance chain
+    expected_output:
+      previous_assurance_chain_verified: true
+      previous_chain_verification_status: verified

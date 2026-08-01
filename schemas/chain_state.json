@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "nodechain://schemas/chain_state",
+  "title": "ChainState",
+  "description": "Mutable state accumulated during chain execution. Persisted for pause/resume.",
+  "type": "object",
+  "required": ["run_id", "chain_id", "status", "current_node", "step", "started_at", "outputs"],
+  "properties": {
+    "run_id": { "type": "string", "format": "uuid" },
+    "chain_id": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["initialized", "running", "paused", "completed", "failed", "rejected_by_reviewer"]
+    },
+    "current_node": { "type": "string" },
+    "step": { "type": "integer", "minimum": 0 },
+    "started_at": { "type": "string", "format": "date-time" },
+    "paused_at": { "type": "string", "format": "date-time" },
+    "completed_at": { "type": "string", "format": "date-time" },
+    "outputs": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Per-node outputs keyed by node_id"
+    },
+    "loop_state": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "iteration": { "type": "integer" },
+          "entered_at": { "type": "string", "format": "date-time" },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "cost_accumulated_usd": { "type": "number", "minimum": 0 },
+    "human_review": {
+      "type": "object",
+      "properties": {
+        "requested": { "type": "boolean" },
+        "decision": { "type": "string" },
+        "reviewer": { "type": "string" },
+        "decided_at": { "type": "string", "format": "date-time" },
+        "timeout_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

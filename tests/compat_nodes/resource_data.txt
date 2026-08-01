@@ -1,0 +1,4 @@
+Chroot compatibility test data file.
+This file is read by resource_test_node to verify that data files
+packaged alongside node implementation.py are accessible under chroot
+(via the /package bind mount).

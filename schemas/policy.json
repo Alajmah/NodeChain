@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "nodechain://schemas/policy",
+  "title": "Policy",
+  "description": "Declarative policy governing node behavior, memory access, tool usage, and output constraints.",
+  "type": "object",
+  "required": ["policy_id", "policy_type", "target", "rules"],
+  "properties": {
+    "policy_id": { "type": "string" },
+    "policy_type": {
+      "type": "string",
+      "enum": [
+        "input_validation",
+        "output_validation",
+        "tool_access",
+        "memory_access",
+        "cost_limit",
+        "rate_limit",
+        "content_filter",
+        "trust_level",
+        "retry",
+        "timeout",
+        "fallback",
+        "audit",
+        "memory_retention",
+        "sensitivity"
+      ]
+    },
+    "target": {
+      "type": "string",
+      "description": "Node ID or '*' for all nodes"
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["rule_id", "condition", "action"],
+        "properties": {
+          "rule_id": { "type": "string" },
+          "condition": { "type": "string" },
+          "action": {
+            "type": "string",
+            "enum": ["allow", "deny", "require_approval", "transform", "retry", "escalate", "log"]
+          },
+          "parameters": { "type": "object" },
+          "priority": { "type": "integer", "default": 0 }
+        }
+      }
+    },
+    "description": { "type": "string" },
+    "version": { "type": "string" }
+  },
+  "additionalProperties": false
+}

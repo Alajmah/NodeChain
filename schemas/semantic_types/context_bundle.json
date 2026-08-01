@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "nodechain://schemas/semantic_types/context_bundle",
+  "title": "ContextBundle",
+  "type": "object",
+  "required": ["plan_ref", "search_queries", "adapter_grants"],
+  "properties": {
+    "plan_ref": { "type": "string" },
+    "research_goal_ref": { "type": "string" },
+    "search_queries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["query_id", "terms", "target_adapters"],
+        "properties": {
+          "query_id": { "type": "string" },
+          "terms": { "type": "array", "items": { "type": "string" } },
+          "target_adapters": { "type": "array", "items": { "type": "string" } },
+          "filters": { "type": "object" },
+          "max_results": { "type": "integer", "default": 10 }
+        }
+      }
+    },
+    "adapter_grants": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Adapters this node is permitted to invoke"
+    },
+    "session_memory": {
+      "type": "array",
+      "items": { "type": "object" },
+      "description": "Granted memory records from previous runs"
+    },
+    "focus_areas": { "type": "array", "items": { "type": "string" } }
+  }
+}

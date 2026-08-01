@@ -1,0 +1,14 @@
+chain_id: production_untrusted_demo
+name: Production Untrusted Demo
+version: "1.0.0"
+description: |
+  Demo blueprint using production_untrusted policy preset.
+  Shows seccomp + cgroup limit enforcement for untrusted nodes.
+  Minimal chain: just an echo node, no model required.
+goal: Echo a query under production-untrusted isolation
+policy_preset: production_untrusted
+nodes:
+  - node_id: echo_node
+    node_type: deterministic
+    position: 1
+connections: []

@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "nodechain://schemas/semantic_types/raw_user_query",
+  "title": "RawUserQuery",
+  "type": "object",
+  "required": ["query"],
+  "properties": {
+    "query": { "type": "string", "minLength": 1 },
+    "context": { "type": "string" },
+    "priority": { "type": "string", "enum": ["low", "normal", "high"] },
+    "metadata": { "type": "object", "additionalProperties": true }
+  }
+}

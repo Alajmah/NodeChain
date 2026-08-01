@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "properties": {
+    "query": { "type": "string" },
+    "transformed": { "type": "string" },
+    "transform_applied": { "type": "string" }
+  },
+  "required": ["query", "transformed"]
+}

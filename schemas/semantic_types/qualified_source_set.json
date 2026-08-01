@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "nodechain://schemas/semantic_types/qualified_source_set",
+  "title": "QualifiedSourceSet",
+  "description": "Sources after quality evaluation with credibility scores and loop trigger.",
+  "type": "object",
+  "required": ["qualified_sources", "quality_summary", "loop_required"],
+  "properties": {
+    "qualified_sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source_ref", "quality_score", "signals"],
+        "properties": {
+          "source_ref": { "type": "string" },
+          "quality_score": { "type": "number", "minimum": 0, "maximum": 1 },
+          "signals": {
+            "type": "object",
+            "properties": {
+              "peer_reviewed": { "type": "boolean" },
+              "citation_strength": { "type": "string", "enum": ["high", "medium", "low", "none"] },
+              "recency": { "type": "string", "enum": ["current", "recent", "dated", "stale"] },
+              "retraction_status": { "type": "boolean" },
+              "venue_quality": { "type": "string", "enum": ["top", "good", "acceptable", "unknown"] },
+              "cross_source_corroboration": { "type": "integer" }
+            }
+          },
+          "exclusion_reason": { "type": "string" },
+          "included": { "type": "boolean" }
+        }
+      }
+    },
+    "quality_summary": {
+      "type": "object",
+      "properties": {
+        "total_evaluated": { "type": "integer" },
+        "total_passed": { "type": "integer" },
+        "average_score": { "type": "number" },
+        "domain_coverage": { "type": "string", "enum": ["strong", "adequate", "weak"] }
+      }
+    },
+    "loop_required": { "type": "boolean" },
+    "loop_reason": { "type": "string" },
+    "revised_queries": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Suggested revised queries if loop is required"
+    }
+  }
+}

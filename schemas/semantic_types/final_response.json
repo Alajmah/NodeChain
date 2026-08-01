@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "nodechain://schemas/semantic_types/final_response",
+  "title": "FinalResponse",
+  "type": "object",
+  "required": ["recommendation", "confidence_statement", "citations", "uncertainty_disclosures"],
+  "properties": {
+    "recommendation": { "type": "string" },
+    "executive_summary": { "type": "string" },
+    "key_findings": { "type": "array", "items": { "type": "string" } },
+    "confidence_statement": {
+      "type": "object",
+      "required": ["level", "explanation"],
+      "properties": {
+        "level": { "type": "string", "enum": ["HIGH", "MEDIUM", "LOW"] },
+        "explanation": { "type": "string" },
+        "numeric": { "type": "number" }
+      }
+    },
+    "citations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source_ref", "citation_text"],
+        "properties": {
+          "source_ref": { "type": "string" },
+          "citation_text": { "type": "string" },
+          "claim_supported": { "type": "string" }
+        }
+      }
+    },
+    "uncertainty_disclosures": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "human_review_decision": {
+      "type": "string",
+      "enum": ["approved", "rejected", "revised", "not_required"]
+    },
+    "alternative_perspectives": { "type": "array", "items": { "type": "string" } },
+    "methodology_notes": { "type": "string" }
+  }
+}

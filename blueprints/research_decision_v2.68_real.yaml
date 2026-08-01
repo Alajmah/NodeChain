@@ -1,0 +1,191 @@
+chain_id: research-decision-v2.68-real
+name: Research and Decision Assistant (v2.68 real-run, no semantic_scholar)
+version: "1.0.0"
+description: >-
+  Given a complex research question, produce a cited recommendation,
+  validate sources, track uncertainty, and decide whether memory should be updated.
+goal: >-
+  Produce a cited recommendation with confidence statement from a research question,
+  using academic search APIs, evidence synthesis, claim validation, and governed memory writes.
+
+nodes:
+  - node_id: goal_interpreter
+    node_type: model
+    position: 1
+    config:
+      model_required: true
+      max_cost_usd: 0.10
+
+  - node_id: task_planner
+    node_type: model
+    position: 2
+    config:
+      model_required: true
+      max_cost_usd: 0.10
+
+  - node_id: context_selector
+    node_type: deterministic
+    position: 3
+    config:
+      can_read_memory: true
+
+  - node_id: search_tool
+    node_type: tool
+    position: 4
+    config:
+      can_call_tools: true
+      allowed_tools:
+        - search
+      allowed_adapters:
+        - arxiv
+        - openalex
+        - crossref
+        - pubmed
+
+  - node_id: source_ingestion
+    node_type: deterministic
+    position: 5
+
+  - node_id: source_quality_evaluator
+    node_type: model
+    position: 6
+    config:
+      model_required: true
+      max_cost_usd: 0.10
+
+  - node_id: evidence_synthesizer
+    node_type: model
+    position: 7
+    config:
+      model_required: true
+      can_read_memory: true
+      max_cost_usd: 0.15
+
+  - node_id: claim_validator
+    node_type: hybrid
+    position: 8
+    config:
+      model_required: true
+      max_cost_usd: 0.10
+
+  - node_id: risk_classifier
+    node_type: hybrid
+    position: 9
+
+  - node_id: response_generator
+    node_type: model
+    position: 10
+    config:
+      model_required: true
+      max_cost_usd: 0.10
+
+  - node_id: memory_write_decision
+    node_type: deterministic
+    position: 11
+    config:
+      can_write_memory: true
+
+  - node_id: trace_collector
+    node_type: deterministic
+    position: 12
+
+connections:
+  - from_node: goal_interpreter
+    from_port: research_goal
+    to_node: task_planner
+    to_port: research_goal
+
+  - from_node: task_planner
+    from_port: task_plan
+    to_node: context_selector
+    to_port: task_plan
+
+  - from_node: context_selector
+    from_port: context_bundle
+    to_node: search_tool
+    to_port: context_bundle
+
+  - from_node: search_tool
+    from_port: raw_search_results
+    to_node: source_ingestion
+    to_port: raw_search_results
+
+  - from_node: source_ingestion
+    from_port: source_set
+    to_node: source_quality_evaluator
+    to_port: source_set
+
+  - from_node: source_quality_evaluator
+    from_port: qualified_source_set
+    to_node: evidence_synthesizer
+    to_port: qualified_source_set
+
+  - from_node: evidence_synthesizer
+    from_port: evidence_base
+    to_node: claim_validator
+    to_port: evidence_base
+
+  - from_node: claim_validator
+    from_port: validated_evidence
+    to_node: risk_classifier
+    to_port: validated_evidence
+
+  - from_node: risk_classifier
+    from_port: risk_assessment
+    to_node: response_generator
+    to_port: risk_assessment
+
+  - from_node: response_generator
+    from_port: final_response
+    to_node: memory_write_decision
+    to_port: final_response
+
+  - from_node: memory_write_decision
+    from_port: memory_write_decision
+    to_node: trace_collector
+    to_port: memory_write_decision
+
+loops:
+  - loop_id: research.source-quality-loop
+    entry_condition: source_quality_evaluator returns loop_required=true
+    exit_condition: source_quality_evaluator returns loop_required=false
+    max_iterations: 2
+    max_cost_usd: 0.50
+    path:
+      - source_quality_evaluator
+      - context_selector
+      - search_tool
+      - source_ingestion
+      - source_quality_evaluator
+    escalation: Pause chain and request human review with reason=source_quality_exhausted
+
+gates:
+  - gate_id: human-review.high-risk
+    trigger: risk_classifier returns review_required=true with risk_level=HIGH
+    allowed_decisions:
+      - approve
+      - reject
+      - request_revision
+    timeout_minutes: 30
+    approver_role: chain_operator
+
+invariants:
+  - invariant_id: contracts-validated-at-load
+    description: All node contracts must be validated before chain execution begins
+    enforcement: load_time
+
+  - invariant_id: typed-ports-enforced
+    description: All connections use typed ports with schema validation
+    enforcement: both
+
+  - invariant_id: trace-truth-rule
+    description: No trace event claims execution unless it actually occurred
+    enforcement: runtime
+
+  - invariant_id: bounded-loops
+    description: All loops have max_iterations and cost bounds
+    enforcement: load_time
+
+  - invariant_id: memory-write-governance
+    description: Memory writes require policy approval and confidence threshold
+    enforcement: runtime

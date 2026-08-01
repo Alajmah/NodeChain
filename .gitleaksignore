@@ -1,0 +1,6 @@
+# Gitleaks false positive allowlist
+# These are test fixture secrets (intentionally fake values for testing secret detection)
+
+tests/test_secret_reference_policy.py:101
+tests/test_secret_reference_policy.py:115
+tests/test_proxmox_api_adapter.py:133

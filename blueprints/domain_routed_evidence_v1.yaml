@@ -1,0 +1,145 @@
+# Domain-Routed Evidence Chain — structural stress test for branch/join execution
+chain_id: domain_routed_evidence_v1
+name: Domain-Routed Evidence Chain
+version: "1.0.0"
+description: >
+  Branch-and-join chain that classifies a research query into domains,
+  routes to domain-specific search branches, joins results, detects
+  conflicts, and generates a response. Tests fan-out, fan-in,
+  skipped-path tracing, and multi-input node contracts.
+goal: "Produce a domain-routed research synthesis with cross-branch conflict detection."
+
+nodes:
+  - node_id: goal_interpreter
+    node_type: model
+    position: 1
+
+  - node_id: domain_classifier
+    node_type: deterministic
+    position: 2
+
+  # Biomedical branch
+  - node_id: biomedical_search
+    node_type: deterministic
+    config:
+      adapter: pubmed
+    position: 3
+
+  # Technical branch
+  - node_id: technical_search
+    node_type: deterministic
+    config:
+      adapter: arxiv
+    position: 4
+
+  # General branch
+  - node_id: general_search
+    node_type: deterministic
+    config:
+      adapter: openalex
+    position: 5
+
+  # Join point
+  - node_id: evidence_joiner
+    node_type: deterministic
+    position: 6
+
+  - node_id: conflict_detector
+    node_type: deterministic
+    position: 7
+
+  - node_id: response_generator
+    node_type: model
+    position: 8
+    config:
+      node_class: branch_response_generator
+
+  - node_id: trace_collector
+    node_type: deterministic
+    position: 9
+    config:
+      node_class: branch_trace_collector
+
+connections:
+  - from_node: goal_interpreter
+    from_port: output
+    to_node: domain_classifier
+    to_port: input
+
+  - from_node: domain_classifier
+    from_port: output
+    to_node: biomedical_search
+    to_port: input
+    condition: branch_biomedical
+
+  - from_node: domain_classifier
+    from_port: output
+    to_node: technical_search
+    to_port: input
+    condition: branch_technical
+
+  - from_node: domain_classifier
+    from_port: output
+    to_node: general_search
+    to_port: input
+    condition: branch_general
+
+  - from_node: biomedical_search
+    from_port: output
+    to_node: evidence_joiner
+    to_port: input
+
+  - from_node: technical_search
+    from_port: output
+    to_node: evidence_joiner
+    to_port: input
+
+  - from_node: general_search
+    from_port: output
+    to_node: evidence_joiner
+    to_port: input
+
+  - from_node: evidence_joiner
+    from_port: output
+    to_node: conflict_detector
+    to_port: input
+
+  - from_node: conflict_detector
+    from_port: output
+    to_node: response_generator
+    to_port: input
+
+  - from_node: response_generator
+    from_port: output
+    to_node: trace_collector
+    to_port: input
+
+branches:
+  - branch_id: domain_routing
+    from_node: domain_classifier
+    default_branch: general
+    branches:
+      biomedical:
+        - biomedical_search
+      technical:
+        - technical_search
+      general:
+        - general_search
+
+joins:
+  - join_id: evidence_merge
+    to_node: evidence_joiner
+    from_branches:
+      - biomedical
+      - technical
+      - general
+    wait_for: all
+    merge_strategy: merge
+
+invariants:
+  - invariant_id: branch_coverage
+    description: "At least one branch must execute (not all skipped)"
+    enforcement: runtime
+  - invariant_id: join_receives_inputs
+    description: "Join node must receive outputs from all executed branches"
+    enforcement: runtime

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "nodechain://schemas/node_manifest",
+  "title": "NodeManifest",
+  "description": "Machine-readable node descriptor — identity, type, capabilities, and contract reference",
+  "type": "object",
+  "required": ["node_id", "node_type", "name", "description", "contract"],
+  "properties": {
+    "node_id": {
+      "type": "string",
+      "description": "Unique identifier for this node within the chain"
+    },
+    "node_type": {
+      "type": "string",
+      "enum": ["model", "tool", "deterministic", "hybrid", "gate"],
+      "description": "Classification of the node's execution model"
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable name"
+    },
+    "description": {
+      "type": "string",
+      "description": "What this node does"
+    },
+    "contract": {
+      "$ref": "nodechain://schemas/node_contract",
+      "description": "The node's entry/exit contract"
+    },
+    "version": {
+      "type": "string",
+      "description": "Node implementation version",
+      "default": "1.0.0"
+    },
+    "icon": {
+      "type": "string",
+      "description": "Optional icon path or emoji"
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Optional tags for categorization"
+    }
+  },
+  "additionalProperties": false
+}

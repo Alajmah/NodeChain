@@ -1,0 +1,95 @@
+chain_id: incident-response-v1
+name: Incident Response Reference Chain
+version: "1.0.0"
+description: >-
+  Governed incident response pipeline: detect anomalies, triage severity,
+  decide remediation mode, execute governed rollback, and verify recovery.
+  Demonstrates the full certified registry consumption and evidence chain.
+goal: >-
+  Given monitoring signals and optional drift reports, detect incidents,
+  classify severity, decide governed remediation, execute within policy
+  bounds, and verify recovery with evidence chain.
+
+nodes:
+  - node_id: incident_detector
+    node_type: deterministic
+    position: 1
+    config:
+      can_read_memory: false
+
+  - node_id: severity_triager
+    node_type: hybrid
+    position: 2
+    config:
+      model_required: false
+
+  - node_id: remediation_decisioner
+    node_type: deterministic
+    position: 3
+    config:
+      governance_required: true
+
+  - node_id: governed_remediator
+    node_type: deterministic
+    position: 4
+    config:
+      governance_required: true
+      side_effects: true
+
+  - node_id: recovery_verifier
+    node_type: deterministic
+    position: 5
+    config:
+      assurance_required: true
+
+connections:
+  - from_node: incident_detector
+    from_port: incident_report
+    to_node: severity_triager
+    to_port: incident_report
+
+  - from_node: severity_triager
+    from_port: severity_assessment
+    to_node: remediation_decisioner
+    to_port: severity_assessment
+
+  - from_node: remediation_decisioner
+    from_port: remediation_decision
+    to_node: governed_remediator
+    to_port: remediation_decision
+
+  - from_node: governed_remediator
+    from_port: remediation_result
+    to_node: recovery_verifier
+    to_port: remediation_result
+
+gates:
+  - gate_id: human-review.critical-incident
+    trigger: severity_triager returns requires_human_review=true
+    allowed_decisions:
+      - approve
+      - reject
+      - request_revision
+    timeout_minutes: 15
+    approver_role: chain_operator
+
+invariants:
+  - invariant_id: contracts-validated-at-load
+    description: All node contracts must be validated before chain execution begins
+    enforcement: load_time
+
+  - invariant_id: typed-ports-enforced
+    description: All connections use typed ports with schema validation
+    enforcement: both
+
+  - invariant_id: trace-truth-rule
+    description: No trace event claims execution unless it actually occurred
+    enforcement: runtime
+
+  - invariant_id: remediation-authorization
+    description: Remediation execution requires explicit authorization from decisioner
+    enforcement: runtime
+
+  - invariant_id: recovery-verification
+    description: Incidents are only closed when recovery is verified
+    enforcement: runtime

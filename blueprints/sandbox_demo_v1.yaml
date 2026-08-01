@@ -1,0 +1,16 @@
+name: sandbox_demo_v1
+description: Demo blueprint testing all four sandbox boundaries
+version: "1.0.0"
+
+entry:
+  node_id: sandbox_test_node
+  input:
+    test_all: true
+
+steps:
+  - id: step_1
+    node_id: sandbox_test_node
+    input_from: entry
+
+output:
+  from: step_1

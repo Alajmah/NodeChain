@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "import_blocked": { "type": "boolean" },
+    "filesystem_blocked": { "type": "boolean" },
+    "subprocess_blocked": { "type": "boolean" },
+    "network_blocked": { "type": "boolean" },
+    "details": { "type": "object" }
+  }
+}

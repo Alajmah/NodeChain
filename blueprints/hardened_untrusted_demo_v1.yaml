@@ -1,0 +1,15 @@
+chain_id: hardened_untrusted_demo
+name: Hardened Untrusted Demo
+version: "1.0.0"
+description: |
+  Demo blueprint using hardened_untrusted policy preset.
+  Shows the strongest local sandbox: seccomp + cgroup + network namespace +
+  mount confinement (chroot) + trust-check.
+  Minimal chain: just an echo node, no model required.
+goal: Echo a query under hardened-untrusted isolation
+policy_preset: hardened_untrusted
+nodes:
+  - node_id: echo_node
+    node_type: deterministic
+    position: 1
+connections: []

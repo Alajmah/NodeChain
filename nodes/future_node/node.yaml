@@ -1,0 +1,44 @@
+# Future Node — requires runtime version 99.0.0 (used for policy testing)
+
+manifest:
+  node_id: future_node
+  node_type: deterministic
+  name: Future Node
+  description: A node that requires a future runtime version.
+  version: "1.0.0"
+  tags: [test, policy]
+
+contract:
+  contract_id: test.future.v1
+  version: "1.0.0"
+  entry:
+    input_type: raw_user_query
+    schema_ref: "nodechain://schemas/semantic_types/raw_user_query"
+    required_fields:
+      - query
+  exit:
+    output_type: raw_user_query
+    schema_ref: "nodechain://schemas/semantic_types/raw_user_query"
+    guaranteed_fields:
+      - query
+  side_effects: []
+  requirements:
+    model_required: false
+    memory_access: none
+    trust_level: trusted
+
+entrypoint: implementation:FutureNode
+side_effects: []
+
+capabilities:
+  network: false
+  filesystem: none
+  memory_write: false
+  external_api: false
+
+nodechain_min_version: "99.0.0"
+
+meta:
+  author: NodeChain
+  license: MIT
+  nodechain_min_version: "99.0.0"

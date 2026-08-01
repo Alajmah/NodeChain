@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "nodechain://schemas/semantic_types/normalized_research_goal",
+  "title": "NormalizedResearchGoal",
+  "type": "object",
+  "required": ["primary_question", "research_domain", "success_criteria"],
+  "properties": {
+    "primary_question": { "type": "string" },
+    "sub_questions": { "type": "array", "items": { "type": "string" } },
+    "research_domain": { "type": "string" },
+    "domain_classification": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "domain": { "type": "string" },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "success_criteria": { "type": "array", "items": { "type": "string" } },
+    "constraints": { "type": "array", "items": { "type": "string" } },
+    "time_sensitivity": { "type": "string", "enum": ["current", "recent", "historical", "any"] },
+    "depth_required": { "type": "string", "enum": ["surface", "moderate", "deep"] }
+  }
+}

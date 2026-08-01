@@ -1,0 +1,122 @@
+chain_id: code-review-with-patches-v1
+name: Code Review Assistant with Patch Proposals
+version: "1.0.0"
+description: >-
+  Read-only governed code review with patch proposal generation and validation.
+  v2.71 review path + v2.72 governed proposal path. Patches are proposed-only
+  artifacts — never applied to the real repository.
+goal: >-
+  Review code changes for issues, generate patch proposals for clear fixes,
+  validate patches structurally in a temp workspace, classify patch risk, and
+  produce a traceable patch report — all under governed read-only authority.
+
+nodes:
+  # v2.71 review path (unchanged)
+  - node_id: code_review_request
+    node_type: model
+    position: 1
+    config:
+      model_required: true
+      max_cost_usd: 0.10
+
+  - node_id: file_reader
+    node_type: deterministic
+    position: 2
+    config:
+      allowed_paths:
+        - "src/nodechain/**/*.py"
+      git_access: read_only
+      side_effects: []
+
+  - node_id: code_analyzer
+    node_type: model
+    position: 3
+    config:
+      model_required: true
+      max_cost_usd: 0.20
+
+  - node_id: finding_classifier
+    node_type: deterministic
+    position: 4
+    config:
+      side_effects: []
+
+  - node_id: review_report_generator
+    node_type: model
+    position: 5
+    config:
+      model_required: true
+      max_cost_usd: 0.10
+
+  # v2.72 patch proposal path (new)
+  - node_id: patch_generator
+    node_type: model
+    position: 6
+    config:
+      model_required: true
+      max_cost_usd: 0.20
+      side_effects: []
+
+  - node_id: patch_validator
+    node_type: deterministic
+    position: 7
+    config:
+      allowed_paths:
+        - "src/nodechain/**/*.py"
+      side_effects:
+        - sandbox_file_write
+
+  - node_id: patch_risk_classifier
+    node_type: deterministic
+    position: 8
+    config:
+      side_effects: []
+
+  - node_id: patch_report_assembler
+    node_type: deterministic
+    position: 9
+    config:
+      side_effects: []
+
+connections:
+  # v2.71 review path (unchanged)
+  - from_node: code_review_request
+    from_port: code_review_goal
+    to_node: file_reader
+    to_port: code_review_goal
+
+  - from_node: file_reader
+    from_port: code_artifacts
+    to_node: code_analyzer
+    to_port: code_artifacts
+
+  - from_node: code_analyzer
+    from_port: review_findings
+    to_node: finding_classifier
+    to_port: review_findings
+
+  - from_node: finding_classifier
+    from_port: classified_findings
+    to_node: review_report_generator
+    to_port: classified_findings
+
+  # v2.72 patch proposal path (new)
+  - from_node: review_report_generator
+    from_port: final_review
+    to_node: patch_generator
+    to_port: final_review
+
+  - from_node: patch_generator
+    from_port: patch_proposals
+    to_node: patch_validator
+    to_port: patch_proposals
+
+  - from_node: patch_validator
+    from_port: validated_patches
+    to_node: patch_risk_classifier
+    to_port: validated_patches
+
+  - from_node: patch_risk_classifier
+    from_port: classified_patches
+    to_node: patch_report_assembler
+    to_port: classified_patches

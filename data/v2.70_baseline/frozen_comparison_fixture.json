@@ -1,0 +1,674 @@
+{
+  "comparison_version": "v2.70.0",
+  "frozen_at": "2026-07-05",
+  "source_run_id": "df0ab40f-05f7-46f7-a3ee-a0cd4dd5cdc8",
+  "research_question": "Is retrieval-augmented generation effective for reducing hallucinations in large language models?",
+  "source_set_hash": "b9fc69a56950098a",
+  "source_count": 10,
+  "sources": [
+    {
+      "source_id": "bd94e4fd-feb5-4680-ac90-abfb960fe08a",
+      "title": "When LLMs meet cybersecurity: a systematic literature review",
+      "abstract": "Abstract The rapid development of large language models (LLMs) has opened new avenues across various fields, including cybersecurity, which faces an evolving threat landscape and demand for innovative technologies. Despite initial explorations into the application of LLMs in cybersecurity, there is a lack of a comprehensive overview of this research area. This paper addresses this gap by providing a systematic literature review, covering the analysis of over 300 works, encompassing 25 LLMs and m",
+      "authors": [
+        "Jie Zhang",
+        "H. Bu",
+        "Hui Wen"
+      ],
+      "venue": "Cybersecurity",
+      "publication_date": "2025-02-05",
+      "citation_count": 161,
+      "peer_reviewed": true,
+      "doi": "10.1186/s42400-025-00361-w",
+      "quality_score": 0.9
+    },
+    {
+      "source_id": "a58429eb-1130-4d12-a811-e6db448f50ee",
+      "title": "\ud83e\udddcSiren\u2019s Song in the AI Ocean: A Survey on Hallucination in Large Language Models",
+      "abstract": "Abstract While large language models (LLMs) have demonstrated remarkable capabilities across a range of downstream tasks, a significant concern revolves around their propensity to exhibit hallucinations: LLMs occasionally generate content that diverges from the user input, contradicts previously generated context, or misaligns with established world knowledge. This phenomenon poses a substantial challenge to the reliability of LLMs in real-world scenarios. In this article, we survey recent effor",
+      "authors": [
+        "Yue Zhang",
+        "Yafu Li",
+        "Leyang Cui"
+      ],
+      "venue": "Computational Linguistics",
+      "publication_date": "2025-01-01",
+      "citation_count": 145,
+      "peer_reviewed": true,
+      "doi": "10.1162/coli.a.16",
+      "quality_score": 0.95
+    },
+    {
+      "source_id": "4984b53b-2602-4943-8215-4078c07c5441",
+      "title": "Factuality challenges in the era of large language models and opportunities for fact-checking",
+      "abstract": "",
+      "authors": [
+        "Isabelle Augenstein",
+        "Timothy Baldwin",
+        "Meeyoung Cha"
+      ],
+      "venue": "Nature Machine Intelligence",
+      "publication_date": "2024-08-22",
+      "citation_count": 128,
+      "peer_reviewed": true,
+      "doi": "10.1038/s42256-024-00881-z",
+      "quality_score": 0.98
+    },
+    {
+      "source_id": "b8fbdadf-6e5d-4997-af5d-840f64080a0c",
+      "title": "AI Agents vs. Agentic AI: A Conceptual taxonomy, applications and challenges",
+      "abstract": "Information fusion, in the context of the Generative AI era, must distinguish AI Agents from Agentic AI. This review critically distinguishes between AI Agents and Agentic AI, offering a structured, conceptual taxonomy, application mapping, and analysis of opportunities and challenges to clarify their divergent design philosophies and capabilities. We begin by outlining the search strategy and foundational definitions, characterizing AI Agents as modular systems driven and enabled by LLMs and LI",
+      "authors": [
+        "Ranjan Sapkota",
+        "Konstantinos I. Roumeliotis",
+        "Manoj Karkee"
+      ],
+      "venue": "Information Fusion",
+      "publication_date": "2025-08-22",
+      "citation_count": 119,
+      "peer_reviewed": true,
+      "doi": "10.1016/j.inffus.2025.103599",
+      "quality_score": 0.9
+    },
+    {
+      "source_id": "4b6215d2-78fb-443a-a316-cdd942a28c2a",
+      "title": "RAGTruth: A Hallucination Corpus for Developing Trustworthy Retrieval-Augmented Language Models",
+      "abstract": "Cheng Niu, Yuanhao Wu, Juno Zhu, Siliang Xu, KaShun Shum, Randy Zhong, Juntong Song, Tong Zhang. Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers). 2024.",
+      "authors": [
+        "Cheng Niu",
+        "Yuanhao Wu",
+        "Juno Zhu"
+      ],
+      "venue": "",
+      "publication_date": "2024-01-01",
+      "citation_count": 51,
+      "peer_reviewed": true,
+      "doi": "10.18653/v1/2024.acl-long.585",
+      "quality_score": 0.65
+    },
+    {
+      "source_id": "48d58345-9a8c-4c2e-8233-38c9a1b245cd",
+      "title": "Retrieval-Augmented Generation (RAG)",
+      "abstract": "The necessity for information is a fundamental aspect of human nature, and as such, there are ongoing efforts to enhance information retrieval with information systems (Alavi and Leidner 2001 ; Alavi et al. 2024 ). Companies are particularly affected by this, as they have extensive data at their disposal, and employees need to access it. Unfortunately, current systems are not able to adequately meet employees\u2019 expectations. In fact, studies have shown that 79% of employees are dissatisfied with ",
+      "authors": [
+        "Michael Klesel",
+        "H.F. Wittmann"
+      ],
+      "venue": "Business & Information Systems Engineering",
+      "publication_date": "2025-06-01",
+      "citation_count": 43,
+      "peer_reviewed": true,
+      "doi": "10.1007/s12599-025-00945-3",
+      "quality_score": 0.7
+    },
+    {
+      "source_id": "e92dfc4c-11fc-4a4d-9e00-9c22fb8b177c",
+      "title": "Evaluating Retrieval-Augmented Generation Models for Financial Report Question and Answering",
+      "abstract": "This study explores the application of retrieval-augmented generation (RAG) to improve the accuracy and reliability of large language models (LLMs) in the context of financial report analysis. The focus is on enabling private investors to make informed decisions by enhancing the question-and-answering capabilities regarding the half-yearly or quarterly financial reports of banks. The study adopts a Design Science Research (DSR) methodology to develop and evaluate an RAG system tailored for this ",
+      "authors": [
+        "Ivan Iaroshev",
+        "Ramalingam Pillai",
+        "Leandro Vaglietti"
+      ],
+      "venue": "Applied Sciences",
+      "publication_date": "2024-10-12",
+      "citation_count": 34,
+      "peer_reviewed": true,
+      "doi": "10.3390/app14209318",
+      "quality_score": 0.6
+    },
+    {
+      "source_id": "ee7ee194-67b8-4292-8f8c-c6f145e71b4a",
+      "title": "Document GraphRAG: Knowledge Graph Enhanced Retrieval Augmented Generation for Document Question Answering Within the Manufacturing Domain",
+      "abstract": "Retrieval-Augmented Generation (RAG) systems have shown significant potential for domain-specific Question Answering (QA) tasks, although persistent challenges in retrieval precision and context selection continue to hinder their effectiveness. This study introduces Document Graph RAG (GraphRAG), a novel framework that bolsters retrieval robustness and enhances answer generation by incorporating Knowledge Graphs (KGs) built upon a document\u2019s intrinsic structure into the RAG pipeline. Through the",
+      "authors": [
+        "Simon Knollmeyer",
+        "O\u011fuz Caymazer",
+        "Daniel Gro\u00dfmann"
+      ],
+      "venue": "Electronics",
+      "publication_date": "2025-05-22",
+      "citation_count": 31,
+      "peer_reviewed": true,
+      "doi": "10.3390/electronics14112102",
+      "quality_score": 0.6
+    },
+    {
+      "source_id": "c0c602e1-0ef1-40e8-8937-6afe09d4937a",
+      "title": "Understand What LLM Needs: Dual Preference Alignment for Retrieval-Augmented Generation",
+      "abstract": "Retrieval-augmented generation (RAG) has effectively mitigated the hallucination problem of large language models (LLMs). However, the difficulty of aligning the retriever with the LLMs' diverse knowledge preferences inevitably poses a challenge in developing a reliable RAG system. To address this issue, we propose DPA-RAG, a universal framework designed to align diverse knowledge preferences within RAG systems. Specifically, we initially introduce a preference knowledge construction pipeline an",
+      "authors": [
+        "Guanting Dong",
+        "Yutao Zhu",
+        "Chenghao Zhang"
+      ],
+      "venue": "",
+      "publication_date": "2025-04-22",
+      "citation_count": 25,
+      "peer_reviewed": true,
+      "doi": "10.1145/3696410.3714717",
+      "quality_score": 0.55
+    },
+    {
+      "source_id": "bd99f755-20b2-4475-9d01-dac11bb395a4",
+      "title": "Grounding and Evaluation for Large Language Models: Practical Challenges and Lessons Learned (Survey)",
+      "abstract": "With the ongoing rapid adoption of Artificial Intelligence (AI)-based systems in high-stakes domains, ensuring the trustworthiness, safety, and observability of these systems has become crucial. It is essential to evaluate and monitor AI systems not only for accuracy and quality-related metrics but also for robustness, bias, security, interpretability, and other responsible AI dimensions. We focus on large language models (LLMs) and other generative AI models, which present additional challenges",
+      "authors": [
+        "Krishnaram Kenthapadi",
+        "Mehrnoosh Sameki",
+        "Ankur Taly"
+      ],
+      "venue": "",
+      "publication_date": "2024-08-24",
+      "citation_count": 24,
+      "peer_reviewed": true,
+      "doi": "10.1145/3637528.3671467",
+      "quality_score": 0.5
+    }
+  ],
+  "nodechain_result": {
+    "recommendation": "Organizations should implement Retrieval-Augmented Generation (RAG) systems to mitigate LLM hallucinations and improve reliability, but must prioritize solving technical challenges related to retrieval precision and alignment. While emerging architectures like GraphRAG show theoretical promise, current validated evidence supports focusing on robust standard RAG implementation and optimization for specific domain needs.",
+    "citations": [
+      {
+        "source_ref": "a58429eb-1130-4d12-a811-e6db448f50ee",
+        "citation_text": "\ud83e\udddcSiren\u2019s Song in the AI Ocean: A Survey on Hallucination in Large Language Models (2025-01-01)",
+        "claim_supported": "Large Language Models (LLMs) exhibit 'hallucinations', generating content that diverges from user input, contradicts context, or misaligns with world knowledge, posing reliability challenges.",
+        "claim_status": "insufficient_evidence"
+      },
+      {
+        "source_ref": "4b6215d2-78fb-443a-a316-cdd942a28c2a",
+        "citation_text": "RAGTruth: A Hallucination Corpus for Developing Trustworthy Retrieval-Augmented Language Models (2024-01-01)",
+        "claim_supported": "Retrieval-Augmented Generation (RAG) is an effective strategy for mitigating the hallucination problem in LLMs by grounding generation in retrieved data.",
+        "claim_status": "confirmed"
+      },
+      {
+        "source_ref": "c0c602e1-0ef1-40e8-8937-6afe09d4937a",
+        "citation_text": "Understand What LLM Needs: Dual Preference Alignment for Retrieval-Augmented Generation (2025-04-22)",
+        "claim_supported": "Retrieval-Augmented Generation (RAG) is an effective strategy for mitigating the hallucination problem in LLMs by grounding generation in retrieved data.",
+        "claim_status": "confirmed"
+      },
+      {
+        "source_ref": "ee7ee194-67b8-4292-8f8c-c6f145e71b4a",
+        "citation_text": "Document GraphRAG: Knowledge Graph Enhanced Retrieval Augmented Generation for Document Question Answering Within the Manufacturing Domain (2025-05-22)",
+        "claim_supported": "RAG systems face technical challenges including difficulties in retrieval precision, context selection, and aligning the retriever with the LLM's knowledge preferences.",
+        "claim_status": "confirmed"
+      },
+      {
+        "source_ref": "e92dfc4c-11fc-4a4d-9e00-9c22fb8b177c",
+        "citation_text": "Evaluating Retrieval-Augmented Generation Models for Financial Report Question and Answering (2024-10-12)",
+        "claim_supported": "RAG improves the accuracy and reliability of LLMs in specialized domains such as financial report analysis, aiding decision-making for private investors.",
+        "claim_status": "insufficient_evidence"
+      },
+      {
+        "source_ref": "48d58345-9a8c-4c2e-8233-38c9a1b245cd",
+        "citation_text": "Retrieval-Augmented Generation (RAG) (2025-06-01)",
+        "claim_supported": "There is a significant gap in the satisfaction with current information systems, with 79% of employees dissatisfied, driving the need for better retrieval systems like RAG.",
+        "claim_status": "insufficient_evidence"
+      },
+      {
+        "source_ref": "b8fbdadf-6e5d-4997-af5d-840f64080a0c",
+        "citation_text": "AI Agents vs. Agentic AI: A Conceptual taxonomy, applications and challenges (2025-08-22)",
+        "claim_supported": "AI Agents are conceptually distinct from Agentic AI and are best characterized as modular systems driven and enabled by LLMs.",
+        "claim_status": "insufficient_evidence"
+      },
+      {
+        "source_ref": "bd94e4fd-feb5-4680-ac90-abfb960fe08a",
+        "citation_text": "When LLMs meet cybersecurity: a systematic literature review (2025-02-05)",
+        "claim_supported": "LLMs are being actively applied in cybersecurity to address evolving threats, though a comprehensive overview was previously lacking.",
+        "claim_status": "insufficient_evidence"
+      }
+    ],
+    "confidence": {
+      "level": "MEDIUM",
+      "numeric": 0.52,
+      "explanation": "The core finding that RAG mitigates hallucinations is supported by multiple sources and confirmed validation. However, confidence is tempered by the 'insufficient evidence' status of several specific claims, including detailed statistics on employee dissatisfaction and the comparative efficacy of advanced architectures like GraphRAG, which are often supported by only a single source."
+    },
+    "claims": [
+      {
+        "claim_id": "C1",
+        "statement": "Large Language Models (LLMs) exhibit 'hallucinations', generating content that diverges from user input, contradicts context, or misaligns with world knowledge, posing reliability challenges.",
+        "supporting_sources": [
+          "a58429eb-1130-4d12-a811-e6db448f50ee"
+        ],
+        "contradicting_sources": [],
+        "confidence": 0.7,
+        "support_strength": "direct",
+        "source_agreement": "consistent",
+        "uncertainty": "Based on a survey of recent efforts; while widely observed, specific definitions and categorizations of hallucinations may vary across the field.",
+        "domain": "Computational Linguistics",
+        "raw_confidence": 0.85,
+        "calibrated_confidence": 0.7,
+        "calibration_metadata": {
+          "feature_based_confidence": 0.7,
+          "calibration_adjustment": -0.15,
+          "reason_codes": [
+            "high_source_quality=0.95"
+          ],
+          "caps_applied": [
+            "source_count_1_cap=0.65"
+          ]
+        }
+      },
+      {
+        "claim_id": "C2",
+        "statement": "Retrieval-Augmented Generation (RAG) is an effective strategy for mitigating the hallucination problem in LLMs by grounding generation in retrieved data.",
+        "supporting_sources": [
+          "4b6215d2-78fb-443a-a316-cdd942a28c2a",
+          "c0c602e1-0ef1-40e8-8937-6afe09d4937a"
+        ],
+        "contradicting_sources": [],
+        "confidence": 0.75,
+        "support_strength": "direct",
+        "source_agreement": "consistent",
+        "uncertainty": "While effective, RAG is not a complete solution and introduces complexities regarding retrieval quality and integration.",
+        "domain": "Natural Language Processing",
+        "raw_confidence": 0.8,
+        "calibrated_confidence": 0.75,
+        "calibration_metadata": {
+          "feature_based_confidence": 0.75,
+          "calibration_adjustment": -0.05,
+          "reason_codes": [],
+          "caps_applied": []
+        }
+      },
+      {
+        "claim_id": "C3",
+        "statement": "RAG systems face technical challenges including difficulties in retrieval precision, context selection, and aligning the retriever with the LLM's knowledge preferences.",
+        "supporting_sources": [
+          "ee7ee194-67b8-4292-8f8c-c6f145e71b4a",
+          "c0c602e1-0ef1-40e8-8937-6afe09d4937a"
+        ],
+        "contradicting_sources": [],
+        "confidence": 0.75,
+        "support_strength": "direct",
+        "source_agreement": "consistent",
+        "uncertainty": "Identified challenges vary by specific implementation and domain (e.g., manufacturing vs. general).",
+        "domain": "Information Systems",
+        "raw_confidence": 0.75,
+        "calibrated_confidence": 0.75,
+        "calibration_metadata": {
+          "feature_based_confidence": 0.75,
+          "calibration_adjustment": 0.0,
+          "reason_codes": [],
+          "caps_applied": []
+        }
+      },
+      {
+        "claim_id": "C4",
+        "statement": "Incorporating Knowledge Graphs (KGs) into RAG pipelines (GraphRAG) enhances retrieval robustness and answer generation, particularly for document QA.",
+        "supporting_sources": [
+          "ee7ee194-67b8-4292-8f8c-c6f145e71b4a"
+        ],
+        "contradicting_sources": [],
+        "confidence": 0.6,
+        "support_strength": "direct",
+        "source_agreement": "consistent",
+        "uncertainty": "Finding is based on a specific study in the manufacturing domain; generalizability to other domains requires further validation.",
+        "domain": "Knowledge Management",
+        "raw_confidence": 0.6,
+        "calibrated_confidence": 0.6,
+        "calibration_metadata": {
+          "feature_based_confidence": 0.6,
+          "calibration_adjustment": 0.0,
+          "reason_codes": [],
+          "caps_applied": [
+            "source_count_1_cap=0.65"
+          ]
+        }
+      },
+      {
+        "claim_id": "C5",
+        "statement": "Dual Preference Alignment (DPA) frameworks improve RAG reliability by addressing the challenge of aligning retriever output with diverse LLM knowledge preferences.",
+        "supporting_sources": [
+          "c0c602e1-0ef1-40e8-8937-6afe09d4937a"
+        ],
+        "contradicting_sources": [],
+        "confidence": 0.6,
+        "support_strength": "direct",
+        "source_agreement": "consistent",
+        "uncertainty": "Proposed as a 'universal framework', but currently relies on the specific experimental setup of the authors.",
+        "domain": "Artificial Intelligence",
+        "raw_confidence": 0.6,
+        "calibrated_confidence": 0.6,
+        "calibration_metadata": {
+          "feature_based_confidence": 0.6,
+          "calibration_adjustment": 0.0,
+          "reason_codes": [],
+          "caps_applied": [
+            "source_count_1_cap=0.65"
+          ]
+        }
+      },
+      {
+        "claim_id": "C6",
+        "statement": "RAG improves the accuracy and reliability of LLMs in specialized domains such as financial report analysis, aiding decision-making for private investors.",
+        "supporting_sources": [
+          "e92dfc4c-11fc-4a4d-9e00-9c22fb8b177c"
+        ],
+        "contradicting_sources": [],
+        "confidence": 0.65,
+        "support_strength": "direct",
+        "source_agreement": "consistent",
+        "uncertainty": "Evaluation focused specifically on bank financial reports (half-yearly/quarterly); other document types may yield different results.",
+        "domain": "Financial Technology",
+        "raw_confidence": 0.65,
+        "calibrated_confidence": 0.65,
+        "calibration_metadata": {
+          "feature_based_confidence": 0.65,
+          "calibration_adjustment": 0.0,
+          "reason_codes": [],
+          "caps_applied": [
+            "source_count_1_cap=0.65"
+          ]
+        }
+      },
+      {
+        "claim_id": "C7",
+        "statement": "There is a significant gap in the satisfaction with current information systems, with 79% of employees dissatisfied, driving the need for better retrieval systems like RAG.",
+        "supporting_sources": [
+          "48d58345-9a8c-4c2e-8233-38c9a1b245cd"
+        ],
+        "contradicting_sources": [],
+        "confidence": 0.6,
+        "support_strength": "direct",
+        "source_agreement": "consistent",
+        "uncertainty": "Statistic relies on studies cited within the source paper; the specific demographic and scope of 'employees' may vary.",
+        "domain": "Information Systems",
+        "raw_confidence": 0.6,
+        "calibrated_confidence": 0.6,
+        "calibration_metadata": {
+          "feature_based_confidence": 0.6,
+          "calibration_adjustment": 0.0,
+          "reason_codes": [],
+          "caps_applied": [
+            "source_count_1_cap=0.65"
+          ]
+        }
+      },
+      {
+        "claim_id": "C8",
+        "statement": "AI Agents are conceptually distinct from Agentic AI and are best characterized as modular systems driven and enabled by LLMs.",
+        "supporting_sources": [
+          "b8fbdadf-6e5d-4997-af5d-840f64080a0c"
+        ],
+        "contradicting_sources": [],
+        "confidence": 0.7,
+        "support_strength": "direct",
+        "source_agreement": "consistent",
+        "uncertainty": "Taxonomy is proposed by the authors; terminology in the field (Agents vs Agentic AI) is still evolving and may be used interchangeably by others.",
+        "domain": "Information Fusion",
+        "raw_confidence": 0.7,
+        "calibrated_confidence": 0.7,
+        "calibration_metadata": {
+          "feature_based_confidence": 0.7,
+          "calibration_adjustment": 0.0,
+          "reason_codes": [
+            "high_source_quality=0.90"
+          ],
+          "caps_applied": [
+            "source_count_1_cap=0.65"
+          ]
+        }
+      },
+      {
+        "claim_id": "C9",
+        "statement": "LLMs are being actively applied in cybersecurity to address evolving threats, though a comprehensive overview was previously lacking.",
+        "supporting_sources": [
+          "bd94e4fd-feb5-4680-ac90-abfb960fe08a"
+        ],
+        "contradicting_sources": [],
+        "confidence": 0.7,
+        "support_strength": "direct",
+        "source_agreement": "consistent",
+        "uncertainty": "Based on a systematic review of existing literature; actual field efficacy of these applications is an ongoing area of study.",
+        "domain": "Cybersecurity",
+        "raw_confidence": 0.8,
+        "calibrated_confidence": 0.7,
+        "calibration_metadata": {
+          "feature_based_confidence": 0.7,
+          "calibration_adjustment": -0.1,
+          "reason_codes": [
+            "high_source_quality=0.90"
+          ],
+          "caps_applied": [
+            "source_count_1_cap=0.65"
+          ]
+        }
+      }
+    ],
+    "validated_claims": [
+      {
+        "claim_id": "C1",
+        "statement": "Large Language Models (LLMs) exhibit 'hallucinations', generating content that diverges from user input, contradicts context, or misaligns with world knowledge, posing reliability challenges.",
+        "raw_confidence": 0.7,
+        "status": "insufficient_evidence",
+        "structural_validation": {
+          "passed": false,
+          "source_count_adequate": false,
+          "attribution_complete": true,
+          "issues": [
+            "Fewer than 2 supporting sources"
+          ]
+        },
+        "consistency_validation": {
+          "passed": true,
+          "internal_consistency": 1.0,
+          "source_agreement": 1.0,
+          "issues": []
+        },
+        "adjusted_confidence": 0.5,
+        "supporting_sources": [
+          "a58429eb-1130-4d12-a811-e6db448f50ee"
+        ],
+        "contradicting_sources": [],
+        "validation_notes": "Fewer than 2 supporting sources"
+      },
+      {
+        "claim_id": "C2",
+        "statement": "Retrieval-Augmented Generation (RAG) is an effective strategy for mitigating the hallucination problem in LLMs by grounding generation in retrieved data.",
+        "raw_confidence": 0.75,
+        "status": "confirmed",
+        "structural_validation": {
+          "passed": true,
+          "source_count_adequate": true,
+          "attribution_complete": true,
+          "issues": []
+        },
+        "consistency_validation": {
+          "passed": true,
+          "internal_consistency": 1.0,
+          "source_agreement": 1.0,
+          "issues": []
+        },
+        "adjusted_confidence": 0.75,
+        "supporting_sources": [
+          "4b6215d2-78fb-443a-a316-cdd942a28c2a",
+          "c0c602e1-0ef1-40e8-8937-6afe09d4937a"
+        ],
+        "contradicting_sources": [],
+        "validation_notes": ""
+      },
+      {
+        "claim_id": "C3",
+        "statement": "RAG systems face technical challenges including difficulties in retrieval precision, context selection, and aligning the retriever with the LLM's knowledge preferences.",
+        "raw_confidence": 0.75,
+        "status": "confirmed",
+        "structural_validation": {
+          "passed": true,
+          "source_count_adequate": true,
+          "attribution_complete": true,
+          "issues": []
+        },
+        "consistency_validation": {
+          "passed": true,
+          "internal_consistency": 1.0,
+          "source_agreement": 1.0,
+          "issues": []
+        },
+        "adjusted_confidence": 0.75,
+        "supporting_sources": [
+          "ee7ee194-67b8-4292-8f8c-c6f145e71b4a",
+          "c0c602e1-0ef1-40e8-8937-6afe09d4937a"
+        ],
+        "contradicting_sources": [],
+        "validation_notes": ""
+      },
+      {
+        "claim_id": "C4",
+        "statement": "Incorporating Knowledge Graphs (KGs) into RAG pipelines (GraphRAG) enhances retrieval robustness and answer generation, particularly for document QA.",
+        "raw_confidence": 0.6,
+        "status": "insufficient_evidence",
+        "structural_validation": {
+          "passed": false,
+          "source_count_adequate": false,
+          "attribution_complete": true,
+          "issues": [
+            "Fewer than 2 supporting sources"
+          ]
+        },
+        "consistency_validation": {
+          "passed": true,
+          "internal_consistency": 1.0,
+          "source_agreement": 1.0,
+          "issues": []
+        },
+        "adjusted_confidence": 0.4,
+        "supporting_sources": [
+          "ee7ee194-67b8-4292-8f8c-c6f145e71b4a"
+        ],
+        "contradicting_sources": [],
+        "validation_notes": "Fewer than 2 supporting sources"
+      },
+      {
+        "claim_id": "C5",
+        "statement": "Dual Preference Alignment (DPA) frameworks improve RAG reliability by addressing the challenge of aligning retriever output with diverse LLM knowledge preferences.",
+        "raw_confidence": 0.6,
+        "status": "insufficient_evidence",
+        "structural_validation": {
+          "passed": false,
+          "source_count_adequate": false,
+          "attribution_complete": true,
+          "issues": [
+            "Fewer than 2 supporting sources"
+          ]
+        },
+        "consistency_validation": {
+          "passed": true,
+          "internal_consistency": 1.0,
+          "source_agreement": 1.0,
+          "issues": []
+        },
+        "adjusted_confidence": 0.4,
+        "supporting_sources": [
+          "c0c602e1-0ef1-40e8-8937-6afe09d4937a"
+        ],
+        "contradicting_sources": [],
+        "validation_notes": "Fewer than 2 supporting sources"
+      },
+      {
+        "claim_id": "C6",
+        "statement": "RAG improves the accuracy and reliability of LLMs in specialized domains such as financial report analysis, aiding decision-making for private investors.",
+        "raw_confidence": 0.65,
+        "status": "insufficient_evidence",
+        "structural_validation": {
+          "passed": false,
+          "source_count_adequate": false,
+          "attribution_complete": true,
+          "issues": [
+            "Fewer than 2 supporting sources"
+          ]
+        },
+        "consistency_validation": {
+          "passed": true,
+          "internal_consistency": 1.0,
+          "source_agreement": 1.0,
+          "issues": []
+        },
+        "adjusted_confidence": 0.45,
+        "supporting_sources": [
+          "e92dfc4c-11fc-4a4d-9e00-9c22fb8b177c"
+        ],
+        "contradicting_sources": [],
+        "validation_notes": "Fewer than 2 supporting sources"
+      },
+      {
+        "claim_id": "C7",
+        "statement": "There is a significant gap in the satisfaction with current information systems, with 79% of employees dissatisfied, driving the need for better retrieval systems like RAG.",
+        "raw_confidence": 0.6,
+        "status": "insufficient_evidence",
+        "structural_validation": {
+          "passed": false,
+          "source_count_adequate": false,
+          "attribution_complete": true,
+          "issues": [
+            "Fewer than 2 supporting sources"
+          ]
+        },
+        "consistency_validation": {
+          "passed": true,
+          "internal_consistency": 1.0,
+          "source_agreement": 1.0,
+          "issues": []
+        },
+        "adjusted_confidence": 0.4,
+        "supporting_sources": [
+          "48d58345-9a8c-4c2e-8233-38c9a1b245cd"
+        ],
+        "contradicting_sources": [],
+        "validation_notes": "Fewer than 2 supporting sources"
+      },
+      {
+        "claim_id": "C8",
+        "statement": "AI Agents are conceptually distinct from Agentic AI and are best characterized as modular systems driven and enabled by LLMs.",
+        "raw_confidence": 0.7,
+        "status": "insufficient_evidence",
+        "structural_validation": {
+          "passed": false,
+          "source_count_adequate": false,
+          "attribution_complete": true,
+          "issues": [
+            "Fewer than 2 supporting sources"
+          ]
+        },
+        "consistency_validation": {
+          "passed": true,
+          "internal_consistency": 1.0,
+          "source_agreement": 1.0,
+          "issues": []
+        },
+        "adjusted_confidence": 0.5,
+        "supporting_sources": [
+          "b8fbdadf-6e5d-4997-af5d-840f64080a0c"
+        ],
+        "contradicting_sources": [],
+        "validation_notes": "Fewer than 2 supporting sources"
+      },
+      {
+        "claim_id": "C9",
+        "statement": "LLMs are being actively applied in cybersecurity to address evolving threats, though a comprehensive overview was previously lacking.",
+        "raw_confidence": 0.7,
+        "status": "insufficient_evidence",
+        "structural_validation": {
+          "passed": false,
+          "source_count_adequate": false,
+          "attribution_complete": true,
+          "issues": [
+            "Fewer than 2 supporting sources"
+          ]
+        },
+        "consistency_validation": {
+          "passed": true,
+          "internal_consistency": 1.0,
+          "source_agreement": 1.0,
+          "issues": []
+        },
+        "adjusted_confidence": 0.5,
+        "supporting_sources": [
+          "bd94e4fd-feb5-4680-ac90-abfb960fe08a"
+        ],
+        "contradicting_sources": [],
+        "validation_notes": "Fewer than 2 supporting sources"
+      }
+    ]
+  }
+}

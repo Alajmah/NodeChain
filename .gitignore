@@ -1,0 +1,95 @@
+# ── Secrets and environment ─────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.p12
+*.pfx
+known_hosts
+*_rsa
+*_ed25519
+
+# ── Runtime data (never commit) ────────────────────────────────────────────
+data/
+!data/.gitkeep
+# v2.70 regression fixture: part of the baseline comparison contract (Gate 7,
+# "reproducible from committed fixtures"). Tested by test_baseline_comparison.py.
+!data/v2.70_baseline/
+!data/v2.70_baseline/frozen_comparison_fixture.json
+
+# ── Python ─────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ── Virtual environments ───────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── IDE ────────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.settings/
+
+# ── Testing and coverage ───────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# ── OS ─────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Temporary files ────────────────────────────────────────────────────────
+*.tmp
+*.bak
+*.log
+tmp/
+
+# ── NodeChain specific ────────────────────────────────────────────────────
+registry.lock.json
+eval_suites/*.signed.json
+*_signed.json
+trace_output/
+
+# chatgpt-collaboration skill (account-specific bindings)
+/.chatgpt-collaboration.json
+/.chatgpt-collaboration.json.*
+
+# Local NodeChain/Ouroboros runtime state
+/.ouroboros/state.db
+/.zcode/
+/.benchmarks/
+/.nodechain/

@@ -1,0 +1,103 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "nodechain://schemas/chain_trace",
+  "title": "ChainTrace",
+  "description": "Complete, auditable execution record. The trace must not claim a step occurred unless it was actually executed.",
+  "type": "object",
+  "required": ["trace_id", "run_id", "chain_id", "started_at", "events"],
+  "properties": {
+    "trace_id": { "type": "string", "format": "uuid" },
+    "run_id": { "type": "string", "format": "uuid" },
+    "chain_id": { "type": "string" },
+    "chain_name": { "type": "string" },
+    "started_at": { "type": "string", "format": "date-time" },
+    "completed_at": { "type": "string", "format": "date-time" },
+    "final_status": {
+      "type": "string",
+      "enum": ["completed", "failed", "rejected_by_reviewer"]
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["event_id", "timestamp", "node_id", "step_id", "event_type", "actor"],
+        "properties": {
+          "event_id": { "type": "string", "format": "uuid" },
+          "timestamp": { "type": "string", "format": "date-time" },
+          "run_id": { "type": "string", "format": "uuid" },
+          "chain_id": { "type": "string" },
+          "node_id": { "type": "string" },
+          "step_id": { "type": "integer" },
+          "contract_id": { "type": "string" },
+          "policy_id": { "type": "string" },
+          "event_type": {
+            "type": "string",
+            "enum": [
+              "chain_started",
+              "chain_completed",
+              "chain_failed",
+              "node_invoked",
+              "node_succeeded",
+              "node_failed",
+              "contract_validated",
+              "policy_evaluated",
+              "tool_called",
+              "tool_result_received",
+              "validation_started",
+              "validation_passed",
+              "validation_failed",
+              "loop_entered",
+              "loop_exited",
+              "escalation_triggered",
+              "human_review_requested",
+              "human_review_completed",
+              "human_review_timeout",
+              "memory_write_requested",
+              "memory_write_allowed",
+              "memory_write_blocked",
+              "transition_evaluated",
+              "routing_decision",
+              "skipped",
+              "simulated"
+            ]
+          },
+          "actor": {
+            "type": "string",
+            "enum": ["node", "runtime", "human", "policy_engine"]
+          },
+          "input_reference": { "type": "string" },
+          "output_reference": { "type": "string" },
+          "decision": { "type": "string" },
+          "reason_codes": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "cost_usd": { "type": "number" },
+          "latency_ms": { "type": "integer" },
+          "risk_level": {
+            "type": "string",
+            "enum": ["LOW", "MEDIUM", "HIGH"]
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "total_cost_usd": { "type": "number" },
+    "total_duration_ms": { "type": "integer" },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "nodes_executed": { "type": "integer" },
+        "loops_entered": { "type": "integer" },
+        "human_reviews": { "type": "integer" },
+        "memory_writes_attempted": { "type": "integer" },
+        "memory_writes_committed": { "type": "integer" },
+        "trace_complete": { "type": "boolean" }
+      }
+    }
+  },
+  "additionalProperties": false
+}

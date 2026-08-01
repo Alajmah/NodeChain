@@ -1,0 +1,70 @@
+suite_id: sandbox_hardening_eval
+suite_version: "1.0.0"
+target_type: adapter
+target_ref: "nodechain://adapters/sandbox"
+description: >
+  Verifies seccomp, cgroup, namespace, chroot, PID, procfs, and strict
+  invariant behavior for the NodeChain sandbox execution platform.
+
+metrics:
+  - correctness
+  - schema_validity
+  - invariant_compliance
+  - policy_compliance
+  - trace_completeness
+
+thresholds:
+  correctness: 1.0
+  invariant_compliance: 1.0
+  schema_validity: 1.0
+
+cases:
+  - case_id: seccomp-syscall-filter
+    description: Seccomp profile blocks 20 dangerous syscalls
+    required_invariants:
+      - INV-007
+    expected_output:
+      blocked_syscalls: 20
+      enforcement: kernel_level
+
+  - case_id: cgroup-v2-memory-limit
+    description: Cgroup v2 enforces memory.max limit
+    required_invariants:
+      - INV-009
+    expected_output:
+      memory_enforcement: cgroup_v2
+      reclaim_before_kill: true
+
+  - case_id: network-namespace-confinement
+    description: Network namespace isolates untrusted node network access
+    required_invariants:
+      - INV-011
+    expected_output:
+      network_isolation: namespace
+
+  - case_id: mount-namespace-chroot
+    description: Mount namespace with chroot confines filesystem access
+    required_invariants:
+      - INV-012
+    expected_output:
+      filesystem_confinement: chroot_and_python_hooks
+      defense_in_depth: true
+
+  - case_id: pid-namespace-isolation
+    description: PID namespace isolates process visibility via two-stage fork
+    required_invariants:
+      - INV-013
+    expected_output:
+      pid_namespace: two_stage_fork
+      procfs_remount: true
+
+  - case_id: hardened-untrusted-preset
+    description: Hardened untrusted preset activates all sandbox layers
+    expected_policy_verdict: pass
+    expected_output:
+      preset: hardened_untrusted
+      seccomp: true
+      cgroup: true
+      network_ns: true
+      mount_ns: true
+      pid_ns: true

@@ -1,0 +1,55 @@
+suite_id: trust_chain_eval
+suite_version: "1.0.0"
+target_type: trace
+target_ref: "nodechain://trust/chain"
+description: >
+  Verifies the complete trust chain: audit bundle → attestation →
+  verifier profile → gate receipt → deployment receipt.
+
+metrics:
+  - correctness
+  - contract_validity
+  - policy_compliance
+  - trace_completeness
+
+thresholds:
+  correctness: 1.0
+  contract_validity: 1.0
+
+cases:
+  - case_id: audit-bundle-signing
+    description: Audit bundle is signed with RSA-PSS-SHA256
+    expected_output:
+      signature_algorithm: RSA-PSS-SHA256
+      schema_version: "2"
+      content_manifest: present
+
+  - case_id: deployment-attestation
+    description: Attestation binds policy_id, version, and digest
+    expected_output:
+      policy_bound: true
+      ci_expectations: enforced
+
+  - case_id: verifier-profile-trust
+    description: Verifier profile is signed and in trust store
+    expected_output:
+      trust_store_purpose: verifier_profile_signing
+      profile_versioned: true
+
+  - case_id: gate-receipt
+    description: Gate receipt records evaluation result as signed receipt
+    expected_output:
+      receipt_type: deployment_gate
+      signature_required: true
+
+  - case_id: deployment-system-receipt
+    description: Deployment system receipt records adapter execution
+    expected_output:
+      receipt_type: deployment_system
+      adapter_manifest_signed: true
+
+  - case_id: assurance-chain-verification
+    description: One-command assurance chain verification passes
+    expected_output:
+      chain_verified: true
+      components: 6

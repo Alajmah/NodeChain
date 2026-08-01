@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest an idea for NodeChain
+labels: ["feature-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        NodeChain is roadmap-controlled. Feature requests are welcome but do
+        not imply acceptance or implementation commitment. The frozen roadmap
+        determines sequencing and priority.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem does this feature address?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What would you like to see happen?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What alternatives have you considered?
+    validations:
+      required: false

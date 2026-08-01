@@ -1,0 +1,90 @@
+suite_id: reference_chain_eval
+suite_version: "1.0.0"
+target_type: chain
+target_ref: "nodechain://chains/research_decision_v1"
+description: >
+  Verifies the original autonomous chain behavior: contracts, ports,
+  state transitions, trace completeness, policy gates, and review gates.
+
+metrics:
+  - correctness
+  - schema_validity
+  - contract_validity
+  - invariant_compliance
+  - policy_compliance
+  - trace_completeness
+  - cost
+
+thresholds:
+  correctness: 1.0
+  schema_validity: 1.0
+  contract_validity: 1.0
+  invariant_compliance: 1.0
+  trace_completeness: 1.0
+
+cases:
+  - case_id: contract-validation
+    description: All 12 nodes have valid input/output contracts
+    expected_output:
+      nodes: 12
+      contracts_valid: true
+
+  - case_id: port-compatibility
+    description: All port connections between nodes are type-compatible
+    expected_output:
+      port_connections_checked: true
+      incompatible_ports: 0
+
+  - case_id: state-transition-completeness
+    description: Chain executes all backbone nodes in correct order
+    expected_output:
+      backbone_nodes_executed: 10
+      branch_nodes_excluded_from_backbone: true
+
+  - case_id: branch-join-correctness
+    description: Parallel branches merge with correct join strategy
+    expected_output:
+      merge_strategies: [append, merge, latest, concat]
+      cancellation_policies: [ignore_late, cancel_on_first, first_success_only]
+
+  - case_id: trace-completeness
+    description: Trace events recorded for every node execution
+    expected_trace_properties:
+      events_per_node: 3
+      includes_pre_call: true
+      includes_post_call: true
+
+  - case_id: policy-gate-enforcement
+    description: Policy gate enforces execution policy per node
+    expected_policy_verdict: pass
+    expected_output:
+      gate_enforced: true
+      violations: 0
+
+  - case_id: review-gate
+    description: Review gate pauses for human/auto approval
+    expected_output:
+      review_modes: [interactive, auto_approve, auto_reject, auto_revision, pause, disabled]
+
+  - case_id: durable-state-persistence
+    description: State persisted atomically across all 4 SQLite surfaces
+    expected_output:
+      persistence_surfaces: 4
+      atomic_writes: true
+
+  - case_id: cost-accounting
+    description: Cost recorded in invocation ledger
+    expected_output:
+      cost_accounted: true
+      ledger_surface: invocation_ledger
+
+  - case_id: loop-enforcement
+    description: Loop nodes enforce entry/exit/budget semantics
+    required_invariants:
+      - INV-001
+      - INV-002
+      - INV-003
+    expected_output:
+      loop_entry_guard: true
+      loop_exit_guard: true
+      loop_budget: enforced

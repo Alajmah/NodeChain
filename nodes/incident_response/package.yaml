@@ -1,0 +1,55 @@
+# Incident Response Chain — multi-node package for governed incident handling.
+#
+# This package implements a 5-node incident response chain that demonstrates
+# the full certified ecosystem: detect → triage → decide → remediate → verify.
+# Each node is a self-contained unit with contracts, capabilities, and
+# trust declarations suitable for certified registry publishing.
+
+manifest:
+  node_id: incident_response
+  node_type: hybrid
+  name: Incident Response Chain
+  description: >
+    Governed incident response pipeline: detect anomalies, triage severity,
+    decide remediation mode, execute governed rollback, and verify recovery.
+    Exercises the full certified registry consumption and evidence chain.
+  version: "1.0.0"
+  tags: [incident-response, operations, governance, certified]
+
+  multi_node: true
+  nodes:
+    - node_id: incident_detector
+      entrypoint: implementations/incident_detector.py:IncidentDetector
+      contract: contracts/incident_detector.json
+    - node_id: severity_triager
+      entrypoint: implementations/severity_triager.py:SeverityTriager
+      contract: contracts/severity_triager.json
+    - node_id: remediation_decisioner
+      entrypoint: implementations/remediation_decisioner.py:RemediationDecisioner
+      contract: contracts/remediation_decisioner.json
+    - node_id: governed_remediator
+      entrypoint: implementations/governed_remediator.py:GovernedRemediator
+      contract: contracts/governed_remediator.json
+    - node_id: recovery_verifier
+      entrypoint: implementations/recovery_verifier.py:RecoveryVerifier
+      contract: contracts/recovery_verifier.json
+
+entrypoint: implementations/incident_detector.py:IncidentDetector
+
+capabilities:
+  network: false
+  filesystem: read-only
+  memory_write: false
+  external_api: false
+  subprocess: false
+  gpu: false
+
+dependencies:
+  python: []
+
+meta:
+  author: NodeChain
+  license: MIT
+  tags: [incident-response, operations, certified]
+  compatibility_version: "1.0.0"
+  nodechain_min_version: "1.18.0"

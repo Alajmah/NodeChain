@@ -1,0 +1,73 @@
+chain_id: quick-fact-check-v1
+name: Quick Fact Checker
+version: "1.0.0"
+description: >-
+  Verifies a single claim against academic sources. Lightweight chain
+  for rapid fact-checking. Reuses 5 nodes from the Research & Decision Assistant.
+goal: >-
+  Given a factual claim, search academic sources and produce a verified
+  assessment of the claim's accuracy with supporting evidence.
+
+nodes:
+  - node_id: goal_interpreter
+    node_type: model
+    position: 1
+    config:
+      model_required: true
+      max_cost_usd: 0.10
+
+  - node_id: search_tool
+    node_type: tool
+    position: 2
+    config:
+      can_call_tools: true
+      allowed_tools:
+        - search
+      allowed_adapters:
+        - semantic_scholar
+        - arxiv
+        - openalex
+
+  - node_id: source_ingestion
+    node_type: deterministic
+    position: 3
+
+  - node_id: evidence_synthesizer
+    node_type: model
+    position: 4
+    config:
+      model_required: true
+      can_read_memory: true
+      max_cost_usd: 0.50
+
+  - node_id: response_generator
+    node_type: model
+    position: 5
+    config:
+      model_required: true
+      max_cost_usd: 0.50
+
+connections:
+  - from_node: goal_interpreter
+    from_port: research_goal
+    to_node: search_tool
+    to_port: research_goal
+
+  - from_node: search_tool
+    from_port: raw_search_results
+    to_node: source_ingestion
+    to_port: raw_search_results
+
+  - from_node: source_ingestion
+    from_port: source_set
+    to_node: evidence_synthesizer
+    to_port: source_set
+
+  - from_node: evidence_synthesizer
+    from_port: evidence_base
+    to_node: response_generator
+    to_port: evidence_base
+
+loops: []
+
+gates: []

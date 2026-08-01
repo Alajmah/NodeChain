@@ -1,0 +1,55 @@
+suite_id: drift_remediation_eval
+suite_version: "1.0.0"
+target_type: remediation
+target_ref: "nodechain://drift/remediation"
+description: >
+  Verifies drift detection, signed drift policy, lifecycle management,
+  remediation plan, and governed auto-rollback.
+
+metrics:
+  - correctness
+  - policy_compliance
+  - trace_completeness
+
+thresholds:
+  correctness: 1.0
+  policy_compliance: 1.0
+
+cases:
+  - case_id: drift-detection-6-fields
+    description: Drift check compares 6 fields against release history
+    expected_output:
+      drift_fields: 6
+      evidence_aware: true
+
+  - case_id: signed-drift-policy
+    description: Drift policy signed and verified against trust store
+    expected_output:
+      trust_store_purpose: drift_policy_signing
+      signature_status: valid
+
+  - case_id: lifecycle-validity-windows
+    description: Policy lifecycle rejects expired/revoked in strict mode
+    expected_output:
+      policy_status: active
+      validity_checked: true
+
+  - case_id: remediation-recommend
+    description: Recommend mode produces plan without mutating target
+    expected_output:
+      remediation_mode: recommend
+      final_state: recommendation_produced
+      rollback_attempted: false
+
+  - case_id: remediation-auto-rollback
+    description: Auto-rollback resolves known-good and executes
+    expected_output:
+      remediation_mode: auto_rollback
+      require_latest_known_good: true
+      selected_action: rollback_artifact
+
+  - case_id: remediation-strict-deny
+    description: Strict mode denies when prerequisites not met
+    expected_output:
+      strict_mode: true
+      denial_reason: present

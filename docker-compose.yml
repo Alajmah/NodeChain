@@ -1,0 +1,33 @@
+version: "3.9"
+
+services:
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - "8100:8000"
+    volumes:
+      - ./data/chroma:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v2/heartbeat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  nodechain:
+    build: .
+    depends_on:
+      chromadb:
+        condition: service_healthy
+    environment:
+      - NODECHAIN_PROVIDER=lim
+      - NODECHAIN_MODEL=auto
+      - LIM_BASE_URL=http://localhost:8766
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+    volumes:
+      - ./data:/app/data
+      - ./blueprints:/app/blueprints
+      - ./traces:/app/traces

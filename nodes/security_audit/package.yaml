@@ -1,0 +1,17 @@
+# Security Audit Package
+package_id: security_audit
+version: "1.0.0"
+description: "7-node security audit pipeline for platform posture assessment"
+nodes:
+  - asset_inventory_collector
+  - trust_posture_auditor
+  - registry_posture_auditor
+  - evidence_chain_auditor
+  - sandbox_policy_auditor
+  - deployment_risk_auditor
+  - audit_report_writer
+capabilities:
+  - "fs:read"
+  - "import:json"
+sandbox_profile: none
+trust_level: trusted

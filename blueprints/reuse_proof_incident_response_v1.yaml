@@ -1,0 +1,63 @@
+# Reusable Node Proof Pack — Incident Response (v2.62.0)
+# Proves shared_risk_classifier + shared_trace_collector reuse via orchestrator.
+
+chain_id: reuse-proof-incident-response-v1
+name: Reuse Proof — Incident Response
+version: "1.0.0"
+description: >-
+  End-to-end proof that shared nodes execute through the orchestrator
+  in an incident response domain context.
+
+goal: >-
+  Triage an incident, assess risk using the shared risk classifier,
+  and collect trace using the shared trace collector.
+
+nodes:
+  - node_id: incident_triager
+    node_type: deterministic
+    position: 1
+
+  - node_id: incident_risk_adapter
+    node_type: deterministic
+    position: 2
+
+  - node_id: shared_risk_classifier
+    node_type: deterministic
+    position: 3
+    config:
+      shared_node: true
+      package: shared_risk_classifier
+      version: "1.0.0"
+
+  - node_id: trace_input_adapter
+    node_type: deterministic
+    position: 4
+
+  - node_id: shared_trace_collector
+    node_type: deterministic
+    position: 5
+    config:
+      shared_node: true
+      package: shared_trace_collector
+      version: "1.0.0"
+
+connections:
+  - from_node: incident_triager
+    from_port: incident_triage_result
+    to_node: incident_risk_adapter
+    to_port: incident_triage_result
+
+  - from_node: incident_risk_adapter
+    from_port: risk_context
+    to_node: shared_risk_classifier
+    to_port: risk_context
+
+  - from_node: shared_risk_classifier
+    from_port: risk_assessment
+    to_node: trace_input_adapter
+    to_port: risk_assessment
+
+  - from_node: trace_input_adapter
+    from_port: trace_input
+    to_node: shared_trace_collector
+    to_port: trace_input

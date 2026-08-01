@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "nodechain://schemas/semantic_types/chain_trace_output",
+  "title": "ChainTraceOutput",
+  "description": "Reference to the complete chain trace file produced by the Trace Collector Node.",
+  "type": "object",
+  "required": ["trace_file_path", "trace_id", "run_id", "complete"],
+  "properties": {
+    "trace_file_path": { "type": "string" },
+    "trace_id": { "type": "string", "format": "uuid" },
+    "run_id": { "type": "string", "format": "uuid" },
+    "complete": { "type": "boolean" },
+    "event_count": { "type": "integer" },
+    "truth_rule_verified": { "type": "boolean" },
+    "validation_notes": { "type": "array", "items": { "type": "string" } }
+  }
+}

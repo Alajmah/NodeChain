@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "nodechain://schemas/semantic_types/raw_search_results",
+  "title": "RawSearchResults",
+  "type": "object",
+  "required": ["results"],
+  "properties": {
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["origin_api", "raw_data"],
+        "properties": {
+          "origin_api": {
+            "type": "string",
+            "enum": ["semantic_scholar", "arxiv", "openalex", "crossref", "pubmed", "chroma_local"]
+          },
+          "raw_data": { "type": "object", "additionalProperties": true },
+          "query_used": { "type": "string" },
+          "retrieved_at": { "type": "string", "format": "date-time" },
+          "adapter_latency_ms": { "type": "integer" }
+        }
+      }
+    },
+    "total_found": { "type": "integer" },
+    "adapters_called": { "type": "array", "items": { "type": "string" } },
+    "adapters_failed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "adapter": { "type": "string" },
+          "error": { "type": "string" }
+        }
+      }
+    }
+  }
+}

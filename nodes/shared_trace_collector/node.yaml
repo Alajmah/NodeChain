@@ -1,0 +1,50 @@
+# Shared Trace Collector — reusable governed node package (v2.61.0)
+#
+# Every autonomous chain needs trace collection. This node is domain-neutral:
+# it accepts TRACE_INPUT (chain execution summary) and produces
+# CHAIN_TRACE_OUTPUT (final trace record).
+#
+# Build a node once. Govern it forever. Reuse it everywhere.
+
+manifest:
+  node_id: shared_trace_collector
+  node_type: deterministic
+  name: Shared Trace Collector
+  description: >
+    Domain-neutral trace collector. Accepts chain execution summary
+    and produces a final trace record. Reusable across all chain types.
+  version: "1.0.0"
+  tags: [shared, trace, collector, reusable, cross-domain]
+
+contract:
+  contract_id: shared.trace-collector.v1
+  version: "1.0.0"
+  entry:
+    input_type: trace_input
+    schema_ref: "nodechain://schemas/semantic_types/trace_input"
+    required_fields:
+      - run_id
+  exit:
+    output_type: chain_trace_output
+    schema_ref: "nodechain://schemas/semantic_types/chain_trace_output"
+    guaranteed_fields:
+      - trace_id
+      - run_id
+      - nodes_executed
+
+requirements:
+  model_required: false
+  memory_access: "none"
+
+side_effects: []
+
+capabilities:
+  network: false
+  filesystem: "none"
+  memory_write: false
+  external_api: false
+  subprocess: false
+  gpu: false
+
+trust_level: trusted
+nodechain_min_version: "2.61.0"

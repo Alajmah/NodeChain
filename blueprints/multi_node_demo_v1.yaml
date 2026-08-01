@@ -1,0 +1,28 @@
+# Multi-Node Demo Blueprint — two nodes from the same package
+#
+# Chains: uppercase_node -> reverse_node (both from text_transforms package)
+#
+# Usage:
+#   nodechain run "Hello Multi" -b blueprints/multi_node_demo_v1.yaml --provider mock
+
+chain_id: multi-node-demo-v1
+name: Multi-Node Demo Chain
+version: "1.0"
+description: >
+  Demonstrates two nodes from the same multi-node package in one blueprint.
+goal: Demonstrate multi-node package execution
+
+nodes:
+  - node_id: uppercase_node
+    node_type: deterministic
+    position: 1
+
+  - node_id: reverse_node
+    node_type: deterministic
+    position: 2
+
+connections:
+  - from_node: uppercase_node
+    from_port: output
+    to_node: reverse_node
+    to_port: input

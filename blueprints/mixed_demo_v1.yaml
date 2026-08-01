@@ -1,0 +1,30 @@
+# Mixed Demo Blueprint — built-in + registry-loaded nodes
+#
+# Chains: echo_node (registry) -> goal_interpreter (built-in)
+# Demonstrates port compatibility across registry/built-in boundaries.
+#
+# Usage:
+#   nodechain run "test query" -b blueprints/mixed_demo_v1.yaml --provider mock
+
+chain_id: mixed-demo-v1
+name: Mixed Origin Demo Chain
+version: "1.0"
+description: >
+  Demonstrates mixed built-in and registry-loaded nodes in one blueprint.
+  Echo node (from registry) feeds into goal interpreter (built-in).
+goal: Demonstrate mixed-origin node execution
+
+nodes:
+  - node_id: echo_node
+    node_type: deterministic
+    position: 1
+
+  - node_id: goal_interpreter
+    node_type: model
+    position: 2
+
+connections:
+  - from_node: echo_node
+    from_port: output
+    to_node: goal_interpreter
+    to_port: input

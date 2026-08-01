@@ -1,0 +1,58 @@
+suite_id: incident_response_eval
+suite_version: "1.0.0"
+target_type: package
+target_ref: "nodechain://packages/incident_response"
+description: >
+  Structural evaluation of the incident-response package. Verifies
+  contract validity, governance gate enforcement, evidence chain
+  propagation, and recovery verification semantics.
+
+metrics:
+  - correctness
+  - contract_validity
+  - governance_enforcement
+  - evidence_chain_integrity
+  - recovery_verification
+
+thresholds:
+  correctness: 1.0
+  contract_validity: 1.0
+  governance_enforcement: 1.0
+  evidence_chain_integrity: 1.0
+  recovery_verification: 1.0
+
+cases:
+  - case_id: detector-contract-valid
+    description: IncidentDetector has valid contract with guaranteed fields
+    expected_output:
+      node_id: incident_detector
+      contract_id: incident.detector.v1
+      guaranteed_fields: [incident_id, detected, anomalies, severity_hint]
+
+  - case_id: triager-contract-valid
+    description: SeverityTriager has valid contract with severity output
+    expected_output:
+      node_id: severity_triager
+      contract_id: incident.triager.v1
+      guaranteed_fields: [severity, severity_score, requires_remediation]
+
+  - case_id: decisioner-contract-valid
+    description: RemediationDecisioner has valid contract with mode output
+    expected_output:
+      node_id: remediation_decisioner
+      contract_id: incident.decisioner.v1
+      guaranteed_fields: [remediation_mode, authorized, selected_action, policy_digest]
+
+  - case_id: remediator-contract-valid
+    description: GovernedRemediator declares deployment side effects
+    expected_output:
+      node_id: governed_remediator
+      contract_id: incident.remediator.v1
+      has_side_effects: true
+
+  - case_id: verifier-contract-valid
+    description: RecoveryVerifier has valid contract with evidence chain
+    expected_output:
+      node_id: recovery_verifier
+      contract_id: incident.verifier.v1
+      guaranteed_fields: [recovered, verified, incident_status, evidence_chain]

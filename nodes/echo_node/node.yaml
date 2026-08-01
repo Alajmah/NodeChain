@@ -1,0 +1,57 @@
+# Echo Node — a simple example Harness Node package.
+#
+# This node echoes its input with optional transformation.
+# Demonstrates the node package format.
+
+manifest:
+  node_id: echo_node
+  node_type: deterministic
+  name: Echo Node
+  description: >
+    Passes through input with optional transformation.
+    A minimal example of a packaged Harness Node.
+  version: "1.0.0"
+  tags: [example, utility, passthrough]
+
+contract:
+  contract_id: utility.echo.v1
+  version: "1.0.0"
+  entry:
+    input_type: raw_user_query
+    schema_ref: "nodechain://schemas/semantic_types/raw_user_query"
+    required_fields:
+      - query
+    optional_fields:
+      - transform
+  exit:
+    output_type: raw_user_query
+    schema_ref: "nodechain://schemas/semantic_types/raw_user_query"
+    guaranteed_fields:
+      - query
+      - transformed
+  side_effects: []
+  requirements:
+    model_required: false
+    memory_access: none
+    trust_level: trusted
+
+meta:
+  author: NodeChain
+  license: MIT
+  tags: [example, utility]
+  compatibility_version: "1.0.0"
+  nodechain_min_version: "0.3.4"
+
+entrypoint: implementation:EchoNode
+side_effects: []
+
+capabilities:
+  network: false
+  filesystem: none
+  memory_write: false
+  external_api: false
+  subprocess: false
+  gpu: false
+
+dependencies:
+  python: []

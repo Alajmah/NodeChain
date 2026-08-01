@@ -1,0 +1,108 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "nodechain://schemas/chain_blueprint",
+  "title": "ChainBlueprint",
+  "description": "Declarative chain definition. Loaded and validated by the runtime at chain start.",
+  "type": "object",
+  "required": ["chain_id", "name", "version", "goal", "nodes", "connections", "invariants"],
+  "properties": {
+    "chain_id": {
+      "type": "string",
+      "description": "Unique chain identifier"
+    },
+    "name": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "description": {
+      "type": "string"
+    },
+    "goal": {
+      "type": "string",
+      "description": "What this chain accomplishes"
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["node_id", "node_type"],
+        "properties": {
+          "node_id": { "type": "string" },
+          "node_type": { "type": "string" },
+          "config": { "type": "object" },
+          "position": { "type": "integer" }
+        }
+      }
+    },
+    "connections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["from_node", "from_port", "to_node", "to_port"],
+        "properties": {
+          "from_node": { "type": "string" },
+          "from_port": { "type": "string" },
+          "to_node": { "type": "string" },
+          "to_port": { "type": "string" },
+          "condition": { "type": "string" },
+          "label": { "type": "string" }
+        }
+      }
+    },
+    "loops": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["loop_id", "entry_condition", "exit_condition", "max_iterations", "path"],
+        "properties": {
+          "loop_id": { "type": "string" },
+          "entry_condition": { "type": "string" },
+          "exit_condition": { "type": "string" },
+          "max_iterations": { "type": "integer", "minimum": 1 },
+          "max_cost_usd": { "type": "number" },
+          "path": { "type": "array", "items": { "type": "string" } },
+          "escalation": { "type": "string" }
+        }
+      }
+    },
+    "gates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["gate_id", "trigger", "allowed_decisions", "timeout_minutes"],
+        "properties": {
+          "gate_id": { "type": "string" },
+          "trigger": { "type": "string" },
+          "allowed_decisions": { "type": "array", "items": { "type": "string" } },
+          "timeout_minutes": { "type": "integer" },
+          "approver_role": { "type": "string" }
+        }
+      }
+    },
+    "invariants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["invariant_id", "description", "enforcement"],
+        "properties": {
+          "invariant_id": { "type": "string" },
+          "description": { "type": "string" },
+          "enforcement": { "type": "string", "enum": ["load_time", "runtime", "both"] }
+        }
+      }
+    },
+    "policies": {
+      "type": "array",
+      "items": { "$ref": "nodechain://schemas/policy" }
+    },
+    "policy_preset": {
+      "type": "string",
+      "enum": ["minimal", "standard_untrusted", "production_untrusted"],
+      "description": "Policy preset for sandbox/resource governance (v1.3.5)"
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,21 @@
+# Echo Demo Blueprint — demonstrates registry-loaded node execution.
+#
+# Uses only echo_node from the local registry.
+# No built-in nodes needed.
+#
+# Usage:
+#   nodechain run "test query" -b blueprints/echo_demo_v1.yaml --provider mock
+
+chain_id: echo-demo-v1
+name: Echo Demo Chain
+version: "1.0"
+description: >
+  Minimal chain using the echo_node package from the local registry.
+goal: Demonstrate registry-loaded node execution
+
+nodes:
+  - node_id: echo_node
+    node_type: deterministic
+    position: 1
+
+connections: []

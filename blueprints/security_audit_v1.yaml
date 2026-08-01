@@ -1,0 +1,91 @@
+chain_id: security-audit-v1
+name: Security Audit Reference Chain
+version: "1.0.0"
+description: >-
+  Governed security audit pipeline that assesses platform posture across
+  trust, registry, evidence, sandbox, and deployment domains.
+goal: >-
+  Given dashboard state and platform artifacts, audit all security domains,
+  aggregate findings by severity, compute audit score, and produce a
+  structured security audit report.
+
+nodes:
+  - node_id: asset_inventory_collector
+    node_type: deterministic
+    position: 1
+    config:
+      can_read_memory: false
+
+  - node_id: trust_posture_auditor
+    node_type: deterministic
+    position: 2
+    config:
+      governance_required: true
+
+  - node_id: registry_posture_auditor
+    node_type: deterministic
+    position: 3
+    config:
+      governance_required: true
+
+  - node_id: evidence_chain_auditor
+    node_type: deterministic
+    position: 4
+
+  - node_id: sandbox_policy_auditor
+    node_type: deterministic
+    position: 5
+
+  - node_id: deployment_risk_auditor
+    node_type: deterministic
+    position: 6
+
+  - node_id: audit_report_writer
+    node_type: deterministic
+    position: 7
+    config:
+      assurance_required: true
+
+connections:
+  - from_node: asset_inventory_collector
+    from_port: asset_inventory
+    to_node: trust_posture_auditor
+    to_port: asset_inventory
+
+  - from_node: trust_posture_auditor
+    from_port: trust_audit
+    to_node: registry_posture_auditor
+    to_port: trust_audit
+
+  - from_node: registry_posture_auditor
+    from_port: registry_audit
+    to_node: evidence_chain_auditor
+    to_port: registry_audit
+
+  - from_node: evidence_chain_auditor
+    from_port: evidence_audit
+    to_node: sandbox_policy_auditor
+    to_port: evidence_audit
+
+  - from_node: sandbox_policy_auditor
+    from_port: sandbox_audit
+    to_node: deployment_risk_auditor
+    to_port: sandbox_audit
+
+  - from_node: deployment_risk_auditor
+    from_port: deployment_audit
+    to_node: audit_report_writer
+    to_port: deployment_audit
+
+invariants:
+  - invariant_id: no-mutation-during-audit
+    description: Audit chain must not modify any platform state
+    enforcement: runtime
+
+  - invariant_id: all-findings-have-evidence
+    description: Every finding must reference a source artifact digest
+    enforcement: runtime
+
+  - invariant_id: severity-ranking
+    description: Findings must be ranked by severity (critical > degraded > warning)
+    enforcement: runtime
