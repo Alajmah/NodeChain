@@ -170,7 +170,4 @@ class ArxivAdapter(BaseSearchAdapter):
         raw = {"xml_content": fetch_result.text}
         results = self.normalize_response(raw, query)
 
-        for r in results:
-            r.adapter_latency_ms = fetch_result.latency_ms
-
-        return results
+        return self._finalize_results(results, fetch_result.latency_ms)

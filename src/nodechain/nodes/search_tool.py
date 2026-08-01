@@ -13,6 +13,15 @@ from nodechain.core.contract import (
 from nodechain.core.manifest import NodeManifest
 from nodechain.core.port import PortType
 from nodechain.adapters.search.base_search import SearchQuery, SearchAdapterError
+from nodechain.core.provenance import (
+    ProvenanceError,
+    ProvenanceFailureCode,
+    ProvenanceEntry,
+    validate_live_result,
+    merge_provenance_entries,
+    check_mode_consistency,
+    derive_dedup_origins,
+)
 from nodechain.nodes.base_node import BaseNode
 # v3.5.0: dispatch-integrity exceptions must escape the node (ChatGPT T3 gate)
 from nodechain.runtime.recovery_dispatch_guard import (
@@ -107,30 +116,35 @@ def _get_dedup_key(result: dict[str, Any]) -> str | None:
 def _deduplicate_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Deduplicate search results by DOI, stable ID, or normalized title.
 
-    Preserves provenance: when duplicates are merged, the origin_api list
-    is extended to show all contributing adapters.
+    Preserves complete provenance entries: when duplicates merge, each
+    contributing adapter's version/query/timestamp is retained.
+    Rejects mixed current/legacy/pre-version modes in deduplicated results.
     """
     seen: dict[str, dict[str, Any]] = {}
     no_key: list[dict[str, Any]] = []
 
     for result in results:
+        # FPV1: every result gets a provenance entry before dedup key check
+        entry = ProvenanceEntry.from_raw_result(result).to_dict()
+        if "provenance_entries" not in result.get("raw_data", {}):
+            result["raw_data"]["provenance_entries"] = [entry]
+            result["raw_data"]["_dedup_origins"] = derive_dedup_origins([entry])
+
         key = _get_dedup_key(result)
         if key is None:
             no_key.append(result)
             continue
 
+        entry = ProvenanceEntry.from_raw_result(result).to_dict()
+
         if key in seen:
-            # Merge: extend provenance
             existing = seen[key]
-            existing_origins = existing.get("raw_data", {}).get("_dedup_origins", [])
-            new_origin = result.get("origin_api", "")
-            if new_origin and new_origin not in existing_origins:
-                existing_origins.append(new_origin)
-                existing["raw_data"]["_dedup_origins"] = existing_origins
+            existing_entries = existing.get("raw_data", {}).get("provenance_entries", [])
+            merged = merge_provenance_entries(existing_entries, entry)
+            check_mode_consistency(merged)
+            existing["raw_data"]["provenance_entries"] = merged
+            existing["raw_data"]["_dedup_origins"] = derive_dedup_origins(merged)
         else:
-            # First occurrence — initialize provenance tracking
-            origin = result.get("origin_api", "")
-            result["raw_data"]["_dedup_origins"] = [origin] if origin else []
             seen[key] = result
 
     return list(seen.values()) + no_key
@@ -361,7 +375,16 @@ class SearchToolNode(BaseNode):
                 try:
                     results = await adapter.search(query)
                     for r in results:
-                        all_results.append(r.model_dump())
+                        d = r.model_dump()
+                        # FPV1: detect unstamped before serialization
+                        if r.provenance_version is None:
+                            raise ProvenanceError(
+                                ProvenanceFailureCode.PROVENANCE_VERSION_MISSING_LIVE,
+                                f"result index {len(all_results)}: unstamped live result "
+                                f"(adapter did not route through _finalize_results)",
+                            )
+                        validate_live_result(d, len(all_results))
+                        all_results.append(d)
                     adapters_called.append(adapter_name)
                     # v2.69: track per-adapter result count for visibility
                     adapter_result_counts[adapter_name] = (
@@ -371,6 +394,10 @@ class SearchToolNode(BaseNode):
                     # v3.5.0 (ChatGPT T3 gate): dispatch-integrity violations
                     # must NOT be swallowed as adapter failures. They must
                     # propagate so the coordinator/classifier can handle them.
+                    raise
+                except ProvenanceError:
+                    # FPV1: provenance-integrity violations must propagate,
+                    # not be swallowed as adapter failures.
                     raise
                 except SearchAdapterError as e:
                     # Structured failure from the adapter layer (v2.57.0)
@@ -426,7 +453,15 @@ class SearchToolNode(BaseNode):
                     try:
                         results = await adapter.search(rescue_query)
                         for r in results:
-                            all_results.append(r.model_dump())
+                            d = r.model_dump()
+                            if r.provenance_version is None:
+                                raise ProvenanceError(
+                                    ProvenanceFailureCode.PROVENANCE_VERSION_MISSING_LIVE,
+                                    f"result index {len(all_results)}: unstamped live result "
+                                    f"(adapter did not route through _finalize_results)",
+                                )
+                            validate_live_result(d, len(all_results))
+                            all_results.append(d)
                         adapters_called.append(adapter_name)
                         rescue_attempted.append(adapter_name)
                         # v2.69: track rescue per-adapter result count
@@ -435,6 +470,9 @@ class SearchToolNode(BaseNode):
                         )
                     except (OrdinaryDispatchError, RecoveryDispatchError):
                         # v3.5.0 (ChatGPT T3 gate): must propagate, not swallowed
+                        raise
+                    except ProvenanceError:
+                        # FPV1: provenance-integrity violations must propagate
                         raise
                     except (SearchAdapterError, Exception) as e:
                         err_msg = e.failure.message if isinstance(e, SearchAdapterError) else str(e)

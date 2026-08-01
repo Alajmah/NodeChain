@@ -43,6 +43,7 @@ def _make_envelope(
 
 def _mock_adapter(name: str, results: list[dict] | None = None):
     """Create a mock adapter that returns given results or raises."""
+    from nodechain.core.provenance import CURRENT_PROVENANCE_VERSION
     adapter = MagicMock()
     if results is not None:
         mock_results = []
@@ -52,6 +53,7 @@ def _mock_adapter(name: str, results: list[dict] | None = None):
                 raw_data=r,
                 query_used="test query",
                 retrieved_at="2026-07-01T00:00:00Z",
+                provenance_version=CURRENT_PROVENANCE_VERSION,
             ))
         adapter.search = AsyncMock(return_value=mock_results)
     else:

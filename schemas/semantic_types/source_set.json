@@ -10,7 +10,7 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["source_id", "origin_api", "title"],
+        "required": ["source_id", "origin_api", "title", "provenance"],
         "properties": {
           "source_id": { "type": "string" },
           "origin_api": {
@@ -34,13 +34,80 @@
           "pdf_url": { "type": "string" },
           "credibility_signals": { "type": "object", "additionalProperties": true },
           "provenance": {
-            "type": "object",
-            "required": ["adapter", "query", "retrieval_timestamp"],
-            "properties": {
-              "adapter": { "type": "string" },
-              "query": { "type": "string" },
-              "retrieval_timestamp": { "type": "string", "format": "date-time" }
-            }
+            "oneOf": [
+              {
+                "type": "object",
+                "required": ["mode", "version", "entries", "adapter", "query", "retrieval_timestamp"],
+                "properties": {
+                  "mode": { "type": "string", "const": "current" },
+                  "version": { "type": "integer", "const": 1 },
+                  "entries": {
+                    "type": "array", "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "required": ["version", "adapter", "query", "retrieval_timestamp"],
+                      "properties": {
+                        "version": { "type": "integer", "const": 1 },
+                        "adapter": { "type": "string", "minLength": 1 },
+                        "query": { "type": "string", "minLength": 1 },
+                        "retrieval_timestamp": { "type": "string", "minLength": 1, "format": "date-time" }
+                      }
+                    }
+                  },
+                  "adapter": { "type": "string" },
+                  "query": { "type": "string" },
+                  "retrieval_timestamp": { "type": "string", "format": "date-time" }
+                }
+              },
+              {
+                "type": "object",
+                "required": ["mode", "version", "entries", "adapter", "query", "retrieval_timestamp"],
+                "properties": {
+                  "mode": { "type": "string", "const": "legacy" },
+                  "version": { "type": "integer", "const": 0 },
+                  "entries": {
+                    "type": "array", "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "required": ["version", "adapter", "query", "retrieval_timestamp"],
+                      "properties": {
+                        "version": { "type": "integer", "const": 0 },
+                        "adapter": { "type": "string", "minLength": 1 },
+                        "query": { "type": "string", "minLength": 1 },
+                        "retrieval_timestamp": { "type": "string", "minLength": 1, "format": "date-time" }
+                      }
+                    }
+                  },
+                  "adapter": { "type": "string" },
+                  "query": { "type": "string" },
+                  "retrieval_timestamp": { "type": "string", "format": "date-time" }
+                }
+              },
+              {
+                "type": "object",
+                "required": ["mode", "version", "entries", "adapter", "query", "retrieval_timestamp"],
+                "properties": {
+                  "mode": { "type": "string", "const": "pre_version" },
+                  "version": { "type": "null" },
+                  "entries": {
+                    "type": "array", "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "required": ["version", "adapter", "query", "retrieval_timestamp"],
+                      "properties": {
+                        "version": { "type": "null" },
+                        "adapter": { "type": "string", "minLength": 1 },
+                        "query": { "type": "string", "minLength": 1 },
+                        "retrieval_timestamp": { "type": "string", "minLength": 1, "format": "date-time" }
+                      }
+                    }
+                  },
+                  "adapter": { "type": "string" },
+                  "query": { "type": "string" },
+                  "retrieval_timestamp": { "type": "string", "format": "date-time" }
+                }
+              }
+            ]
           }
         }
       }
