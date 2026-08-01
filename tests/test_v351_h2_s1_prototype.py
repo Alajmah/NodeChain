@@ -44,6 +44,30 @@ def _libc():
     return libc
 
 
+def _minimal_python_exec_env() -> dict[str, str]:
+    """Build the minimal environment required to re-exec this interpreter.
+
+    The bootstrap and workload processes re-exec ``sys.executable`` across two
+    ``execve`` boundaries with an explicit (replaced) environment. If that
+    environment omits ``LD_LIBRARY_PATH``, a relocated CPython (e.g. the
+    ``actions/setup-python`` tool-cache build whose bundled ``libpython`` is
+    not on the default system loader path) fails to resolve its shared
+    libraries and cannot import ``ctypes`` — so the bootstrap dies before it
+    can call ``ptrace``.
+
+    Only ``PATH`` and ``LD_LIBRARY_PATH`` are carried: the loader path is the
+    one variable the relocated interpreter genuinely needs. The complete
+    ambient environment is deliberately NOT propagated — credentials, tokens,
+    proxy variables, ``PYTHONPATH`` and unrelated runner state stay out of the
+    spawned prototype.
+    """
+    env: dict[str, str] = {"PATH": "/usr/bin:/bin"}
+    loader_path = os.environ.get("LD_LIBRARY_PATH")
+    if loader_path:
+        env["LD_LIBRARY_PATH"] = loader_path
+    return env
+
+
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux-only ptrace test")
 class TestS1ExecEventPrototype:
     """Prove PTRACE_EVENT_EXEC works in the supervisor topology."""
@@ -66,6 +90,7 @@ class TestS1ExecEventPrototype:
         # Create the bootstrap script.
         bootstrap = tmp_path / "bootstrap.py"
         workload_str = str(workload)
+        exec_env = _minimal_python_exec_env()
         bootstrap.write_text(
             "import ctypes, os, signal, sys\n"
             "libc = ctypes.CDLL(None, use_errno=True)\n"
@@ -76,8 +101,7 @@ class TestS1ExecEventPrototype:
             f"    print(f'PTRACE_TRACEME failed errno={{ctypes.get_errno()}}', file=sys.stderr, flush=True)\n"
             f"    os._exit(126)\n"
             "os.kill(os.getpid(), signal.SIGSTOP)\n"
-            f"os.execve(sys.executable, [sys.executable, '{workload_str}'],\n"
-            f"          {{'PATH': '/usr/bin:/bin'}})\n"
+            f"os.execve(sys.executable, [sys.executable, '{workload_str}'], {exec_env!r})\n"
             "os._exit(127)\n"
         )
 
@@ -89,7 +113,7 @@ class TestS1ExecEventPrototype:
         if pid == 0:
             os.execve(sys.executable,
                       [sys.executable, str(bootstrap), str(workload)],
-                      {"PATH": "/usr/bin:/bin"})
+                      exec_env)
             os._exit(127)
 
         # === SUPERVISOR ===
@@ -174,7 +198,7 @@ class TestS1ExecEventPrototype:
         if pid == 0:
             os.execve(sys.executable,
                       [sys.executable, str(bootstrap)],
-                      {"PATH": "/usr/bin:/bin"})
+                      _minimal_python_exec_env())
             os._exit(127)
 
         # Wait for SIGSTOP.
@@ -223,3 +247,30 @@ class TestS1ExecEventPrototype:
         assert os.WTERMSIG(final_status) == signal.SIGKILL, (
             f"expected SIGKILL, got signal {os.WTERMSIG(final_status)}"
         )
+
+
+class TestMinimalPythonExecEnv:
+    """CI-H1: the loader-path-preserving helper is hermetic on every platform.
+
+    These cover the environment-stripping regression directly so the helper's
+    contract is pinned independently of the (Linux-only) ptrace tests.
+    """
+
+    def test_ld_library_path_present_preserves_path_and_loader(self, monkeypatch):
+        monkeypatch.setenv("LD_LIBRARY_PATH", "/opt/python/x64/lib")
+        env = _minimal_python_exec_env()
+        assert env["PATH"] == "/usr/bin:/bin"
+        assert env["LD_LIBRARY_PATH"] == "/opt/python/x64/lib"
+
+    def test_ld_library_path_present_excludes_unrelated_variables(self, monkeypatch):
+        monkeypatch.setenv("LD_LIBRARY_PATH", "/opt/python/x64/lib")
+        monkeypatch.setenv("PYTHONPATH", "/should/not/leak")
+        monkeypatch.setenv("GH_TOKEN", "should_not_leak")
+        monkeypatch.setenv("https_proxy", "http://should.not.leak:3128")
+        env = _minimal_python_exec_env()
+        assert env == {"PATH": "/usr/bin:/bin", "LD_LIBRARY_PATH": "/opt/python/x64/lib"}
+
+    def test_ld_library_path_absent_is_exactly_path(self, monkeypatch):
+        monkeypatch.delenv("LD_LIBRARY_PATH", raising=False)
+        env = _minimal_python_exec_env()
+        assert env == {"PATH": "/usr/bin:/bin"}
