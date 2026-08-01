@@ -27,7 +27,8 @@ class TestQuickstartSmoke:
         """scripts/validate_schemas.py runs and exits 0 (the first quickstart command)."""
         result = subprocess.run(
             [sys.executable, "scripts/validate_schemas.py"],
-            capture_output=True, text=True, cwd=str(REPO_ROOT), timeout=30,
+            capture_output=True, text=True, encoding="utf-8", errors="strict",
+            cwd=str(REPO_ROOT), timeout=30,
         )
         assert result.returncode == 0, (
             f"validate_schemas.py failed (exit {result.returncode}): {result.stderr[:300]}"
@@ -40,8 +41,10 @@ class TestQuickstartSmoke:
             [sys.executable, "-m", "nodechain.cli.main", "run",
              "hello nodechain", "-b", "blueprints/echo_demo_v1.yaml",
              "--provider", "mock"],
-            capture_output=True, text=True, cwd=str(REPO_ROOT), timeout=60,
-            env={**os.environ, "NODECHAIN_PROVIDER": "mock"},
+            capture_output=True, text=True, encoding="utf-8", errors="strict",
+            cwd=str(REPO_ROOT), timeout=60,
+            env={**os.environ, "NODECHAIN_PROVIDER": "mock",
+                 "PYTHONIOENCODING": "utf-8"},
         )
         assert result.returncode == 0, (
             f"echo demo failed (exit {result.returncode}): {result.stderr[:500]}"
@@ -57,8 +60,9 @@ class TestQuickstartSmoke:
             [sys.executable, "-m", "nodechain.cli.main", "run",
              "hello nodechain", "-b", "blueprints/echo_demo_v1.yaml",
              "--provider", "mock"],
-            capture_output=True, text=True, cwd=str(REPO_ROOT), timeout=60,
-            env=env,
+            capture_output=True, text=True, encoding="utf-8", errors="strict",
+            cwd=str(REPO_ROOT), timeout=60,
+            env={**env, "PYTHONIOENCODING": "utf-8"},
         )
         assert run_result.returncode == 0
 
@@ -73,7 +77,7 @@ class TestQuickstartSmoke:
         assert trace_file.exists(), f"trace file not found: {trace_file}"
 
         # Verify the trace file is valid JSON and has the expected shape
-        with open(trace_file) as f:
+        with open(trace_file, encoding="utf-8") as f:
             trace = json.load(f)
         assert trace["chain_id"] == "echo-demo-v1"
         assert trace["final_status"] == "completed"
@@ -82,7 +86,8 @@ class TestQuickstartSmoke:
         # Verify the trace inspection command works
         inspect_result = subprocess.run(
             [sys.executable, "-m", "nodechain.cli.main", "trace", run_id],
-            capture_output=True, text=True, cwd=str(REPO_ROOT), timeout=30,
+            capture_output=True, text=True, encoding="utf-8", errors="strict",
+            cwd=str(REPO_ROOT), timeout=30,
         )
         assert inspect_result.returncode == 0, (
             f"trace inspection failed: {inspect_result.stderr[:300]}"
@@ -97,8 +102,9 @@ class TestQuickstartSmoke:
             [sys.executable, "-m", "nodechain.cli.main", "run",
              "hello nodechain", "-b", "blueprints/echo_demo_v1.yaml",
              "--provider", "mock"],
-            capture_output=True, text=True, cwd=str(REPO_ROOT), timeout=60,
-            env=env,
+            capture_output=True, text=True, encoding="utf-8", errors="strict",
+            cwd=str(REPO_ROOT), timeout=60,
+            env={**env, "PYTHONIOENCODING": "utf-8"},
         )
         assert run_result.returncode == 0
 
@@ -112,7 +118,8 @@ class TestQuickstartSmoke:
         replay_result = subprocess.run(
             [sys.executable, "-m", "nodechain.cli.main", "trace-replay", "run",
              "--trace", str(trace_path)],
-            capture_output=True, text=True, cwd=str(REPO_ROOT), timeout=30,
+            capture_output=True, text=True, encoding="utf-8", errors="strict",
+            cwd=str(REPO_ROOT), timeout=30,
         )
         assert replay_result.returncode == 0, (
             f"trace-replay failed: {replay_result.stderr[:300]}"

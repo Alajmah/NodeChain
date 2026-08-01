@@ -42,31 +42,31 @@ def _extract_latest_changelog_version(text: str) -> str:
 
 def test_pyproject_matches_runtime():
     """pyproject.toml version must match nodechain.__version__."""
-    pyproject = (REPO_ROOT / "pyproject.toml").read_text()
+    pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert _extract_version_from_pyproject(pyproject) == nodechain.__version__
 
 
 def test_ci_docs_match_runtime():
     """docs/ci.md current-version statement must match nodechain.__version__."""
-    ci_md = (REPO_ROOT / "docs" / "ci.md").read_text()
+    ci_md = (REPO_ROOT / "docs" / "ci.md").read_text(encoding="utf-8")
     assert _extract_version_from_ci_md(ci_md) == nodechain.__version__
 
 
 def test_readme_status_matches_runtime():
     """README.md Status section must match nodechain.__version__."""
-    readme = (REPO_ROOT / "README.md").read_text()
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     assert _extract_version_from_readme(readme) == nodechain.__version__
 
 
 def test_changelog_latest_matches_runtime():
     """CHANGELOG.md latest entry must match nodechain.__version__."""
-    changelog = (REPO_ROOT / "CHANGELOG.md").read_text()
+    changelog = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     assert _extract_latest_changelog_version(changelog) == nodechain.__version__
 
 
 def test_architecture_md_current_version_matches_runtime():
     """ARCHITECTURE.md historical-document note must state the current version."""
-    arch = (REPO_ROOT / "ARCHITECTURE.md").read_text()
+    arch = (REPO_ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
     m = re.search(r"The current version is v([\d.]+)\b", arch)
     assert m, "ARCHITECTURE.md must state a current version"
     assert m.group(1) == nodechain.__version__
