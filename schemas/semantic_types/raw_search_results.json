@@ -9,16 +9,41 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["origin_api", "raw_data"],
+        "required": ["origin_api", "raw_data", "query_used", "retrieved_at", "provenance_version"],
         "properties": {
           "origin_api": {
             "type": "string",
             "enum": ["semantic_scholar", "arxiv", "openalex", "crossref", "pubmed", "chroma_local"]
           },
-          "raw_data": { "type": "object", "additionalProperties": true },
-          "query_used": { "type": "string" },
+          "raw_data": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["provenance_entries"],
+            "properties": {
+              "provenance_entries": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["version", "adapter", "query", "retrieval_timestamp"],
+                  "properties": {
+                    "version": { "type": "integer", "const": 1 },
+                    "adapter": { "type": "string", "minLength": 1 },
+                    "query": { "type": "string", "minLength": 1 },
+                    "retrieval_timestamp": { "type": "string", "minLength": 1, "format": "date-time" }
+                  }
+                }
+              },
+              "_dedup_origins": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          },
+          "query_used": { "type": "string", "minLength": 1 },
           "retrieved_at": { "type": "string", "format": "date-time" },
-          "adapter_latency_ms": { "type": "integer" }
+          "adapter_latency_ms": { "type": "integer" },
+          "provenance_version": { "type": "integer", "const": 1 }
         }
       }
     },

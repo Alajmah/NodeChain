@@ -25,6 +25,11 @@ from nodechain.adapters.search.failure_types import (
     classify_http_status,
 )
 from nodechain.adapters.search.circuit_breaker import CircuitBreaker
+from nodechain.core.provenance import (
+    CURRENT_PROVENANCE_VERSION,
+    ProvenanceError,
+    ProvenanceFailureCode,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,13 +43,18 @@ class SearchQuery(BaseModel):
 
 
 class SearchAdapterResult(BaseModel):
-    """Normalized result from a single search adapter."""
+    """Normalized result from a single search adapter.
+
+    provenance_version is stamped centrally by BaseSearchAdapter.search()
+    and must never be set by individual adapters.
+    """
 
     origin_api: str
     raw_data: dict[str, Any]
     query_used: str
     retrieved_at: str
     adapter_latency_ms: int = 0
+    provenance_version: int | None = None  # stamped by search(), not by adapters
 
 
 class BaseSearchAdapter(ABC):
@@ -297,7 +307,12 @@ class BaseSearchAdapter(ABC):
         return self._circuit.to_dict()
 
     async def search(self, query: SearchQuery) -> list[SearchAdapterResult]:
-        """Execute a search through this adapter using the shared _fetch()."""
+        """Execute a search through this adapter using the shared _fetch().
+
+        This is the single authoritative current-version stamping boundary.
+        After normalize_response, every result is stamped with
+        CURRENT_PROVENANCE_VERSION. Adapters must not set it themselves.
+        """
         await self._respect_rate_limit()
 
         url = self.build_url(query)
@@ -321,9 +336,41 @@ class BaseSearchAdapter(ABC):
         results = self.normalize_response(fetch_result.data or {}, query)
         elapsed_ms = int((time.time() - start) * 1000) + fetch_result.latency_ms
 
-        # Stamp latency
+        return self._finalize_results(results, elapsed_ms)
+
+    def _finalize_results(
+        self, results: list[SearchAdapterResult], elapsed_ms: int
+    ) -> list[SearchAdapterResult]:
+        """Shared finalization: stamp latency + provenance version.
+
+        Rejects ANY adapter-supplied provenance version (including 1).
+        The version is exclusively set by this central boundary.
+        Called by base search(), arXiv search(), and PubMed search().
+        """
         for r in results:
             r.adapter_latency_ms = elapsed_ms
+            # Reject ANY adapter-supplied version, including explicit None
+            if "provenance_version" in r.model_fields_set:
+                raise ProvenanceError(
+                    ProvenanceFailureCode.PROVENANCE_VERSION_CONFLICT,
+                    f"adapter {self.adapter_name} supplied provenance_version="
+                    f"{r.provenance_version}; version must not be set by adapters",
+                )
+            # Reject adapter-supplied reserved provenance fields
+            if "provenance_entries" in r.raw_data:
+                raise ProvenanceError(
+                    ProvenanceFailureCode.PROVENANCE_VERSION_CONFLICT,
+                    f"adapter {self.adapter_name} supplied reserved "
+                    f"raw_data.provenance_entries",
+                )
+            if "_dedup_origins" in r.raw_data:
+                raise ProvenanceError(
+                    ProvenanceFailureCode.PROVENANCE_VERSION_CONFLICT,
+                    f"adapter {self.adapter_name} supplied reserved "
+                    f"raw_data._dedup_origins",
+                )
+            # Central authoritative stamping
+            r.provenance_version = CURRENT_PROVENANCE_VERSION
 
         return results
 

@@ -1,0 +1,119 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "nodechain://schemas/semantic_types/raw_search_results_compat",
+  "title": "RawSearchResultsCompat",
+  "description": "Compatibility input schema for SourceIngestionNode. Permits current, legacy, and pre-version records with mode-enforced constraints.",
+  "type": "object",
+  "required": ["results"],
+  "properties": {
+    "results": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["origin_api", "raw_data", "query_used", "retrieved_at", "provenance_version"],
+            "properties": {
+              "origin_api": { "type": "string", "minLength": 1 },
+              "raw_data": {
+                "type": "object",
+                "required": ["provenance_entries"],
+                "properties": {
+                  "provenance_entries": {
+                    "type": "array", "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "required": ["version", "adapter", "query", "retrieval_timestamp"],
+                      "properties": {
+                        "version": { "type": "integer", "const": 1 },
+                        "adapter": { "type": "string", "minLength": 1 },
+                        "query": { "type": "string", "minLength": 1 },
+                        "retrieval_timestamp": { "type": "string", "minLength": 1, "format": "date-time" }
+                      }
+                    }
+                  },
+                  "_dedup_origins": { "type": "array", "items": { "type": "string" } }
+                },
+                "additionalProperties": true
+              },
+              "query_used": { "type": "string", "minLength": 1 },
+              "retrieved_at": { "type": "string", "format": "date-time" },
+              "adapter_latency_ms": { "type": "integer" },
+              "provenance_version": { "type": "integer", "const": 1 }
+            },
+            "additionalProperties": true
+          },
+          {
+            "type": "object",
+            "required": ["origin_api", "raw_data", "query_used", "retrieved_at", "provenance_version"],
+            "properties": {
+              "origin_api": { "type": "string", "minLength": 1 },
+              "raw_data": {
+                "type": "object",
+                "properties": {
+                  "provenance_entries": {
+                    "type": "array", "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "required": ["version", "adapter", "query", "retrieval_timestamp"],
+                      "properties": {
+                        "version": { "type": "integer", "const": 0 },
+                        "adapter": { "type": "string", "minLength": 1 },
+                        "query": { "type": "string", "minLength": 1 },
+                        "retrieval_timestamp": { "type": "string", "minLength": 1, "format": "date-time" }
+                      }
+                    }
+                  },
+                  "_dedup_origins": { "type": "array", "items": { "type": "string" } }
+                },
+                "additionalProperties": true
+              },
+              "query_used": { "type": "string", "minLength": 1 },
+              "retrieved_at": { "type": "string", "format": "date-time" },
+              "adapter_latency_ms": { "type": "integer" },
+              "provenance_version": { "type": "integer", "const": 0 }
+            },
+            "additionalProperties": true
+          },
+          {
+            "type": "object",
+            "required": ["origin_api", "raw_data", "query_used", "retrieved_at"],
+            "properties": {
+              "origin_api": { "type": "string", "minLength": 1 },
+              "raw_data": {
+                "type": "object",
+                "properties": {
+                  "provenance_entries": {
+                    "type": "array", "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "required": ["version", "adapter", "query", "retrieval_timestamp"],
+                      "properties": {
+                        "version": { "type": "null" },
+                        "adapter": { "type": "string", "minLength": 1 },
+                        "query": { "type": "string", "minLength": 1 },
+                        "retrieval_timestamp": { "type": "string", "minLength": 1, "format": "date-time" }
+                      }
+                    }
+                  },
+                  "_dedup_origins": { "type": "array", "items": { "type": "string" } }
+                },
+                "additionalProperties": true
+              },
+              "query_used": { "type": "string", "minLength": 1 },
+              "retrieved_at": { "type": "string", "format": "date-time" },
+              "adapter_latency_ms": { "type": "integer" }
+            },
+            "propertyNames": {
+              "not": { "const": "provenance_version" }
+            },
+            "additionalProperties": true
+          }
+        ]
+      }
+    },
+    "total_found": { "type": "integer" },
+    "adapters_called": { "type": "array", "items": { "type": "string" } },
+    "adapters_failed": { "type": "array" }
+  }
+}

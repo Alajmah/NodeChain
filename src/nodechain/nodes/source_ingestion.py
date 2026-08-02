@@ -13,7 +13,201 @@ from nodechain.core.contract import (
 )
 from nodechain.core.manifest import NodeManifest
 from nodechain.core.port import PortType
+from nodechain.core.provenance import (
+    CURRENT_PROVENANCE_VERSION,
+    LEGACY_PROVENANCE_VERSION,
+    ProvenanceClassification,
+    ProvenanceError,
+    ProvenanceFailureCode,
+    ProvenanceMode,
+    _is_strict_int,
+    classify_for_ingestion,
+    classification_to_mode,
+    is_ingestible,
+    is_valid_timestamp,
+)
 from nodechain.nodes.base_node import BaseNode
+
+
+def _validate_entry_strict(
+    entry: dict[str, Any],
+    expected_version: int | None,
+    context: str,
+) -> None:
+    """Strictly validate a single provenance entry.
+
+    Uses the correct failure code for the entry's expected mode.
+    """
+    # Determine incomplete failure code based on expected version
+    if expected_version == CURRENT_PROVENANCE_VERSION:
+        incomplete_code = ProvenanceFailureCode.PROVENANCE_CURRENT_INCOMPLETE
+    elif expected_version == LEGACY_PROVENANCE_VERSION:
+        incomplete_code = ProvenanceFailureCode.PROVENANCE_LEGACY_INCOMPLETE
+    else:
+        incomplete_code = ProvenanceFailureCode.PROVENANCE_PRE_VERSION_INCOMPLETE
+
+    # Check required fields are non-blank strings
+    for f in ("adapter", "query", "retrieval_timestamp"):
+        val = entry.get(f)
+        if not isinstance(val, str) or val.strip() == "":
+            raise ProvenanceError(
+                incomplete_code,
+                f"{context}: entry field '{f}' missing or non-string",
+            )
+
+    # Validate timestamp is RFC 3339 date-time
+    if not is_valid_timestamp(entry.get("retrieval_timestamp", "")):
+        raise ProvenanceError(
+            incomplete_code,
+            f"{context}: invalid retrieval_timestamp {entry.get('retrieval_timestamp')!r}",
+        )
+
+    # Check version matches expected
+    ev = entry.get("version")
+    if expected_version is None:
+        # Pre-version: entry version must be None
+        if ev is not None:
+            raise ProvenanceError(
+                ProvenanceFailureCode.PROVENANCE_VERSION_CONFLICT,
+                f"{context}: pre-version record with entry version {ev}",
+            )
+    else:
+        if not _is_strict_int(ev):
+            raise ProvenanceError(
+                ProvenanceFailureCode.PROVENANCE_VERSION_MALFORMED,
+                f"{context}: entry version not a strict int: {ev!r}",
+            )
+        if ev != expected_version:
+            raise ProvenanceError(
+                ProvenanceFailureCode.PROVENANCE_MODE_MIXED,
+                f"{context}: entry version {ev} != expected {expected_version}",
+            )
+
+
+def _build_normalized_provenance(raw: dict[str, Any]) -> dict[str, Any]:
+    """Build normalized provenance from a raw search result.
+
+    Applies compatibility decoding on the raw dictionary before any
+    Pydantic defaults. Validates all authoritative entries strictly.
+    """
+    c = classify_for_ingestion(raw)
+    if not is_ingestible(c):
+        # Map classification to correct failure code
+        if c == ProvenanceClassification.MALFORMED_VERSION:
+            code = ProvenanceFailureCode.PROVENANCE_VERSION_MALFORMED
+        elif c == ProvenanceClassification.UNKNOWN_VERSION:
+            code = ProvenanceFailureCode.PROVENANCE_VERSION_UNKNOWN
+        elif c == ProvenanceClassification.CURRENT_INCOMPLETE:
+            code = ProvenanceFailureCode.PROVENANCE_CURRENT_INCOMPLETE
+        elif c == ProvenanceClassification.LEGACY_INCOMPLETE:
+            code = ProvenanceFailureCode.PROVENANCE_LEGACY_INCOMPLETE
+        elif c == ProvenanceClassification.PRE_VERSION_INCOMPLETE:
+            code = ProvenanceFailureCode.PROVENANCE_PRE_VERSION_INCOMPLETE
+        else:
+            code = ProvenanceFailureCode.PROVENANCE_VERSION_MALFORMED
+        raise ProvenanceError(code, f"ingestion rejected: {c.value}")
+
+    mode = classification_to_mode(c)
+
+    if c in (ProvenanceClassification.CURRENT_COMPLETE,):
+        norm_version = CURRENT_PROVENANCE_VERSION
+    elif c == ProvenanceClassification.LEGACY_COMPLETE:
+        norm_version = LEGACY_PROVENANCE_VERSION
+    else:
+        norm_version = None  # pre_version
+
+    # Determine incomplete failure code based on expected version
+    if norm_version == CURRENT_PROVENANCE_VERSION:
+        incomplete_code = ProvenanceFailureCode.PROVENANCE_CURRENT_INCOMPLETE
+    elif norm_version == LEGACY_PROVENANCE_VERSION:
+        incomplete_code = ProvenanceFailureCode.PROVENANCE_LEGACY_INCOMPLETE
+    else:
+        incomplete_code = ProvenanceFailureCode.PROVENANCE_PRE_VERSION_INCOMPLETE
+
+    # R6: Validate the top-level retrieved_at for EVERY ingestible record.
+    # The flat retrieved_at is propagated to the output (retrieval_timestamp)
+    # regardless of whether provenance_entries are present, so it must be a
+    # semantically valid RFC 3339 timestamp here — including for records that
+    # already carry validated entries.
+    retrieved_at = raw.get("retrieved_at", "")
+    if not is_valid_timestamp(retrieved_at):
+        raise ProvenanceError(
+            incomplete_code,
+            f"invalid top-level retrieved_at: {retrieved_at!r}",
+        )
+
+    # Build and validate entries
+    entries: list[dict[str, Any]] = []
+    raw_data = raw.get("raw_data", {})
+    entries_key_present = "provenance_entries" in raw_data
+    raw_entries = raw_data.get("provenance_entries")
+
+    if entries_key_present:
+        # Key is present — must be non-empty list of objects
+        if not isinstance(raw_entries, list):
+            raise ProvenanceError(
+                ProvenanceFailureCode.PROVENANCE_VERSION_MALFORMED,
+                f"provenance_entries is not a list: {type(raw_entries).__name__}",
+            )
+        if len(raw_entries) == 0:
+            raise ProvenanceError(
+                incomplete_code,
+                "provenance_entries is explicitly empty",
+            )
+        for i, e in enumerate(raw_entries):
+            if not isinstance(e, dict):
+                raise ProvenanceError(
+                    ProvenanceFailureCode.PROVENANCE_VERSION_MALFORMED,
+                    f"entry[{i}] is not an object",
+                )
+            _validate_entry_strict(e, norm_version, f"entry[{i}]")
+            entries.append({
+                "version": e["version"],
+                "adapter": e["adapter"],
+                "query": e["query"],
+                "retrieval_timestamp": e["retrieval_timestamp"],
+            })
+    elif c == ProvenanceClassification.CURRENT_COMPLETE:
+        # Current version MUST have provenance_entries — no fallback allowed
+        raise ProvenanceError(
+            ProvenanceFailureCode.PROVENANCE_CURRENT_INCOMPLETE,
+            "current record missing provenance_entries (no fallback for current)",
+        )
+    else:
+        # Legacy or pre-version: bounded flat-field fallback may synthesize
+        entry = {
+            "version": norm_version,
+            "adapter": raw.get("origin_api", ""),
+            "query": raw.get("query_used", ""),
+            "retrieval_timestamp": raw.get("retrieved_at", ""),
+        }
+        _validate_entry_strict(entry, norm_version, "top-level")
+        entries.append(entry)
+
+    # Deduplicate and sort canonically
+    seen_keys: set[tuple] = set()
+    deduped: list[dict[str, Any]] = []
+    for e in entries:
+        key = (e["version"], e["adapter"], e["query"], e["retrieval_timestamp"])
+        if key not in seen_keys:
+            seen_keys.add(key)
+            deduped.append(e)
+    entries = sorted(deduped, key=lambda e: (
+        e.get("version") if e.get("version") is not None else -1,
+        e.get("adapter", ""),
+        e.get("query", ""),
+        e.get("retrieval_timestamp", ""),
+    ))
+
+    return {
+        "mode": mode.value,
+        "version": norm_version,
+        "entries": entries,
+        # Backward-compatible flat fields
+        "adapter": raw.get("origin_api", ""),
+        "query": raw.get("query_used", ""),
+        "retrieval_timestamp": raw.get("retrieved_at", ""),
+    }
 
 
 SOURCE_INGESTION_CONTRACT = NodeContract(
@@ -22,7 +216,7 @@ SOURCE_INGESTION_CONTRACT = NodeContract(
     version="1.0.0",
     entry=EntryContract(
         input_type=PortType.RAW_SEARCH_RESULTS,
-        schema_ref="nodechain://schemas/semantic_types/raw_search_results",
+        schema_ref="nodechain://schemas/semantic_types/raw_search_results_compat",
         required_fields=["results"],
     ),
     exit=ExitContract(
@@ -217,6 +411,9 @@ class SourceIngestionNode(BaseNode):
         by_origin: dict[str, int] = {}
 
         for raw in raw_results:
+            # FPV1: validate provenance BEFORE any content-quality filtering
+            provenance = _build_normalized_provenance(raw)
+
             origin = raw.get("origin_api", "")
             raw_data = raw.get("raw_data", {})
 
@@ -240,11 +437,7 @@ class SourceIngestionNode(BaseNode):
                 "source_id": str(uuid.uuid4()),
                 "origin_api": origin,
                 **normalized,
-                "provenance": {
-                    "adapter": origin,
-                    "query": raw.get("query_used", ""),
-                    "retrieval_timestamp": raw.get("retrieved_at", ""),
-                },
+                "provenance": provenance,
             }
 
             sources.append(source_record)

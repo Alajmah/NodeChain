@@ -152,10 +152,7 @@ class PubMedAdapter(BaseSearchAdapter):
         raw = {"articles": articles}
         results = self.normalize_response(raw, query)
 
-        for r in results:
-            r.adapter_latency_ms = elapsed_ms
-
-        return results
+        return self._finalize_results(results, elapsed_ms)
 
     def _parse_pubmed_xml(self, xml_content: str) -> list[dict[str, Any]]:
         """Parse PubMed XML into structured article dicts."""
