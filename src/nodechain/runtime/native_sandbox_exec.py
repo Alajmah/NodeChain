@@ -54,7 +54,10 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from nodechain.runtime.exec_supervisor import SupervisorExecutionEvidence
 
 
 def _build_child_script() -> str:

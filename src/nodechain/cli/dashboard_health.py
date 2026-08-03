@@ -1412,7 +1412,7 @@ class HR042BranchPolicyViolation(HealthRule):
             return {
                 "rule_id": self.rule_id,
                 "name": "branch_policy_violation",
-                "severity": UNHEALTHY,
+                "severity": CRITICAL,
                 "description": f"{violations} branch policy violation(s)",
                 "recommendation": "Review branch policy and investigate violation",
             }

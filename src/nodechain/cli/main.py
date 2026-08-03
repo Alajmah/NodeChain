@@ -13,6 +13,7 @@ from pathlib import Path
 import click
 
 from rich.console import Console
+from rich.panel import Panel
 
 from nodechain.cli.exit_codes import EXIT_OK, EXIT_NOT_FOUND, EXIT_TRUST_VIOLATION, EXIT_VALIDATION
 import hashlib

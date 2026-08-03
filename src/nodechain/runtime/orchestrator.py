@@ -6,7 +6,7 @@ import os
 import time
 from typing import Any
 
-from nodechain.core.blueprint import ChainBlueprint
+from nodechain.core.blueprint import BranchDef, ChainBlueprint
 from nodechain.core.contract import ContractRegistry
 from nodechain.core.envelope import (
     Capabilities,

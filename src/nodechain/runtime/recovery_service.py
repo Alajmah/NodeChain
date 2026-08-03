@@ -30,6 +30,7 @@ from nodechain.runtime.recovery_classifier import (
     classify,
 )
 from nodechain.runtime.recovery_policy import (
+    AuthorizationResult,
     OperatorActionPolicy,
     RecoveryAction,
 )
