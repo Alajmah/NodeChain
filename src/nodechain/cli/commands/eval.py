@@ -612,7 +612,7 @@ def eval_node_scorecard_cmd(node_id: str, all_shared: bool, output: str, json_on
         from pathlib import Path
         output_data = reports[0] if len(reports) == 1 else {"reports": reports}
         Path(output).write_text(
-            json_mod.dumps(output_data, indent=2, default=str),
+            json.dumps(output_data, indent=2, default=str),
             encoding="utf-8",
         )
         if not json_only:
@@ -620,7 +620,7 @@ def eval_node_scorecard_cmd(node_id: str, all_shared: bool, output: str, json_on
 
     if json_only:
         output_data = reports[0] if len(reports) == 1 else {"reports": reports}
-        console.print(json_mod.dumps(output_data, indent=2, default=str))
+        console.print(json.dumps(output_data, indent=2, default=str))
 
     ctx = click.get_current_context()
     ctx.exit(EXIT_OK if all_passed else EXIT_VALIDATION)

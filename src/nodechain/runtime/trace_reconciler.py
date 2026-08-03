@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from nodechain.core.state import StateManager
-from nodechain.core.trace import ChainTrace, EventType
+from nodechain.core.trace import ChainTrace, EventType, TraceEvent
 
 
 @dataclass

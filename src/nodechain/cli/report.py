@@ -563,7 +563,7 @@ def _build_report_dict(state, completed_steps, side_effects, reconciliation=None
     # Trust summary
     try:
         from nodechain.sdk.trust_summary import TrustSummary, NodeTrustRecord
-        trust = TrustSummary(run_id=run_id)
+        trust = TrustSummary(run_id=state.run_id)
         trust.lockfile_verified = report.get("lockfile_verified", "missing") == "verified"
         trust.locked_mode = report.get("locked_mode", False)
         # v1.3.6: populate preset info from env
