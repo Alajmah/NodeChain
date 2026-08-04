@@ -103,11 +103,11 @@ class TestVersionConsistency:
 
     def test_init_version(self):
         import nodechain
-        assert nodechain.__version__ == "3.5.1"
+        assert nodechain.__version__ == "3.6.0"
 
     def test_pyproject_version(self):
         toml = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
-        assert 'version = "3.5.1"' in toml
+        assert 'version = "3.6.0"' in toml
 
     def test_release_guard_version(self):
         import importlib.util
@@ -117,4 +117,4 @@ class TestVersionConsistency:
         )
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        assert mod.EXPECTED_VERSION == "3.5.1"
+        assert mod.EXPECTED_VERSION == "3.6.0"

@@ -547,6 +547,13 @@ CLI → blueprint → default (none).
 
 ## Status
 
+**v3.6.0 — First Public-Era Release**
+
+Flat-result provenance versioning v1, public development governance,
+blocking Ruff undefined-name gate, twelve protected hosted checks,
+cross-platform Publication Tree qualification, Windows test timeout
+headroom of 90 minutes, and Node 24 GitHub Actions runtime.
+
 **v3.5.1 — PID-Namespace Supervised Execution Hardening**
 
 Native asynchronous supervised-protocol ownership with exact

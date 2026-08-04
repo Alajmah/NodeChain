@@ -462,7 +462,7 @@ class TestCIMode:
 class TestV180Version:
     def test_version_is_1_8_0(self):
         import nodechain
-        assert nodechain.__version__ == "3.5.1"
+        assert nodechain.__version__ == "3.6.0"
 
     def test_changelog_has_v180(self):
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
@@ -631,7 +631,7 @@ class TestExpectationChecks:
 class TestV181Version:
     def test_version_is_1_8_1(self):
         import nodechain
-        assert nodechain.__version__ == "3.5.1"
+        assert nodechain.__version__ == "3.6.0"
 
     def test_changelog_has_v181(self):
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
@@ -769,7 +769,7 @@ class TestVerifierProfile:
 class TestV182Version:
     def test_version_is_1_8_2(self):
         import nodechain
-        assert nodechain.__version__ == "3.5.1"
+        assert nodechain.__version__ == "3.6.0"
 
     def test_changelog_has_v182(self):
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
@@ -1049,7 +1049,7 @@ class TestProfileSignatureVerification:
 class TestV183Version:
     def test_version_is_1_8_3(self):
         import nodechain
-        assert nodechain.__version__ == "3.5.1"
+        assert nodechain.__version__ == "3.6.0"
 
     def test_changelog_has_v183(self):
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")

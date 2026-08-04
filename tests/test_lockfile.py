@@ -255,18 +255,18 @@ class TestVersionConsistency:
     def test_runtime_version_is_1_6_0(self):
         """AC9: __version__ matches latest tag."""
         from nodechain import __version__
-        assert __version__ == "3.5.1"
+        assert __version__ == "3.6.0"
 
     def test_policy_enforcer_uses_correct_version(self):
         """AC9: Policy enforcer reads correct runtime version."""
         enforcer = PackagePolicyEnforcer()
-        assert enforcer.runtime_version == "3.5.1"
+        assert enforcer.runtime_version == "3.6.0"
 
     def test_lockfile_records_correct_version(self, tmp_path):
         """AC9: Lockfile records correct nodechain version."""
         out = tmp_path / "test.lock.json"
         lf = generate_lockfile(output_path=out)
-        assert lf["nodechain_version"] == "3.5.1"
+        assert lf["nodechain_version"] == "3.6.0"
 
 
 class TestMultiNodeHashing:

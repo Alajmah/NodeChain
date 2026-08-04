@@ -3,8 +3,8 @@
 > **Build a node once. Govern it forever. Reuse it everywhere.**
 
 **Status:** Canonical strategic document
-**Current version:** v3.5.1
-**Last updated:** 2026-07-14
+**Current version:** v3.6.0
+**Last updated:** 2026-08-04
 
 This document is the single source of truth for what NodeChain is, why it
 exists, what it has built, and where it is going. It exists because the

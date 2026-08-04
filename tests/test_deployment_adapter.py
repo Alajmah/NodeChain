@@ -523,7 +523,7 @@ class TestReceiptTypeDistinction:
 class TestV1100Version:
     def test_version_is_1_10_0(self):
         import nodechain
-        assert nodechain.__version__ == "3.5.1"
+        assert nodechain.__version__ == "3.6.0"
 
     def test_changelog_has_v1100(self):
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")

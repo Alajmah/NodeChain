@@ -103,8 +103,8 @@ jobs:
             SMOKE_PY="smoke-env/bin/python"
           fi
           version=$("$SMOKE_PY" -c "import nodechain; print(nodechain.__version__)")
-          if [ "$version" != "3.5.1" ]; then
-            echo "ERROR: expected nodechain.__version__ == 3.5.1, got $version" >&2
+          if [ "$version" != "3.6.0" ]; then
+            echo "ERROR: expected nodechain.__version__ == 3.6.0, got $version" >&2
             exit 1
           fi
           echo "nodechain.__version__ == $version"

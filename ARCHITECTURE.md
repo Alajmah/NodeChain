@@ -1,7 +1,7 @@
 # NodeChain Architecture Report — v1.3.1
 
 > **HISTORICAL DOCUMENT** — This report covers NodeChain v0.1.0 through v1.3.1.
-> The current version is v3.5.1. For the full product vision, see
+> The current version is v3.6.0. For the full product vision, see
 > **[VISION.md](VISION.md)**. For current capabilities, see README.md,
 > CHANGELOG.md, and docs/ci.md. This document is retained for historical
 > reference but does not reflect the current architecture.
