@@ -229,7 +229,7 @@ class TestBundleMetadata:
 class TestV160Version:
     def test_version_is_1_6_1(self):
         import nodechain
-        assert nodechain.__version__ == "3.5.1"
+        assert nodechain.__version__ == "3.6.0"
 
     def test_changelog_has_v161(self):
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
@@ -882,7 +882,7 @@ class TestSignatureInVerify:
 class TestV170Version:
     def test_version_is_1_7_0(self):
         import nodechain
-        assert nodechain.__version__ == "3.5.1"
+        assert nodechain.__version__ == "3.6.0"
 
     def test_changelog_has_v170(self):
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
@@ -1061,7 +1061,7 @@ class TestRequireSignature:
 class TestV171Version:
     def test_version_is_1_7_1(self):
         import nodechain
-        assert nodechain.__version__ == "3.5.1"
+        assert nodechain.__version__ == "3.6.0"
 
     def test_changelog_has_v171(self):
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")

@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-EXPECTED_VERSION = "3.5.1"
+EXPECTED_VERSION = "3.6.0"
 
 
 class TestReleaseVersionGuard:
@@ -28,7 +28,7 @@ class TestReleaseVersionGuard:
 
     def test_version_matches_expected_constant(self):
         """The EXPECTED_VERSION constant in this file must match release."""
-        assert EXPECTED_VERSION == "3.5.1"
+        assert EXPECTED_VERSION == "3.6.0"
 
     def test_cli_version_output(self):
         from click.testing import CliRunner

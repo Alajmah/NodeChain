@@ -1,6 +1,6 @@
 [project]
 name = "nodechain"
-version = "3.5.1"
+version = "3.6.0"
 description = "NodeChain — Autonomous AI systems from composable Harness Nodes"
 requires-python = ">=3.11"
 dependencies = [

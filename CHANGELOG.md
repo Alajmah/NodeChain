@@ -7,6 +7,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [3.6.0] — First Public-Era Release
+
+**Release type:** feature + governance (minor).
+
+v3.6.0 is the first release produced entirely from the clean public
+canonical history. It introduces flat-result provenance versioning,
+establishes the public development governance model, and hardens the
+hosted CI pipeline.
+
+### Added
+
+- Flat-result provenance versioning v1 (PR #3): explicit versioned
+  provenance contract for search-result payloads, with compatibility
+  handling for version 0 and pre-version payloads, strict RFC 3339
+  timestamp validation, and adversarial regression tests.
+- Public development governance documents (PR #4): solo-maintainer
+  operating policy, release checklist, and emergency admin bypass
+  procedure.
+
+### Changed
+
+- Eliminated 16 Ruff F821 undefined-name findings across 8 files
+  (PR #6), including two genuine runtime bugs (AuthorizationResult
+  and Panel imports).
+- Made Ruff lint a blocking gate (PR #7): removed `--exit-zero`,
+  renamed step from advisory to blocking.
+- Refreshed pinned GitHub Actions to checkout v7.0.1 and
+  setup-python v7.0.0 (PR #9), resolving Node.js 20 runtime
+  deprecation warnings.
+
+### Governance and release assurance
+
+- Public repository transition from contaminated private history
+  through clean tree-only republication.
+- Branch protection: PR required, 12 hosted checks enforced, linear
+  history, no force pushes, no branch deletion.
+- Secret scanning, push protection, and Dependabot enabled.
+- Windows test timeout increased to 90 minutes (PRs #5, #8) to
+  accommodate hosted-runner performance variability.
+- Twelve required status checks registered in branch protection (P2-G1).
+
+### Compatibility and boundaries
+
+- Current-version provenance payloads (version 1) require complete
+  provenance fields; incomplete current-version records fail closed.
+- Legacy (version 0) and pre-version payloads remain supported
+  through the compatibility schema.
+- `O_BINARY` correction for Windows/MSVC text-mode corruption of
+  cryptographic key material (F2, F3).
+- CI-H1 loader-environment correction for relocated Python builds
+  (PR #1): `LD_LIBRARY_PATH` preserved across `execve` boundaries.
+
+### PR arc
+
+| PR | Description |
+|----|-------------|
+| #1 | CI-H1: preserve loader environment across execve |
+| #2 | Public-CI portability: advisory lint, UTF-8 encoding fixes |
+| #3 | FPV1: flat-result provenance versioning v1 |
+| #4 | Public development governance |
+| #5 | Windows timeout 45 → 60 |
+| #6 | F821 baseline cleanup |
+| #7 | Blocking Ruff gate |
+| #8 | Windows timeout 60 → 90 |
+| #9 | Node 24 pinned Actions refresh |
+
+### Known boundaries
+
+- Windows hosted-runner test duration varies (25–60+ minutes);
+  sharding is deferred.
+- `slow-shard-2` contains capability-sensitive native-security tests
+  that may skip on hosted runners lacking specific kernel features.
+- The Governed Research Workspace product proof is not shipped in
+  this release.
+
+---
+
 ## [3.5.1] — PID-Namespace Supervised Execution Hardening
 
 **Release type:** production hardening (patch).

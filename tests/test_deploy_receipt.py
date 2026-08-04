@@ -394,7 +394,7 @@ class TestReceiptCLI:
 class TestV190Version:
     def test_version_is_1_9_0(self):
         import nodechain
-        assert nodechain.__version__ == "3.5.1"
+        assert nodechain.__version__ == "3.6.0"
 
     def test_changelog_has_v190(self):
         changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")

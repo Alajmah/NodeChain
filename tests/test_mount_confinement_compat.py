@@ -306,7 +306,7 @@ class TestHardenedUntrustedDocs:
 class TestV147Version:
     def test_version_is_1_6_0(self):
         import nodechain
-        assert nodechain.__version__ == "3.5.1"
+        assert nodechain.__version__ == "3.6.0"
 
     def test_frozen_surfaces_has_inv012(self):
         fs = Path("docs/frozen-surfaces.md").read_text(encoding="utf-8")
