@@ -115,3 +115,54 @@ jobs:
             cli_version=$(smoke-env/bin/nodechain --version)
           fi
           echo "nodechain --version: $cli_version"
+
+      - name: Assert installed-wheel schema validation
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            SMOKE_PY="smoke-env/Scripts/python.exe"
+          else
+            SMOKE_PY="smoke-env/bin/python"
+          fi
+          # Run from a directory outside the repository checkout to prove
+          # schemas resolve from the installed wheel, not the source tree.
+          PROOF_DIR="$(mktemp -d)"
+          cd "$PROOF_DIR"
+          "$SMOKE_PY" -c "
+          import sys, os
+          from nodechain.validation.schema_validator import SCHEMA_ROOT, SchemaValidator
+          # 1. Assert schema root is inside the installed package
+          nc_parent = os.path.dirname(os.path.dirname(os.path.dirname(SCHEMA_ROOT)))
+          if 'nodechain' not in os.path.basename(nc_parent) and 'site-packages' not in str(SCHEMA_ROOT):
+              print(f'ERROR: SCHEMA_ROOT {SCHEMA_ROOT} is not inside the installed package', file=sys.stderr)
+              sys.exit(1)
+          if not SCHEMA_ROOT.is_dir():
+              print(f'ERROR: SCHEMA_ROOT {SCHEMA_ROOT} does not exist', file=sys.stderr)
+              sys.exit(1)
+          print(f'SCHEMA_ROOT: {SCHEMA_ROOT}')
+          # 2. Assert all schemas load
+          sv = SchemaValidator()
+          errors = sv.validate_all_schemas_loadable()
+          if errors:
+              print(f'ERROR: schema load errors: {errors}', file=sys.stderr)
+              sys.exit(1)
+          schema_count = len(list(SCHEMA_ROOT.rglob('*.json')))
+          print(f'All {schema_count} schemas loaded successfully')
+          # 3. Valid payload passes
+          ref = 'nodechain://schemas/semantic_types/raw_user_query'
+          valid_result = sv.validate({'query': 'release schema smoke'}, ref)
+          if not valid_result:
+              print(f'ERROR: valid payload rejected: {valid_result.errors}', file=sys.stderr)
+              sys.exit(1)
+          print('Valid payload accepted')
+          # 4. Invalid payload fails with schema error, NOT 'Schema not found'
+          invalid_result = sv.validate({'query': ''}, ref)
+          if invalid_result:
+              print('ERROR: invalid payload was accepted', file=sys.stderr)
+              sys.exit(1)
+          if any('Schema not found' in e for e in invalid_result.errors):
+              print(f'ERROR: schema not found from installed wheel: {invalid_result.errors}', file=sys.stderr)
+              sys.exit(1)
+          print(f'Invalid payload correctly rejected: {invalid_result.errors}')
+          "
+          PY
