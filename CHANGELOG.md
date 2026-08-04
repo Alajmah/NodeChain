@@ -43,7 +43,6 @@ hosted CI pipeline.
   through clean tree-only republication.
 - Branch protection: PR required, 12 hosted checks enforced, linear
   history, no force pushes, no branch deletion.
-- Secret scanning, push protection, and Dependabot enabled.
 - Windows test timeout increased to 90 minutes (PRs #5, #8) to
   accommodate hosted-runner performance variability.
 - Twelve required status checks registered in branch protection (P2-G1).

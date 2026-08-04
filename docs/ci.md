@@ -67,7 +67,7 @@ Triggers: `push` to `master`, all `pull_request`.
 | `orchestrator-recovery` | `ubuntu-24.04` | 20 min | Orchestrator + recovery console + budget tests | ✅ |
 | `trust-collector` | `ubuntu-24.04` | 20 min | Trust + registry + dashboard + collector semantics | ✅ |
 | `slow-shard-1` | `ubuntu-24.04` | 25 min | Checkpoint + loop + evidence | ✅ |
-| `slow-shard-2` | `ubuntu-24.04` | 25 min | Sandbox + namespace + security (native capability; `continue-on-error` internally, tolerated on hosted) | ✅ (required) |
+| `slow-shard-2` | `ubuntu-24.04` | 25 min | Sandbox + namespace + security | Required check; job-level tolerant |
 | `slow-shard-3` | `ubuntu-24.04` | 25 min | Proxmox adapter + network + integration | ✅ |
 | `windows-tests` | `windows-2022` | 90 min | Cross-platform fast tests | ✅ |
 | `cli-smoke` | `ubuntu-24.04` | 15 min | CLI command surface (includes `recover`) | ✅ |
@@ -75,12 +75,11 @@ Triggers: `push` to `master`, all `pull_request`.
 
 ### slow-shard-2 tolerance
 
-`slow-shard-2` retains `continue-on-error: true` in the workflow because it
-exercises kernel-level sandbox features (seccomp, cgroups, mount namespaces)
-that require privileges unavailable on standard hosted runners. The job is
-nonetheless a **required** branch-protection check: capability-sensitive tests
-that genuinely cannot run on hosted infrastructure produce explicit reasoned
-skips, not silent disappearance, so the job remains a meaningful gate.
+slow-shard-2 is registered as a required status check, but the workflow
+job retains job-level `continue-on-error: true` for hosted-runner capability
+constraints. Branch protection requires the check to report, while GitHub
+Actions tolerates a job-level test failure. Capability-sensitive tests may
+also produce explicit reasoned skips.
 
 ## Local verification (Makefile)
 
@@ -145,10 +144,9 @@ snapshots or CI will fail. The version is currently `3.6.0`.
 
 ## Branch protection status
 
-This repository is **public**. Branch protection is technically enforced via a
-GitHub ruleset with strict required status checks and `enforce_admins: true`.
-Public repositories on GitHub Free do offer branch protection, so no paid plan
-is required for enforcement.
+This repository is public. Classic branch protection is technically
+enforced on master with strict required status checks and
+enforce_admins: true.
 
 **Operating state (v3.6.0):**
 
@@ -167,7 +165,5 @@ is required for enforcement.
 - No direct master commits except emergency recovery.
 - Every feature/change should go through a PR where possible.
 - Release tags must only be created from a green master commit.
-- `slow-shard-2` is required at the branch-protection level but tolerates
-  capability-sensitive sandbox tests internally via `continue-on-error`, since
-  those tests require kernel privileges unavailable on standard GitHub-hosted
-  runners.
+- `slow-shard-2` is a required check but retains job-level
+  `continue-on-error: true` for hosted-runner capability constraints.
