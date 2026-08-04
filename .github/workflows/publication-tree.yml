@@ -120,9 +120,9 @@ jobs:
         shell: bash
         run: |
           if [ "${{ runner.os }}" = "Windows" ]; then
-            SMOKE_PY="smoke-env/Scripts/python.exe"
+            SMOKE_PY="$(pwd)/smoke-env/Scripts/python.exe"
           else
-            SMOKE_PY="smoke-env/bin/python"
+            SMOKE_PY="$(pwd)/smoke-env/bin/python"
           fi
           # Run from a directory outside the repository checkout to prove
           # schemas resolve from the installed wheel, not the source tree.
