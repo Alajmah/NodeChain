@@ -115,3 +115,114 @@ jobs:
             cli_version=$(smoke-env/bin/nodechain --version)
           fi
           echo "nodechain --version: $cli_version"
+
+      - name: Assert installed-wheel schema validation and artifact parity
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            SMOKE_PY="$(pwd)/smoke-env/Scripts/python.exe"
+          else
+            SMOKE_PY="$(pwd)/smoke-env/bin/python"
+          fi
+
+          # --- Artifact-set parity: source vs wheel vs sdist ---
+          "$SMOKE_PY" -c "
+          import sys, zipfile, tarfile
+          from pathlib import Path
+
+          repo = Path('.')
+          source_schemas = sorted(
+              str(p.relative_to('schemas')).replace(chr(92), '/')
+              for p in (repo / 'schemas').rglob('*.json')
+          )
+
+          wheel = next(Path('dist').glob('*.whl'))
+          with zipfile.ZipFile(wheel) as z:
+              wheel_schemas = sorted(
+                  n.replace('nodechain/schemas/', '')
+                  for n in z.namelist()
+                  if 'nodechain/schemas/' in n and n.endswith('.json')
+              )
+
+          sdist = next(Path('dist').glob('*.tar.gz'))
+          with tarfile.open(sdist) as t:
+              sdist_schemas = sorted(
+                  n.split('/schemas/', 1)[-1]
+                  for n in t.getnames()
+                  if '/schemas/' in n and n.endswith('.json')
+                  and '/nodechain/schemas/' not in n
+                  and 'src/nodechain' not in n
+                  and 'nodes/' not in n
+              )
+
+          print(f'source runtime schemas: {len(source_schemas)}')
+          print(f'wheel runtime schemas: {len(wheel_schemas)}')
+          print(f'sdist runtime schemas: {len(sdist_schemas)}')
+
+          sw_diff = set(source_schemas) - set(wheel_schemas)
+          ws_diff = set(wheel_schemas) - set(source_schemas)
+          ss_diff = set(source_schemas) - set(sdist_schemas)
+          sd_diff = set(sdist_schemas) - set(source_schemas)
+
+          print(f'source-only vs wheel: {sorted(sw_diff)}')
+          print(f'wheel-only vs source: {sorted(ws_diff)}')
+          print(f'source-only vs sdist: {sorted(ss_diff)}')
+          print(f'sdist-only vs source: {sorted(sd_diff)}')
+
+          if source_schemas != wheel_schemas:
+              print('ERROR: source != wheel schema sets', file=sys.stderr)
+              sys.exit(1)
+          if source_schemas != sdist_schemas:
+              print('ERROR: source != sdist schema sets', file=sys.stderr)
+              sys.exit(1)
+          print('Artifact-set parity: PASS')
+          "
+
+          # --- Installed-wheel schema proof (outside checkout, no PYTHONPATH) ---
+          unset PYTHONPATH
+          PROOF_DIR="$(mktemp -d)"
+          cd "$PROOF_DIR"
+          "$SMOKE_PY" -c "
+          import sys, os
+          from pathlib import Path
+          import nodechain
+          from nodechain.validation.schema_validator import SCHEMA_ROOT, SchemaValidator
+
+          # 1. Assert SCHEMA_ROOT is exactly inside the installed package
+          expected = Path(nodechain.__file__).resolve().parent / 'schemas'
+          actual = SCHEMA_ROOT.resolve()
+          if actual != expected:
+              print(f'ERROR: SCHEMA_ROOT {actual} != expected {expected}', file=sys.stderr)
+              sys.exit(1)
+          if not actual.is_dir():
+              print(f'ERROR: SCHEMA_ROOT {actual} does not exist', file=sys.stderr)
+              sys.exit(1)
+          print(f'SCHEMA_ROOT: {actual}')
+
+          # 2. Assert all schemas load
+          sv = SchemaValidator()
+          errors = sv.validate_all_schemas_loadable()
+          if errors:
+              print(f'ERROR: schema load errors: {errors}', file=sys.stderr)
+              sys.exit(1)
+          schema_count = len(list(actual.rglob('*.json')))
+          print(f'All {schema_count} schemas loaded successfully')
+
+          # 3. Valid payload passes
+          ref = 'nodechain://schemas/semantic_types/raw_user_query'
+          valid_result = sv.validate({'query': 'release schema smoke'}, ref)
+          if not valid_result:
+              print(f'ERROR: valid payload rejected: {valid_result.errors}', file=sys.stderr)
+              sys.exit(1)
+          print('Valid payload accepted')
+
+          # 4. Invalid payload fails with schema error, NOT 'Schema not found'
+          invalid_result = sv.validate({'query': ''}, ref)
+          if invalid_result:
+              print('ERROR: invalid payload was accepted', file=sys.stderr)
+              sys.exit(1)
+          if any('Schema not found' in e for e in invalid_result.errors):
+              print(f'ERROR: schema not found from installed wheel: {invalid_result.errors}', file=sys.stderr)
+              sys.exit(1)
+          print(f'Invalid payload correctly rejected: {invalid_result.errors}')
+          "

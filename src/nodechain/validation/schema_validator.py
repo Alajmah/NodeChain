@@ -8,8 +8,17 @@ from typing import Any
 
 import jsonschema
 
-# Schema root directory
-SCHEMA_ROOT = Path(__file__).parent.parent.parent.parent / "schemas"
+# Schema root directory.
+# Prefer the installed-package location (nodechain/schemas/ inside site-packages);
+# fall back to the source-tree layout for editable/development installs.
+_PACKAGE_SCHEMA_ROOT = Path(__file__).resolve().parents[1] / "schemas"
+_SOURCE_SCHEMA_ROOT = Path(__file__).resolve().parents[3] / "schemas"
+
+SCHEMA_ROOT = (
+    _PACKAGE_SCHEMA_ROOT
+    if _PACKAGE_SCHEMA_ROOT.is_dir()
+    else _SOURCE_SCHEMA_ROOT
+)
 
 
 class SchemaValidator:

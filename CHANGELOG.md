@@ -25,6 +25,10 @@ hosted CI pipeline.
 - Public development governance documents (PR #4): solo-maintainer
   operating policy, release checklist, and emergency admin bypass
   procedure.
+- Runtime JSON schemas are included in the wheel under
+  `nodechain/schemas/`. `SchemaValidator` supports both installed-package
+  and source-tree layouts. Publication Tree validates schema availability
+  from the installed wheel.
 
 ### Changed
 

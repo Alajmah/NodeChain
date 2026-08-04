@@ -55,6 +55,9 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/nodechain"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"schemas" = "nodechain/schemas"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
