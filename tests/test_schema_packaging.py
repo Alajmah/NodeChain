@@ -1,8 +1,12 @@
 """Schema packaging and runtime validation tests.
 
-Verifies that JSON schemas are accessible from both source-checkout and
-installed-package layouts, and that schema validation produces correct
-results (not silent FileNotFoundError-masking).
+Verifies that JSON schemas are accessible from the source-tree layout,
+and that schema validation produces correct results (not silent
+FileNotFoundError-masking).
+
+Artifact-set parity (source vs wheel vs sdist) is enforced in the
+Publication Tree workflow, not here, because the built wheel and sdist
+files only exist during the publication build.
 """
 
 from __future__ import annotations
@@ -33,7 +37,6 @@ class TestSchemaRootResolution:
 
     def test_source_mode_resolves_repository_schemas(self):
         """In source mode, the source-tree schemas must be accessible."""
-        # At least one of the two roots must exist
         assert _PACKAGE_SCHEMA_ROOT.is_dir() or _SOURCE_SCHEMA_ROOT.is_dir()
 
 
@@ -41,6 +44,12 @@ class TestSchemaValidation:
     """Schema validation must produce correct pass/fail results."""
 
     SENTINEL_REF = "nodechain://schemas/semantic_types/raw_user_query"
+
+    def test_sentinel_schema_exists(self):
+        """The sentinel schema used by these tests must exist."""
+        sv = SchemaValidator()
+        path = sv._resolve_path(self.SENTINEL_REF)
+        assert path.exists(), f"Sentinel schema not found: {path}"
 
     def test_valid_payload_passes(self):
         """A known valid payload must pass validation."""
@@ -79,43 +88,3 @@ class TestSchemaValidation:
             self.SENTINEL_REF,
         )
         assert result.valid
-
-
-class TestSchemaSetParity:
-    """The source schemas must match the packaged schemas dynamically."""
-
-    def _get_source_schemas(self) -> set[str]:
-        """Get relative schema paths from the repository schemas/ directory."""
-        source_root = Path(__file__).resolve().parent.parent / "schemas"
-        if not source_root.is_dir():
-            pytest.skip("Source schemas/ directory not available")
-        return {
-            str(p.relative_to(source_root)).replace("\\", "/")
-            for p in source_root.rglob("*.json")
-        }
-
-    def _get_package_schemas(self) -> set[str]:
-        """Get relative schema paths from the installed package."""
-        pkg_root = Path(__file__).resolve().parent.parent / "nodechain" / "schemas"
-        if not pkg_root.is_dir():
-            # In editable/source mode, package schemas map to source schemas
-            return self._get_source_schemas()
-        return {
-            str(p.relative_to(pkg_root)).replace("\\", "/")
-            for p in pkg_root.rglob("*.json")
-        }
-
-    def test_source_and_package_schema_sets_match(self):
-        """Source and package schema sets must be identical."""
-        source = self._get_source_schemas()
-        package = self._get_package_schemas()
-        assert source == package, (
-            f"Schema set mismatch:\n"
-            f"  source-only: {source - package}\n"
-            f"  package-only: {package - source}"
-        )
-
-    def test_schema_count_at_least_21(self):
-        """Sanity check: at least 21 canonical schemas expected."""
-        source = self._get_source_schemas()
-        assert len(source) >= 21, f"Expected >=21 schemas, got {len(source)}"
