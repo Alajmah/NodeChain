@@ -165,4 +165,3 @@ jobs:
               sys.exit(1)
           print(f'Invalid payload correctly rejected: {invalid_result.errors}')
           "
-          PY
