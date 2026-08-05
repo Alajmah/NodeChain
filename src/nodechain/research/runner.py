@@ -370,6 +370,7 @@ class RunResult:
             or self.state.status == "waiting_for_review"
             or self.state.status == "paused"
             or self.state.status == "paused_for_budget"
+            or self.trace.final_status == "waiting_for_review"
         )
 
     @property
@@ -378,7 +379,10 @@ class RunResult:
 
     @property
     def failed(self) -> bool:
-        return self.trace.final_status not in ("completed", "paused")
+        # A paused run is NOT failed — it's waiting for operator action.
+        if self.paused:
+            return False
+        return self.trace.final_status not in ("completed",)
 
     @property
     def corpus_digest(self) -> str:
