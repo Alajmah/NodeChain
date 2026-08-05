@@ -22,7 +22,7 @@ from nodechain.adapters.search.base_search import SearchQuery
 from nodechain.adapters.search.fixture import FixtureSearchAdapter
 from nodechain.core.blueprint import ChainBlueprint, NodeDef
 from nodechain.core.state import StateManager
-from nodechain.research.fixture_search_node import (
+from nodechain.nodes.fixture_search_tool import (
     FIXTURE_SEARCH_CONTRACT,
     FixtureSearchToolNode,
 )
@@ -224,3 +224,47 @@ def test_fixture_in_trust_registry() -> None:
     """The fixture adapter is statically bound in the trust registry."""
     assert "fixture" in TRUSTED_ADAPTER_CLASSES
     assert TRUSTED_ADAPTER_CLASSES["fixture"] is FixtureSearchAdapter
+
+
+# --------------------------------------------------------------------------- #
+# Package-trust boundary (regression)
+# --------------------------------------------------------------------------- #
+
+
+def test_fixture_node_module_is_in_trusted_namespace() -> None:
+    """The relocated node's concrete class module must be under
+    nodechain.nodes.* so PolicyGate's built-in boundary accepts it."""
+    node = FixtureSearchToolNode()
+    mod = type(node).__module__
+    assert mod == "nodechain.nodes.fixture_search_tool", mod
+    assert mod.startswith("nodechain.nodes.")
+
+
+def test_fixture_node_passes_privileged_trust_boundary() -> None:
+    """Through the real PolicyGate trust predicate, the fixture node is
+    classified as proven built-in (not unknown)."""
+    from nodechain.core.contract import is_privileged_node
+
+    node = FixtureSearchToolNode()
+    assert is_privileged_node(node.manifest.contract) is True
+    # Simulate the PolicyGate's module check (policy_gate.py:101-106)
+    import inspect
+
+    mod = inspect.getmodule(type(node))
+    mod_name = mod.__name__ if mod else ""
+    assert mod_name.startswith("nodechain.nodes."), mod_name
+
+
+def test_non_nodes_subclass_remains_denied() -> None:
+    """Boundary regression: a privileged subclass declared from a
+    non-nodechain.nodes.* module remains denied by the trust boundary."""
+
+    class ResearchSubclass(FixtureSearchToolNode):
+        pass
+
+    instance = ResearchSubclass()
+    mod = type(instance).__module__
+    # This subclass is defined in the test module, not nodechain.nodes.*
+    assert not mod.startswith("nodechain.nodes."), (
+        f"boundary weakened: {mod} should not pass the built-in check"
+    )

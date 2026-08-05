@@ -30,7 +30,7 @@ from typing import Any
 
 from nodechain.adapters.mock_model_adapter import MockModelAdapter
 from nodechain.adapters.search.fixture import FixtureSearchAdapter
-from nodechain.core.blueprint import ChainBlueprint, NodeDef, load_blueprint
+from nodechain.core.blueprint import ChainBlueprint, ConnectionDef, NodeDef, load_blueprint
 from nodechain.core.capsule_crypto import resolve_kek_manager_from_environment
 from nodechain.core.default_policies import DEFAULT_POLICIES
 from nodechain.core.state import StateManager
@@ -44,7 +44,7 @@ from .corpus import (
     corpus_to_fixture_map,
     load_corpus,
 )
-from .fixture_search_node import FixtureSearchToolNode
+from nodechain.nodes.fixture_search_tool import FixtureSearchToolNode
 
 
 # --------------------------------------------------------------------------- #
@@ -85,7 +85,17 @@ def _research_blueprint(chain_id: str, goal: str) -> ChainBlueprint:
             NodeDef(node_id="risk_classifier", node_type="model", config={}, position=9),
             NodeDef(node_id="response_generator", node_type="model", config={}, position=10),
         ],
-        connections=[],
+        connections=[
+            ConnectionDef(from_node="goal_interpreter", from_port="normalized_research_goal", to_node="task_planner", to_port="normalized_research_goal"),
+            ConnectionDef(from_node="task_planner", from_port="task_plan", to_node="context_selector", to_port="task_plan"),
+            ConnectionDef(from_node="context_selector", from_port="context_bundle", to_node="search_tool", to_port="context_bundle"),
+            ConnectionDef(from_node="search_tool", from_port="raw_search_results", to_node="source_ingestion", to_port="raw_search_results"),
+            ConnectionDef(from_node="source_ingestion", from_port="source_set", to_node="source_quality_evaluator", to_port="source_set"),
+            ConnectionDef(from_node="source_quality_evaluator", from_port="qualified_source_set", to_node="evidence_synthesizer", to_port="qualified_source_set"),
+            ConnectionDef(from_node="evidence_synthesizer", from_port="evidence_base", to_node="claim_validator", to_port="evidence_base"),
+            ConnectionDef(from_node="claim_validator", from_port="validated_evidence_base", to_node="risk_classifier", to_port="validated_evidence_base"),
+            ConnectionDef(from_node="risk_classifier", from_port="risk_assessment", to_node="response_generator", to_port="risk_assessment"),
+        ],
     )
 
 
@@ -267,6 +277,12 @@ class WorkspaceRunner:
         paused for review.
         """
         import asyncio
+        import os
+
+        # Sealed research runs require explicit operator review — set pause
+        # mode so the runtime pauses (rather than prompting interactively or
+        # auto-approving) when the risk_classifier requests review.
+        os.environ.setdefault("NODECHAIN_REVIEW_MODE", "pause")
 
         orch = self._compose()
         trace = asyncio.run(orch.run(self.brief.question))
