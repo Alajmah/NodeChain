@@ -31,7 +31,7 @@ from typing import Any
 from nodechain.adapters.mock_model_adapter import MockModelAdapter
 from nodechain.adapters.search.fixture import FixtureSearchAdapter
 from nodechain.core.blueprint import ChainBlueprint, ConnectionDef, NodeDef, load_blueprint
-from nodechain.core.capsule_crypto import resolve_kek_manager_from_environment
+from nodechain.core.capsule_crypto import KekManager
 from nodechain.core.default_policies import DEFAULT_POLICIES
 from nodechain.core.state import StateManager
 from nodechain.runtime.orchestrator import Orchestrator
@@ -46,6 +46,8 @@ from .corpus import (
 )
 from .fixture_model_adapter import FixtureModelAdapter
 from nodechain.nodes.fixture_search_tool import FixtureSearchToolNode
+from .run_descriptor import RunDescriptor, save_descriptor, load_descriptor
+from .scoped_env import scoped_env
 
 
 # --------------------------------------------------------------------------- #
@@ -166,19 +168,27 @@ class WorkspaceRunner:
         *,
         db_path: str | Path | None = None,
         trace_dir: str | Path | None = None,
+        workspace_dir: str | Path | None = None,
         chain_id: str = "research-workspace-v1",
     ) -> None:
         if isinstance(brief, str):
             brief = ResearchBrief.from_question(brief)
         self.brief = brief
+        self._corpus_path = str(corpus_path)
         self.corpus = load_corpus(corpus_path)
         self.corpus_digest = compute_corpus_canonical_digest(self.corpus)
         self.chain_id = chain_id
-        self._db_path = str(db_path or "data/research_workspace.db")
-        self._trace_dir = str(trace_dir or "data/traces")
+        self._workspace_dir = str(workspace_dir or "data/research_workspace")
+        Path(self._workspace_dir).mkdir(parents=True, exist_ok=True)
+        self._db_path = str(db_path or (Path(self._workspace_dir) / "run.db"))
+        self._trace_dir = str(trace_dir or (Path(self._workspace_dir) / "traces"))
+        Path(self._trace_dir).mkdir(parents=True, exist_ok=True)
+        self._kek_path = str(Path(self._workspace_dir) / ".kek")
         self.orchestrator: Orchestrator | None = None
         self._search_node: FixtureSearchToolNode | None = None
         self._fixture_adapter: FixtureSearchAdapter | None = None
+        self._run_descriptor: RunDescriptor | None = None
+        self._review_env: dict[str, str] = {}
 
     # ------------------------------------------------------------------ #
     # Composition
@@ -188,7 +198,13 @@ class WorkspaceRunner:
         """Construct the existing research nodes with FixtureSearchToolNode."""
         from nodechain.cli.run import _create_nodes
 
-        model_adapter = FixtureModelAdapter(latency_ms=0)
+        # Extract search terms from the corpus query keys so the model adapter
+        # produces queries that match the sealed corpus.
+        search_terms = list(self.corpus.queries.keys())
+        model_adapter = FixtureModelAdapter(
+            latency_ms=0,
+            search_terms=search_terms,
+        )
         nodes = _create_nodes(
             model_adapter,
             self._trace_dir,
@@ -202,10 +218,11 @@ class WorkspaceRunner:
 
     def _compose(self) -> Orchestrator:
         """Construct the orchestrator and wire the guarded fixture adapter."""
-        # Build shared state + policy.
+        # Build explicit local-dev KEK (no process-global env mutation).
+        kek_manager = KekManager(local_dev=True, kek_path=self._kek_path)
         sm = StateManager(
             self._db_path,
-            kek_manager=resolve_kek_manager_from_environment(),
+            kek_manager=kek_manager,
         )
         policy_engine = PolicyEngine()
         for policy in DEFAULT_POLICIES:
@@ -278,18 +295,31 @@ class WorkspaceRunner:
         paused for review.
         """
         import asyncio
-        import os
 
-        # Sealed research runs require explicit operator review — set pause
-        # mode so the runtime pauses (rather than prompting interactively or
-        # auto-approving) when the risk_classifier requests review.
-        os.environ.setdefault("NODECHAIN_REVIEW_MODE", "pause")
-        # Sealed runs are inherently local-development (no production KEK).
-        # The KEK is needed for side-effect capsule creation.
-        os.environ.setdefault("NODECHAIN_DEV_MODE", "1")
+        # Sealed research runs require explicit operator review — apply pause
+        # mode through a scoped context so it doesn't leak to the process.
+        with scoped_env({"NODECHAIN_REVIEW_MODE": "pause"}):
+            orch = self._compose()
+            trace = asyncio.run(orch.run(self.brief.question))
 
-        orch = self._compose()
-        trace = asyncio.run(orch.run(self.brief.question))
+        # Persist the run descriptor for resume/finalization.
+        desc = RunDescriptor(
+            run_id=orch.state.run_id,
+            chain_id=self.chain_id,
+            question=self.brief.question,
+            focus_areas=tuple(self.brief.focus_areas),
+            corpus_path=str(self._corpus_path),
+            corpus_digest=self.corpus_digest,
+            corpus_version=self.corpus.corpus_version,
+            scenario_id=self.corpus.scenario_id,
+            db_path=self._db_path,
+            trace_dir=self._trace_dir,
+            workspace_dir=self._workspace_dir,
+            kek_path=self._kek_path,
+        )
+        save_descriptor(self._workspace_dir, desc)
+        self._run_descriptor = desc
+
         return RunResult(
             run_id=orch.state.run_id,
             chain_id=self.chain_id,
@@ -305,7 +335,12 @@ class WorkspaceRunner:
         if self.orchestrator is None:
             raise RuntimeError("no orchestrator — call run() first")
         run_id = self.orchestrator.state.run_id
-        trace = asyncio.run(self.orchestrator.resume(run_id))
+        # The resume path reads review env vars — apply through scoped context
+        # that merges review decision + pause mode.
+        env_updates = {"NODECHAIN_REVIEW_MODE": "pause"}
+        env_updates.update(self._review_env)
+        with scoped_env(env_updates):
+            trace = asyncio.run(self.orchestrator.resume(run_id))
         return RunResult(
             run_id=run_id,
             chain_id=self.chain_id,
@@ -323,11 +358,9 @@ class WorkspaceRunner:
         """Record a review decision for the current paused run.
 
         The decision is delivered through the existing runtime review seam
-        (the env-var the HumanAdapter reads). The actual resume happens in
-        resume().
+        (the env vars the HumanAdapter reads on resume). Applied through
+        a scoped context so env vars don't leak to the process permanently.
         """
-        import os
-
         # Map the WP 5.2 decision vocabulary to the runtime's vocabulary.
         decision_map = {
             "approve": "approve",
@@ -335,9 +368,12 @@ class WorkspaceRunner:
             "revise": "request_revision",
         }
         runtime_decision = decision_map.get(decision, decision)
-        os.environ["NODECHAIN_REVIEW_DECISION"] = runtime_decision
-        os.environ["NODECHAIN_REVIEW_REASON"] = reason
-        os.environ["NODECHAIN_REVIEW_REVIEWER"] = reviewer
+        # Store for resume() to apply through scoped_env.
+        self._review_env = {
+            "NODECHAIN_REVIEW_DECISION": runtime_decision,
+            "NODECHAIN_REVIEW_REASON": reason,
+            "NODECHAIN_REVIEW_REVIEWER": reviewer,
+        }
 
 
 # --------------------------------------------------------------------------- #

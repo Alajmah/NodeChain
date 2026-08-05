@@ -21,11 +21,6 @@ from pathlib import Path
 
 import pytest
 
-# Set env vars BEFORE importing the runner (they're read at orchestrator
-# construction time).
-os.environ.setdefault("NODECHAIN_REVIEW_MODE", "pause")
-os.environ.setdefault("NODECHAIN_DEV_MODE", "1")
-
 from nodechain.research.runner import ResearchBrief, WorkspaceRunner
 
 CORPUS_PATH = Path(__file__).parent.parent.parent / "tests" / "fixtures" / "research" / "corpus_basic.yaml"
@@ -165,15 +160,19 @@ def test_review_reject_routes_through_runtime(runner: WorkspaceRunner) -> None:
 
 
 def test_review_identity_recorded(runner: WorkspaceRunner) -> None:
-    """The review decision records reviewer identity, reason, and decision."""
+    """The review decision records reviewer identity, reason, and decision in
+    the runner's internal review env (not leaked to the process)."""
     result = runner.run()
     assert result.paused
 
     runner.apply_review("approve", "test reason for approval", "alice")
-    # The env vars should carry the review info.
-    assert os.environ.get("NODECHAIN_REVIEW_DECISION") == "approve"
-    assert os.environ.get("NODECHAIN_REVIEW_REASON") == "test reason for approval"
-    assert os.environ.get("NODECHAIN_REVIEW_REVIEWER") == "alice"
+    # The review env is stored internally, not leaked to the process.
+    assert runner._review_env.get("NODECHAIN_REVIEW_DECISION") == "approve"
+    assert runner._review_env.get("NODECHAIN_REVIEW_REASON") == "test reason for approval"
+    assert runner._review_env.get("NODECHAIN_REVIEW_REVIEWER") == "alice"
+    # Verify no leak to process environment.
+    import os
+    assert "NODECHAIN_REVIEW_DECISION" not in os.environ
 
 
 # --------------------------------------------------------------------------- #

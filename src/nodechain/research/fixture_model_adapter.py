@@ -27,10 +27,19 @@ class FixtureModelAdapter:
     the ``"fixture"`` adapter.
     """
 
-    def __init__(self, latency_ms: int = 0) -> None:
+    def __init__(
+        self,
+        latency_ms: int = 0,
+        *,
+        search_terms: list[str] | None = None,
+    ) -> None:
         self.model = "fixture-mock"
         self.default_max_tokens = 4096
         self._latency_ms = latency_ms
+        # When provided, these terms are used as search query terms instead
+        # of the raw question, so the context_selector produces queries that
+        # match corpus keys.
+        self._search_terms = search_terms or []
 
     def complete(
         self,
@@ -57,12 +66,16 @@ class FixtureModelAdapter:
                 "query": user_message.strip(),
             })
         elif "task_planner" in lower or "task planner" in lower:
+            # Use corpus-matched search terms if provided, otherwise extract
+            # from the question.
+            terms = self._search_terms or [user_message.strip()]
             content = json.dumps({
                 "tasks": [
                     {
                         "task_id": 1,
-                        "description": user_message.strip(),
+                        "description": " ".join(terms),
                         "source_types": ["academic"],
+                        "search_terms": terms,
                     }
                 ],
                 "source_routing": {
