@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "nodechain://schemas/semantic_types/research_workspace_report",
+  "title": "ResearchWorkspaceReportV1",
+  "description": "Final summary report document for a ResearchWorkspaceBundleV1 run. Aggregates counts, review state, and replay eligibility.",
+  "type": "object",
+  "required": [
+    "run_id",
+    "run_status",
+    "executive_answer",
+    "claim_count",
+    "supported_claims",
+    "contested_claims",
+    "sources_cited",
+    "adapters_used",
+    "failures_recorded",
+    "review_required",
+    "review_completed",
+    "replay_eligible"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier of the research run this report summarizes."
+    },
+    "run_status": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/run_status"
+    },
+    "executive_answer": {
+      "type": "string",
+      "description": "The synthesized executive answer produced by the run."
+    },
+    "claim_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total number of claims produced."
+    },
+    "supported_claims": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of claims with status 'supported'."
+    },
+    "contested_claims": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of claims with status 'contested'."
+    },
+    "sources_cited": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of distinct sources cited in the report."
+    },
+    "adapters_used": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "List of adapter names invoked during the run."
+    },
+    "failures_recorded": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of failure records produced during the run."
+    },
+    "review_required": {
+      "type": "boolean",
+      "description": "Whether the run required a human review gate."
+    },
+    "review_completed": {
+      "type": "boolean",
+      "description": "Whether the required review gate was completed."
+    },
+    "replay_eligible": {
+      "type": "boolean",
+      "description": "Whether the run is eligible for deterministic replay."
+    }
+  }
+}

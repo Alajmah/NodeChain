@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "nodechain://schemas/semantic_types/research_sources",
+  "title": "ResearchSourcesV1",
+  "description": "The set of retrieved source records for a ResearchWorkspaceBundleV1 run.",
+  "type": "object",
+  "required": ["bundle_version", "run_id", "retrieved_at", "sources"],
+  "additionalProperties": false,
+  "properties": {
+    "bundle_version": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/bundle_version"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier of the research run these sources belong to."
+    },
+    "retrieved_at": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/timestamp"
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/source_record"
+      },
+      "description": "Retrieved source records."
+    },
+    "adapter_coverage": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 0 },
+      "description": "Map of adapter name to number of sources it contributed."
+    },
+    "deduplication_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of duplicate sources removed during ingestion."
+    }
+  }
+}

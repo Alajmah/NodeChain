@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "nodechain://schemas/semantic_types/research_run",
+  "title": "ResearchRunV1",
+  "description": "Live execution record for a ResearchWorkspaceBundleV1 run. Tracks status transitions, step progression, and provider context.",
+  "type": "object",
+  "required": [
+    "bundle_version",
+    "run_id",
+    "chain_id",
+    "started_at",
+    "updated_at",
+    "status",
+    "provider_mode",
+    "current_step",
+    "steps_completed",
+    "replay_eligible"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "bundle_version": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/bundle_version"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier of the research run."
+    },
+    "chain_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier of the chain (blueprint) executing the run."
+    },
+    "started_at": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/timestamp"
+    },
+    "status": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/run_status"
+    },
+    "provider_mode": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Provider mode in use (e.g. 'live', 'record', 'replay')."
+    },
+    "current_step": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Node id of the step currently executing or next to execute."
+    },
+    "steps_completed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["node_id", "completed_at", "succeeded"],
+        "additionalProperties": false,
+        "properties": {
+          "node_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Node id of the completed step."
+          },
+          "completed_at": {
+            "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/timestamp"
+          },
+          "succeeded": {
+            "type": "boolean",
+            "description": "Whether the step succeeded."
+          },
+          "failure_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Failure record id, present only when succeeded is false."
+          }
+        }
+      },
+      "description": "Ordered list of steps completed so far."
+    },
+    "input_digest": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/sha256",
+      "description": "SHA-256 digest of the normalized run input."
+    },
+    "finalized_at": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/timestamp"
+    },
+    "replay_eligible": {
+      "type": "boolean",
+      "description": "Whether the run remains eligible for deterministic replay."
+    }
+  }
+}

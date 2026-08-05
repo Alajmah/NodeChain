@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "nodechain://schemas/semantic_types/research_workspace_manifest",
+  "title": "ResearchWorkspaceManifestV1",
+  "description": "Manifest document for a ResearchWorkspaceBundleV1 run. Describes bundle provenance, artifact inventory, replay eligibility, and digest.",
+  "type": "object",
+  "required": [
+    "bundle_version",
+    "run_id",
+    "chain_id",
+    "blueprint_version",
+    "created_at",
+    "finalized_at",
+    "run_status",
+    "source_commit",
+    "input_digest",
+    "artifact_inventory",
+    "bundle_digest",
+    "provider_mode",
+    "fixture_corpus_version",
+    "trace_reference",
+    "replay_eligible"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "bundle_version": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/bundle_version"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier of the research run this bundle captures."
+    },
+    "chain_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier of the NodeChain chain (blueprint) that executed the run."
+    },
+    "blueprint_version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Version of the blueprint used for the run."
+    },
+    "created_at": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/timestamp"
+    },
+    "finalized_at": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/timestamp"
+    },
+    "run_status": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/run_status"
+    },
+    "source_commit": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Source control commit SHA the run executed against."
+    },
+    "input_digest": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/sha256",
+      "description": "SHA-256 digest of the normalized run input."
+    },
+    "artifact_inventory": {
+      "type": "array",
+      "items": {
+        "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/file_hash"
+      },
+      "description": "List of all artifacts contained in the bundle with their hashes."
+    },
+    "bundle_digest": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/sha256",
+      "description": "Computed digest over the bundle's artifact inventory (not a self-hash of the manifest)."
+    },
+    "provider_mode": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Provider mode used for the run (e.g. 'live', 'record', 'replay')."
+    },
+    "fixture_corpus_version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Version of the fixture corpus referenced by the run."
+    },
+    "trace_reference": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^/].*$",
+      "description": "Relative path to the chain trace artifact within the bundle."
+    },
+    "replay_eligible": {
+      "type": "boolean",
+      "description": "Whether the bundle is eligible for deterministic replay."
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "nodechain://schemas/semantic_types/research_review_decisions",
+  "title": "ResearchReviewDecisionsV1",
+  "description": "Human review decisions recorded at review gates for a ResearchWorkspaceBundleV1 run.",
+  "type": "object",
+  "required": ["bundle_version", "run_id", "recorded_at", "review_decisions"],
+  "additionalProperties": false,
+  "properties": {
+    "bundle_version": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/bundle_version"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier of the research run these review decisions belong to."
+    },
+    "recorded_at": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/timestamp"
+    },
+    "review_decisions": {
+      "type": "array",
+      "items": {
+        "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/review_decision"
+      },
+      "description": "Recorded review decisions."
+    },
+    "review_required": {
+      "type": "boolean",
+      "description": "Whether the run required a review gate."
+    },
+    "review_completed": {
+      "type": "boolean",
+      "description": "Whether all required review gates were completed."
+    }
+  }
+}

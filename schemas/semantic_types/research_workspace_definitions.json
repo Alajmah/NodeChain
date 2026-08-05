@@ -1,0 +1,441 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "nodechain://schemas/semantic_types/research_workspace_definitions",
+  "title": "ResearchWorkspaceBundleV1SharedDefinitions",
+  "description": "Shared definitions ($defs) for the ResearchWorkspaceBundleV1 schema suite. These definitions are referenced by every per-document schema via $ref. This document is NOT a standalone document schema; it is a vocabulary module.",
+  "type": "object",
+  "$defs": {
+    "bundle_version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Bundle contract version. Fixed to '1.0' for the V1 contract."
+    },
+    "run_status": {
+      "type": "string",
+      "enum": [
+        "running",
+        "paused_for_review",
+        "completed",
+        "completed_degraded",
+        "failed",
+        "blocked",
+        "cancelled"
+      ],
+      "description": "Lifecycle status of a research run."
+    },
+    "claim_status": {
+      "type": "string",
+      "enum": [
+        "supported",
+        "partially_supported",
+        "contested",
+        "unsupported",
+        "rejected"
+      ],
+      "description": "Validation outcome for a synthesized claim."
+    },
+    "review_decision_type": {
+      "type": "string",
+      "enum": ["approve", "reject", "revise"],
+      "description": "Decision recorded by a human reviewer at a review gate."
+    },
+    "fault_type": {
+      "type": "string",
+      "enum": [
+        "fail_before_dispatch",
+        "timeout_after_dispatch",
+        "malformed_provenance",
+        "partial_result_set"
+      ],
+      "description": "Class of failure recorded against an adapter or run step."
+    },
+    "target_type": {
+      "type": "string",
+      "enum": ["source", "evidence", "claim", "citation"],
+      "description": "The kind of artifact a validation check targets."
+    },
+    "decision_type": {
+      "type": "string",
+      "description": "Classifier for a policy decision (free-form but required)."
+    },
+    "evidence_type": {
+      "type": "string",
+      "description": "Classifier for extracted evidence (e.g. 'quote', 'paraphrase', 'datum')."
+    },
+    "source_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Opaque identifier for a retrieved source record."
+    },
+    "evidence_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Opaque identifier for an extracted evidence record."
+    },
+    "claim_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Opaque identifier for a synthesized claim."
+    },
+    "citation_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Opaque identifier for a formatted citation record."
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "Lowercase hex SHA-256 digest (64 hex characters)."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})$",
+      "description": "RFC 3339 / ISO 8601 timestamp, e.g. 2026-08-03T14:22:01Z."
+    },
+    "file_hash": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Relative path of the artifact within the bundle."
+        },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      },
+      "description": "A file path paired with its SHA-256 digest."
+    },
+    "source_record": {
+      "type": "object",
+      "required": [
+        "source_id",
+        "origin_api",
+        "query_used",
+        "retrieved_at",
+        "title",
+        "source_hash"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "source_id": { "$ref": "#/$defs/source_id" },
+        "origin_api": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Adapter / API that produced the source (e.g. 'arxiv', 'semantic_scholar')."
+        },
+        "query_used": {
+          "type": "string",
+          "description": "The query (or query identifier) that retrieved this source."
+        },
+        "retrieved_at": { "$ref": "#/$defs/timestamp" },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Title of the source document."
+        },
+        "doi": {
+          "type": ["string", "null"],
+          "description": "Digital Object Identifier for the source, if available."
+        },
+        "authors": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of author names."
+        },
+        "abstract": {
+          "type": ["string", "null"],
+          "description": "Abstract or summary text, if available."
+        },
+        "source_hash": { "$ref": "#/$defs/sha256" }
+      },
+      "description": "A retrieved and ingested source record."
+    },
+    "evidence_record": {
+      "type": "object",
+      "required": [
+        "evidence_id",
+        "source_ids",
+        "extracted_text",
+        "evidence_type",
+        "confidence"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "evidence_id": { "$ref": "#/$defs/evidence_id" },
+        "source_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/source_id" },
+          "minItems": 1,
+          "description": "Source records this evidence was extracted from."
+        },
+        "extracted_text": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Verbatim or paraphrased text drawn from the source(s)."
+        },
+        "evidence_type": { "$ref": "#/$defs/evidence_type" },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Extraction confidence in [0.0, 1.0]."
+        }
+      },
+      "description": "An evidence fragment extracted from one or more sources."
+    },
+    "uncertainty_marker": {
+      "type": "object",
+      "required": ["marker_id", "description", "affected_claim_ids"],
+      "additionalProperties": false,
+      "properties": {
+        "marker_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Opaque identifier for this uncertainty marker."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable description of the uncertainty."
+        },
+        "affected_claim_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/claim_id" },
+          "description": "Claims that this uncertainty pertains to."
+        }
+      },
+      "description": "A recorded uncertainty marker associated with one or more claims."
+    },
+    "validation_result": {
+      "type": "object",
+      "required": [
+        "validation_id",
+        "target_type",
+        "target_id",
+        "check_name",
+        "passed",
+        "message"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "validation_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Opaque identifier for this validation result."
+        },
+        "target_type": { "$ref": "#/$defs/target_type" },
+        "target_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Identifier of the target artifact (source/evidence/claim/citation id)."
+        },
+        "check_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Name of the validation check that was executed."
+        },
+        "passed": {
+          "type": "boolean",
+          "description": "Whether the check passed."
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable outcome message (may be empty)."
+        }
+      },
+      "description": "Result of a single automated validation check against a target artifact."
+    },
+    "claim_record": {
+      "type": "object",
+      "required": [
+        "claim_id",
+        "statement",
+        "status",
+        "supporting_evidence_ids",
+        "contradicting_evidence_ids",
+        "citation_ids",
+        "confidence",
+        "uncertainty_markers",
+        "validation_results"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "claim_id": { "$ref": "#/$defs/claim_id" },
+        "statement": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The synthesized claim statement."
+        },
+        "status": { "$ref": "#/$defs/claim_status" },
+        "supporting_evidence_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/evidence_id" },
+          "description": "Evidence records that support this claim."
+        },
+        "contradicting_evidence_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/evidence_id" },
+          "description": "Evidence records that contradict this claim."
+        },
+        "citation_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/citation_id" },
+          "description": "Citations backing this claim."
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Claim confidence in [0.0, 1.0]."
+        },
+        "uncertainty_markers": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/uncertainty_marker" },
+          "description": "Uncertainty markers attached to this claim."
+        },
+        "validation_results": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/validation_result" },
+          "description": "Validation results produced for this claim."
+        }
+      },
+      "description": "A synthesized research claim with provenance, status, and validation history."
+    },
+    "citation_record": {
+      "type": "object",
+      "required": [
+        "citation_id",
+        "source_id",
+        "evidence_ids",
+        "formatted_citation"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "citation_id": { "$ref": "#/$defs/citation_id" },
+        "source_id": { "$ref": "#/$defs/source_id" },
+        "evidence_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/evidence_id" },
+          "description": "Evidence records rendered through this citation."
+        },
+        "formatted_citation": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable formatted citation string."
+        }
+      },
+      "description": "A formatted citation record linking a source to its evidence."
+    },
+    "policy_decision": {
+      "type": "object",
+      "required": [
+        "decision_id",
+        "decision_type",
+        "reason",
+        "decided_at",
+        "decider_identity"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "decision_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Opaque identifier for this policy decision."
+        },
+        "decision_type": { "$ref": "#/$defs/decision_type" },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Justification for the decision."
+        },
+        "decided_at": { "$ref": "#/$defs/timestamp" },
+        "decider_identity": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Identity of the decider (model id, human reviewer, or policy id)."
+        }
+      },
+      "description": "A governance / policy decision recorded during the run (e.g. memory-write gate)."
+    },
+    "review_decision": {
+      "type": "object",
+      "required": [
+        "review_id",
+        "run_id",
+        "decision",
+        "reason",
+        "reviewer_identity",
+        "decided_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "review_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Opaque identifier for this review decision."
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Identifier of the run this review decision pertains to."
+        },
+        "decision": { "$ref": "#/$defs/review_decision_type" },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Justification recorded by the reviewer."
+        },
+        "reviewer_identity": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Identity of the human reviewer."
+        },
+        "decided_at": { "$ref": "#/$defs/timestamp" }
+      },
+      "description": "A human review decision recorded at a review gate."
+    },
+    "failure_record": {
+      "type": "object",
+      "required": [
+        "failure_id",
+        "adapter_name",
+        "fault_type",
+        "occurred_at",
+        "dispatch_occurred",
+        "evidence_unavailable",
+        "affected_claim_ids"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "failure_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Opaque identifier for this failure record."
+        },
+        "adapter_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Name of the adapter or step that failed."
+        },
+        "fault_type": { "$ref": "#/$defs/fault_type" },
+        "occurred_at": { "$ref": "#/$defs/timestamp" },
+        "dispatch_occurred": {
+          "type": "boolean",
+          "description": "Whether the failure happened after a tool/adapter dispatch (vs. before)."
+        },
+        "evidence_unavailable": {
+          "type": "boolean",
+          "description": "Whether the failure left evidence unavailable for downstream synthesis."
+        },
+        "affected_claim_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/claim_id" },
+          "description": "Claims affected by this failure."
+        }
+      },
+      "description": "A recorded failure affecting one or more claims."
+    }
+  }
+}

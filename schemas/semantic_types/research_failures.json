@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "nodechain://schemas/semantic_types/research_failures",
+  "title": "ResearchFailuresV1",
+  "description": "Failure records for a ResearchWorkspaceBundleV1 run, capturing adapter faults and their impact on claims.",
+  "type": "object",
+  "required": ["bundle_version", "run_id", "recorded_at", "failures"],
+  "additionalProperties": false,
+  "properties": {
+    "bundle_version": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/bundle_version"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier of the research run these failures belong to."
+    },
+    "recorded_at": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/timestamp"
+    },
+    "failures": {
+      "type": "array",
+      "items": {
+        "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/failure_record"
+      },
+      "description": "Recorded failure records."
+    },
+    "degraded_mode": {
+      "type": "boolean",
+      "description": "Whether the run continued in degraded mode as a result of these failures."
+    },
+    "affected_adapter_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of distinct adapters that produced failures."
+    }
+  }
+}

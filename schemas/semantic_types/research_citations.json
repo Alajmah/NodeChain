@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "nodechain://schemas/semantic_types/research_citations",
+  "title": "ResearchCitationsV1",
+  "description": "Formatted citation records for a ResearchWorkspaceBundleV1 run, linking sources to the evidence rendered through them.",
+  "type": "object",
+  "required": ["bundle_version", "run_id", "formatted_at", "citations"],
+  "additionalProperties": false,
+  "properties": {
+    "bundle_version": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/bundle_version"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier of the research run these citations belong to."
+    },
+    "formatted_at": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/timestamp"
+    },
+    "citations": {
+      "type": "array",
+      "items": {
+        "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/citation_record"
+      },
+      "description": "Formatted citation records."
+    },
+    "style": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Citation style applied (e.g. 'apa', 'mla', 'chicago')."
+    }
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "nodechain://schemas/semantic_types/research_validations",
+  "title": "ResearchValidationsV1",
+  "description": "Automated validation results recorded for a ResearchWorkspaceBundleV1 run, targeting sources, evidence, claims, or citations.",
+  "type": "object",
+  "required": ["bundle_version", "run_id", "executed_at", "validation_results"],
+  "additionalProperties": false,
+  "properties": {
+    "bundle_version": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/bundle_version"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier of the research run these validations belong to."
+    },
+    "executed_at": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/timestamp"
+    },
+    "validation_results": {
+      "type": "array",
+      "items": {
+        "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/validation_result"
+      },
+      "description": "Recorded validation results."
+    },
+    "checks_run": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Names of the validation checks executed."
+    },
+    "pass_rate": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Fraction of validation results that passed."
+    }
+  }
+}
