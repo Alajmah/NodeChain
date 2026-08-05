@@ -12,7 +12,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # --------------------------------------------------------------------------- #
@@ -699,6 +699,100 @@ class ResearchWorkspaceReport(_BundleModel):
 
 
 # --------------------------------------------------------------------------- #
+# Trace
+# --------------------------------------------------------------------------- #
+
+
+class TraceEvent(_BundleModel):
+    """A single execution event in a portable run trace.
+
+    ``model_config`` overrides the base ``extra="forbid"`` to permit arbitrary
+    metadata (mirrors ``additionalProperties: true`` on the event schema).
+    """
+
+    model_config = ConfigDict(
+        extra="allow",
+        frozen=True,
+        use_enum_values=False,
+    )
+
+    step_id: int
+    node_id: str
+    event_type: str
+    actor: str
+
+    @field_validator("node_id", "event_type", "actor")
+    @classmethod
+    def _nonempty(cls, v: str) -> str:
+        return _nonempty_str(v)
+
+    @field_validator("step_id")
+    @classmethod
+    def _step_id(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("step_id must be >= 0")
+        return v
+
+
+class ResearchTrace(_BundleModel):
+    """Portable trace document capturing the ordered execution events of a run.
+
+    Unlike other bundle documents this model permits unknown top-level fields
+    (``extra="allow"``) and an optional ``summary`` object, matching the
+    ``additionalProperties: true`` rule on ``research_trace.json``.
+    """
+
+    model_config = ConfigDict(
+        extra="allow",
+        frozen=True,
+        use_enum_values=False,
+    )
+
+    run_id: str
+    chain_id: str
+    events: list[TraceEvent] = Field(default_factory=list)
+    total_cost_usd: float | None = None
+    total_duration_ms: int | None = None
+    summary: dict[str, Any] | None = None
+
+    @field_validator("run_id", "chain_id")
+    @classmethod
+    def _nonempty(cls, v: str) -> str:
+        return _nonempty_str(v)
+
+    @field_validator("total_cost_usd")
+    @classmethod
+    def _cost_non_negative(cls, v: float | None) -> float | None:
+        if v is None:
+            return v
+        if v < 0:
+            raise ValueError("total_cost_usd must be >= 0")
+        return v
+
+    @field_validator("total_duration_ms")
+    @classmethod
+    def _duration_non_negative(cls, v: int | None) -> int | None:
+        if v is None:
+            return v
+        if v < 0:
+            raise ValueError("total_duration_ms must be >= 0")
+        return v
+
+    @model_validator(mode="after")
+    def _events_is_chronological(self) -> "ResearchTrace":
+        # Order is semantically meaningful; we do not reorder, but we do reject
+        # non-monotonic step_ids to keep the trace a faithful chronology.
+        last = -1
+        for ev in self.events:
+            if ev.step_id < last:
+                raise ValueError(
+                    "trace events must have monotonically non-decreasing step_id"
+                )
+            last = ev.step_id
+        return self
+
+
+# --------------------------------------------------------------------------- #
 # Container
 # --------------------------------------------------------------------------- #
 
@@ -725,5 +819,5 @@ class WorkspaceBundle(BaseModel):
     policy_decisions: ResearchPolicyDecisions
     review_decisions: ResearchReviewDecisions
     failures: ResearchFailures
-    trace: dict[str, Any]
+    trace: ResearchTrace
     report: ResearchWorkspaceReport

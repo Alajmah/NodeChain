@@ -27,6 +27,8 @@ from typing import Any, Sequence
 import jsonschema
 from pydantic import BaseModel
 
+from nodechain.validation.schema_validator import SCHEMA_ROOT
+
 from .exceptions import (
     BundleError,
     BundleFinalizationError,
@@ -50,17 +52,9 @@ from .serialization import (
 # Schema loading and $ref resolution
 # --------------------------------------------------------------------------- #
 
-# Resolve schemas relative to the repository root (src/nodechain/research ->
-# ../../..). Prefer the installed-package schemas, fall back to the source tree.
-# The package ships schemas under nodechain/schemas/ (installed) — depth from
-# here to the package root is parents[3] (src/nodechain/research -> src/nodechain
-# -> src -> repo-root in a source tree; nodechain/research -> nodechain in an
-# installed package). Try both layouts.
-_PKG_SCHEMA_ROOT = Path(__file__).resolve().parents[1] / "schemas"
-_SOURCE_SCHEMA_ROOT = Path(__file__).resolve().parents[3] / "schemas"
-SCHEMA_ROOT = (
-    _PKG_SCHEMA_ROOT if _PKG_SCHEMA_ROOT.is_dir() else _SOURCE_SCHEMA_ROOT
-)
+# Schema-root resolution is shared with the rest of NodeChain via
+# ``nodechain.validation.schema_validator.SCHEMA_ROOT``. Do not duplicate the
+# package-vs-source layout probe here.
 _DEFINITIONS_REF = "nodechain://schemas/semantic_types/research_workspace_definitions"
 
 _SCHEMA_REGISTRY: Any | None = None
@@ -121,7 +115,7 @@ _FILENAME_TO_SCHEMA_REF: dict[str, str] = {
     "review-decisions": "nodechain://schemas/semantic_types/research_review_decisions",
     "failures": "nodechain://schemas/semantic_types/research_failures",
     "report": "nodechain://schemas/semantic_types/research_workspace_report",
-    # trace.json has no dedicated schema; treated as opaque.
+    "trace": "nodechain://schemas/semantic_types/research_trace",
 }
 
 
@@ -384,9 +378,6 @@ def _validate_document_schema(filename: str, payload: dict[str, Any]) -> None:
     rel = ref[len("nodechain://schemas/"):]
     path = SCHEMA_ROOT / f"{rel}.json"
     if not path.exists():
-        # trace.json has no dedicated schema; skip (it is opaque)
-        if filename == "trace.json":
-            return
         raise BundleValidationError(f"schema not found for {filename}: {path}")
     with open(path, "r", encoding="utf-8") as fh:
         schema = json.load(fh)
@@ -544,7 +535,9 @@ class BundleWriter:
         """Validate, write the manifest last, and atomically swap staging into
         place. Returns the finalized bundle directory path.
 
-        Raises :class:`BundleFinalizationError` on any write/swap failure and
+        Raises :class:`BundleFinalizationError` on any write/swap failure (this
+        includes a stale-hash / stale-digest mismatch detected between the
+        staging files and the supplied manifest) and
         :class:`BundleValidationError` on schema or cross-reference failure.
         The staging directory is cleaned up on failure.
         """
@@ -555,22 +548,22 @@ class BundleWriter:
             )
 
         try:
-            # 1. Write manifest into staging (last).
+            # 1. BEFORE writing the manifest, recompute every non-manifest file
+            #    hash from the current staging contents and reject any drift
+            #    from the manifest's recorded artifact_inventory. This catches
+            #    stale manifests that were computed against different bytes
+            #    (e.g. a file mutated on disk after compute_manifest ran).
+            self._assert_staging_matches_manifest(manifest)
+
+            # 2. Write manifest into staging LAST (it digests everything else).
             self._write_manifest(manifest)
 
-            # 2. Load every document and run schema + cross-ref validation.
+            # 3. Load every document and run schema validation.
             bundle = self._load_all_documents()
             for fname, payload in bundle.items():
-                if fname == "trace.json":
-                    # Opaque; structural-only check.
-                    if not isinstance(payload, dict):
-                        raise BundleValidationError(
-                            "trace.json must be a JSON object"
-                        )
-                    continue
                 _validate_document_schema(fname, payload)
 
-            # 3. Reject unsupported bundle versions on any document.
+            # 4. Reject unsupported bundle versions on any document.
             for fname, payload in bundle.items():
                 if isinstance(payload, dict) and "bundle_version" in payload:
                     if payload["bundle_version"] != SUPPORTED_BUNDLE_VERSION:
@@ -579,13 +572,17 @@ class BundleWriter:
                             f"{payload['bundle_version']!r}"
                         )
 
-            # 4. Cross-reference integrity.
+            # 5. Cross-document truth + terminal-status enforcement.
+            _validate_cross_document_truth(bundle)
+            _assert_terminal_status(manifest.run_status.value, "manifest.run_status")
+
+            # 6. Cross-reference integrity.
             _validate_cross_references(bundle)
 
-            # 5. Reject duplicate IDs within each collection.
+            # 7. Reject duplicate IDs within each collection.
             _validate_unique_ids(bundle)
 
-            # 6. Atomic rename. os.replace on the same filesystem is atomic.
+            # 8. Atomic rename. os.replace on the same filesystem is atomic.
             if self.bundle_dir.exists():
                 # Destination exists but without manifest (shouldn't normally
                 # happen because of __init__ guard, but double-check).
@@ -600,6 +597,60 @@ class BundleWriter:
             raise BundleFinalizationError(
                 f"finalization failed: {exc}"
             ) from exc
+
+    def _assert_staging_matches_manifest(
+        self, manifest: ResearchWorkspaceManifest
+    ) -> None:
+        """Recompute hashes of every non-manifest file currently in staging and
+        compare them (and the recomputed ``bundle_digest``) against the values
+        recorded on ``manifest``. Raise :class:`BundleFinalizationError` on any
+        mismatch — the caller must not have altered files between
+        :meth:`compute_manifest` and :meth:`finalize`.
+        """
+        recorded_by_path: dict[str, str] = {
+            entry.path: entry.sha256 for entry in manifest.artifact_inventory
+        }
+
+        actual_inventory: list[FileHash] = []
+        for fname in _NON_MANIFEST_FILES:
+            path = self.staging_dir / fname
+            if not path.exists():
+                raise BundleFinalizationError(
+                    f"staging missing required file before finalization: {fname}"
+                )
+            actual = compute_file_hash(path)
+            actual_inventory.append(FileHash(path=fname, sha256=actual))
+            recorded = recorded_by_path.get(fname)
+            if recorded is None:
+                raise BundleFinalizationError(
+                    f"manifest artifact_inventory missing entry for {fname}"
+                )
+            if actual != recorded:
+                raise BundleFinalizationError(
+                    f"stale hash for {fname}: manifest recorded {recorded}, "
+                    f"staging now contains {actual}"
+                )
+
+        # The manifest inventory must cover exactly the non-manifest file set.
+        recorded_paths = set(recorded_by_path)
+        expected_paths = set(_NON_MANIFEST_FILES)
+        if recorded_paths != expected_paths:
+            missing = expected_paths - recorded_paths
+            extra = recorded_paths - expected_paths
+            raise BundleFinalizationError(
+                "manifest artifact_inventory does not match canonical file set: "
+                f"missing={sorted(missing)}, extra={sorted(extra)}"
+            )
+
+        # Recompute the bundle_digest and compare with the manifest's value.
+        recomputed_digest = compute_bundle_digest(
+            actual_inventory, manifest.model_dump(mode="json")
+        )
+        if recomputed_digest != manifest.bundle_digest:
+            raise BundleFinalizationError(
+                f"stale bundle_digest: manifest recorded {manifest.bundle_digest}, "
+                f"recomputed {recomputed_digest}"
+            )
 
     # ------------------------------------------------------------------ #
     # Internals
@@ -667,6 +718,117 @@ def _validate_unique_ids(bundle: dict[str, dict[str, Any]]) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Cross-document truth + terminal-status enforcement
+# --------------------------------------------------------------------------- #
+
+#: Run statuses that may legitimately appear on a finalized bundle. Anything
+#: else (e.g. ``running``, ``paused_for_review``) means the run is still in
+#: flight and MUST NOT be finalized.
+TERMINAL_RUN_STATUSES: frozenset[str] = frozenset(
+    {
+        "completed",
+        "completed_degraded",
+        "failed",
+        "blocked",
+        "cancelled",
+    }
+)
+
+
+def _assert_terminal_status(run_status: str, where: str) -> None:
+    """Reject non-terminal run statuses. ``where`` decorates the error."""
+    if run_status not in TERMINAL_RUN_STATUSES:
+        raise BundleValidationError(
+            f"non-terminal run_status {run_status!r} rejected at {where}; "
+            f"only {sorted(TERMINAL_RUN_STATUSES)} may finalize"
+        )
+
+
+def _validate_cross_document_truth(bundle_data: dict[str, dict[str, Any]]) -> None:
+    """Enforce that every document agrees with the manifest on shared fields.
+
+    ``bundle_data`` maps each canonical filename (including ``manifest.json``)
+    to its parsed JSON document. The manifest is the single source of truth;
+    every other document must agree with it on ``run_id`` and any other field
+    they hold in common. The trace reference on the manifest must resolve to
+    the canonical trace file present in the bundle.
+
+    Raises :class:`BundleValidationError` on the first disagreement.
+    """
+    manifest = bundle_data.get("manifest.json")
+    if manifest is None:
+        raise BundleValidationError(
+            "cross-document truth check requires manifest.json"
+        )
+
+    m_run_id = manifest.get("run_id")
+    m_chain_id = manifest.get("chain_id")
+    m_run_status = manifest.get("run_status")
+    m_input_digest = manifest.get("input_digest")
+    m_provider_mode = manifest.get("provider_mode")
+    m_replay_eligible = manifest.get("replay_eligible")
+    m_trace_reference = manifest.get("trace_reference")
+
+    errors: list[str] = []
+
+    def _eq(label: str, doc_field: str, expected: Any, actual: Any) -> None:
+        if actual != expected:
+            errors.append(
+                f"{label}: expected {doc_field}={expected!r}, got {actual!r}"
+            )
+
+    # 1. Every document's run_id == manifest.run_id.
+    for fname, doc in bundle_data.items():
+        if fname == "manifest.json" or not isinstance(doc, dict):
+            continue
+        if "run_id" in doc:
+            _eq(fname, "run_id", m_run_id, doc.get("run_id"))
+
+    # 2. review record run_id == manifest.run_id (per-record, in case the
+    #    document-level run_id is absent on a malformed bundle).
+    review_doc = bundle_data.get("review-decisions.json", {})
+    for rec in review_doc.get("review_decisions", []):
+        _eq(
+            f"review-decisions.json[{rec.get('review_id')}]",
+            "run_id",
+            m_run_id,
+            rec.get("run_id"),
+        )
+
+    # 3. run.json agreement with manifest.
+    run_doc = bundle_data.get("run.json", {})
+    _eq("run.json", "chain_id", m_chain_id, run_doc.get("chain_id"))
+    _eq("run.json", "status", m_run_status, run_doc.get("status"))
+    _eq("run.json", "input_digest", m_input_digest, run_doc.get("input_digest"))
+    _eq("run.json", "provider_mode", m_provider_mode, run_doc.get("provider_mode"))
+    _eq("run.json", "replay_eligible", m_replay_eligible, run_doc.get("replay_eligible"))
+
+    # 4. report.json agreement with manifest.
+    report_doc = bundle_data.get("report.json", {})
+    _eq("report.json", "run_id", m_run_id, report_doc.get("run_id"))
+    _eq("report.json", "run_status", m_run_status, report_doc.get("run_status"))
+    _eq("report.json", "replay_eligible", m_replay_eligible, report_doc.get("replay_eligible"))
+
+    # 5. trace run_id agreement with manifest.
+    trace_doc = bundle_data.get("trace.json", {})
+    _eq("trace.json", "run_id", m_run_id, trace_doc.get("run_id"))
+
+    # 6. trace_reference must resolve to the canonical trace file in the bundle.
+    if m_trace_reference != "trace.json":
+        errors.append(
+            f"manifest.trace_reference must be 'trace.json' (canonical trace "
+            f"file), got {m_trace_reference!r}"
+        )
+    if "trace.json" not in bundle_data:
+        errors.append("canonical trace.json is missing from the bundle")
+
+    if errors:
+        raise BundleValidationError(
+            "cross-document truth check failed: " + "; ".join(errors)
+        )
+
+
+# --------------------------------------------------------------------------- #
 # BundleReader
 # --------------------------------------------------------------------------- #
 
@@ -696,6 +858,10 @@ class BundleReader:
 
     def get_document(self, filename: str) -> dict[str, Any]:
         safe = _validate_filename(filename)
+        if safe not in BUNDLE_FILES:
+            raise BundleIntegrityError(
+                f"{safe!r} is not a canonical bundle file"
+            )
         path = self.bundle_dir / safe
         _validate_within_bundle(path, self.bundle_dir)
         if not path.exists():
@@ -705,11 +871,17 @@ class BundleReader:
 
     def verify_integrity(self) -> bool:
         """Verify that every recorded file hash matches the file on disk, that
-        every required file is present, that cross-references resolve, and that
-        the ``bundle_digest`` matches a recomputation.
+        every required file is present, that cross-references resolve, that the
+        ``bundle_digest`` matches a recomputation, that the inventory equals the
+        exact canonical file set, that every non-manifest document validates
+        against its JSON schema, that no document declares an unsupported
+        bundle version, and that cross-document truth holds.
 
         Returns ``True`` if everything is consistent. Raises
-        :class:`BundleIntegrityError` on the first problem.
+        :class:`BundleIntegrityError` (or
+        :class:`BundleValidationError` for schema / cross-reference / truth
+        failures, which are surfaced unchanged so callers can distinguish
+        integrity drift from contract violations) on the first problem.
         """
         # 1. Every required file present and within-bundle.
         for fname in BUNDLE_FILES:
@@ -718,10 +890,35 @@ class BundleReader:
             if not path.exists():
                 raise BundleIntegrityError(f"missing required file: {fname}")
 
-        # 2. Recompute per-file hashes; compare against inventory.
+        # 2. Inventory must equal the exact canonical file set: no duplicates,
+        #    no missing canonical paths, no extra/noncanonical paths.
+        inventory_entries: list[dict[str, Any]] = list(
+            self._manifest_doc.get("artifact_inventory", [])
+        )
+        inventory_paths: list[str] = [e.get("path") for e in inventory_entries]
+        seen: set[str] = set()
+        for p in inventory_paths:
+            if p in seen:
+                raise BundleIntegrityError(
+                    f"duplicate inventory path in manifest: {p!r}"
+                )
+            seen.add(p)
+        canonical_non_manifest = set(_NON_MANIFEST_FILES)
+        inventory_set = set(inventory_paths)
+        missing = canonical_non_manifest - inventory_set
+        extra = inventory_set - canonical_non_manifest
+        if missing:
+            raise BundleIntegrityError(
+                f"manifest inventory missing canonical paths: {sorted(missing)}"
+            )
+        if extra:
+            raise BundleIntegrityError(
+                f"manifest inventory contains noncanonical paths: {sorted(extra)}"
+            )
+
+        # 3. Recompute per-file hashes; compare against inventory.
         inventory_by_path: dict[str, str] = {
-            entry["path"]: entry["sha256"]
-            for entry in self._manifest_doc.get("artifact_inventory", [])
+            entry["path"]: entry["sha256"] for entry in inventory_entries
         }
         for fname in _NON_MANIFEST_FILES:
             actual = compute_file_hash(self.bundle_dir / fname)
@@ -735,7 +932,7 @@ class BundleReader:
                     f"hash mismatch for {fname}: expected {recorded}, got {actual}"
                 )
 
-        # 3. Recompute bundle_digest and compare.
+        # 4. Recompute bundle_digest and compare.
         inventory: list[FileHash] = [
             FileHash(path=p, sha256=s)
             for p, s in inventory_by_path.items()
@@ -747,12 +944,29 @@ class BundleReader:
                 f"{self._manifest.bundle_digest}, recomputed {recomputed}"
             )
 
-        # 4. Cross-reference integrity.
-        bundle = {
-            fname: self.get_document(fname)
-            for fname in BUNDLE_FILES
-            if fname != "manifest.json"
-        }
+        # 5. Schema-validate every non-manifest document (not just hash check).
+        bundle: dict[str, dict[str, Any]] = {}
+        for fname in _NON_MANIFEST_FILES:
+            with open(self.bundle_dir / fname, "r", encoding="utf-8") as fh:
+                bundle[fname] = json.load(fh)
+            _validate_document_schema(fname, bundle[fname])
+
+        # 6. Reject unsupported bundle versions on any document.
+        for fname, payload in bundle.items():
+            if isinstance(payload, dict) and "bundle_version" in payload:
+                if payload["bundle_version"] != SUPPORTED_BUNDLE_VERSION:
+                    raise BundleValidationError(
+                        f"unsupported bundle_version in {fname}: "
+                        f"{payload['bundle_version']!r}"
+                    )
+
+        # 7. Cross-document truth (run_id / chain_id / status / ... agree with
+        #    the manifest) and terminal-status enforcement.
+        bundle_with_manifest = dict(bundle)
+        bundle_with_manifest["manifest.json"] = self._manifest_doc
+        _validate_cross_document_truth(bundle_with_manifest)
+
+        # 8. Cross-reference integrity + duplicate-ID checks.
         _validate_cross_references(bundle)
         _validate_unique_ids(bundle)
 

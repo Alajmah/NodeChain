@@ -271,7 +271,27 @@ def _failures() -> dict:
 
 
 def _trace() -> dict:
-    return {"trace_id": "t-1", "run_id": RUN_ID, "events": []}
+    return {
+        "run_id": RUN_ID,
+        "chain_id": CHAIN_ID,
+        "events": [
+            {
+                "step_id": 0,
+                "node_id": "ingest",
+                "event_type": "step_completed",
+                "actor": "arxiv",
+            },
+            {
+                "step_id": 1,
+                "node_id": "synthesize",
+                "event_type": "step_started",
+                "actor": "orchestrator",
+            },
+        ],
+        "total_cost_usd": 0.12,
+        "total_duration_ms": 1500,
+        "summary": {"steps": 2},
+    }
 
 
 def _report() -> dict:
@@ -393,8 +413,13 @@ def test_manifest_self_hash_detects_tamper(tmp_path: Path) -> None:
 
 
 def test_unknown_field_rejected(tmp_path: Path) -> None:
+    """Unknown fields must be rejected. The malformed payload is written
+    BEFORE compute_manifest (so hashes agree); the schema validator then
+    catches it. Mutating a staged file AFTER compute_manifest is covered
+    separately by the stale-hash tests (Blocker 2)."""
     writer = BundleWriter(tmp_path / "bundle")
     docs = _all_documents()
+    docs["brief.json"]["unexpected_field"] = "boom"
     for fname in BUNDLE_FILES:
         if fname == "manifest.json":
             continue
@@ -405,19 +430,18 @@ def test_unknown_field_rejected(tmp_path: Path) -> None:
         run_status=RunStatus.COMPLETED, input_digest=INPUT_DIGEST,
         provider_mode="live", fixture_corpus_version="corpus-1",
     )
-    # Inject an unknown field into a staged file before finalize.
-    brief_path = writer.staging_dir / "brief.json"
-    doc = json.loads(brief_path.read_text())
-    doc["unexpected_field"] = "boom"
-    brief_path.write_text(canonical_json(doc))
     with pytest.raises(BundleValidationError):
         writer.finalize(manifest)
     assert not writer.staging_dir.exists(), "staging must be cleaned up"
 
 
 def test_missing_required_field_rejected(tmp_path: Path) -> None:
+    """Missing required fields must be rejected. The malformed payload is
+    written BEFORE compute_manifest so hashes agree and the schema validator
+    fires."""
     writer = BundleWriter(tmp_path / "bundle")
     docs = _all_documents()
+    del docs["brief.json"]["question"]  # required field
     for fname in BUNDLE_FILES:
         if fname == "manifest.json":
             continue
@@ -428,18 +452,18 @@ def test_missing_required_field_rejected(tmp_path: Path) -> None:
         run_status=RunStatus.COMPLETED, input_digest=INPUT_DIGEST,
         provider_mode="live", fixture_corpus_version="corpus-1",
     )
-    brief_path = writer.staging_dir / "brief.json"
-    doc = json.loads(brief_path.read_text())
-    del doc["question"]  # required field
-    brief_path.write_text(canonical_json(doc))
     with pytest.raises(BundleValidationError):
         writer.finalize(manifest)
     assert not writer.staging_dir.exists()
 
 
 def test_unsupported_bundle_version_rejected(tmp_path: Path) -> None:
+    """Unsupported bundle_version must be rejected. The malformed payload is
+    written BEFORE compute_manifest so hashes agree and the version check
+    fires."""
     writer = BundleWriter(tmp_path / "bundle")
     docs = _all_documents()
+    docs["run.json"]["bundle_version"] = "2.0"  # unsupported
     for fname in BUNDLE_FILES:
         if fname == "manifest.json":
             continue
@@ -450,10 +474,6 @@ def test_unsupported_bundle_version_rejected(tmp_path: Path) -> None:
         run_status=RunStatus.COMPLETED, input_digest=INPUT_DIGEST,
         provider_mode="live", fixture_corpus_version="corpus-1",
     )
-    run_path = writer.staging_dir / "run.json"
-    doc = json.loads(run_path.read_text())
-    doc["bundle_version"] = "2.0"  # unsupported
-    run_path.write_text(canonical_json(doc))
     with pytest.raises(BundleValidationError):
         writer.finalize(manifest)
     assert not writer.staging_dir.exists()
