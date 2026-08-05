@@ -366,11 +366,15 @@ class WorkspaceRunner:
             raise RuntimeError("no orchestrator — call run() first")
         run_id = self.orchestrator.state.run_id
         # The resume path reads review env vars — apply through scoped context
-        # that merges review decision + pause mode.
+        # that merges review decision + pause mode. The review env is one-shot:
+        # cleared in finally so a later resume cannot silently reuse it.
         env_updates = {"NODECHAIN_REVIEW_MODE": "pause"}
         env_updates.update(self._review_env)
-        with scoped_env(env_updates):
-            trace = asyncio.run(self.orchestrator.resume(run_id))
+        try:
+            with scoped_env(env_updates):
+                trace = asyncio.run(self.orchestrator.resume(run_id))
+        finally:
+            self._review_env = {}  # one-shot: clear after every resume attempt
         return RunResult(
             run_id=run_id,
             chain_id=self.chain_id,
@@ -390,15 +394,23 @@ class WorkspaceRunner:
         The decision is delivered through the existing runtime review seam
         (the env vars the HumanAdapter reads on resume). Applied through
         a scoped context so env vars don't leak to the process permanently.
+
+        Rejects unknown decisions — only 'approve', 'reject', 'revise' are
+        valid.
         """
-        # Map the WP 5.2 decision vocabulary to the runtime's vocabulary.
         decision_map = {
             "approve": "approve",
             "reject": "reject",
             "revise": "request_revision",
         }
-        runtime_decision = decision_map.get(decision, decision)
-        # Store for resume() to apply through scoped_env.
+        if decision not in decision_map:
+            raise ValueError(
+                f"unknown review decision {decision!r}; "
+                f"must be one of {sorted(decision_map)}"
+            )
+        runtime_decision = decision_map[decision]
+        # Store for resume() to apply through scoped_env. This is one-shot:
+        # resume() clears it in finally.
         self._review_env = {
             "NODECHAIN_REVIEW_DECISION": runtime_decision,
             "NODECHAIN_REVIEW_REASON": reason,

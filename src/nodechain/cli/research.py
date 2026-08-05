@@ -181,44 +181,45 @@ def research_run(
     help="Identity of the reviewer.",
 )
 @click.option(
-    "--corpus",
-    "corpus_path",
-    required=True,
-    type=click.Path(exists=True),
-    help="Path to the sealed fixture corpus YAML file (same as the run).",
-)
-@click.option(
-    "--brief",
+    "--workspace",
+    "workspace_dir",
     default=None,
-    help="Brief file or question (same as the original run).",
-)
-@click.option(
-    "--db",
-    "db_path",
-    default=None,
-    help="Path to the run state database (must match the original run).",
+    help="Operational workspace directory (auto-discovered from descriptor by default).",
 )
 def research_review(
     run_id: str,
     decision: str,
     reason: str,
     reviewer: str,
-    corpus_path: str,
-    brief: str | None,
-    db_path: str | None,
+    workspace_dir: str | None,
 ) -> None:
     """Submit a review decision for a paused run and resume.
 
-    RUN_ID is the identifier of the paused run.
+    RUN_ID is the identifier of the paused run. The corpus, brief, and database
+    are auto-discovered from the persisted run descriptor — no resupply needed.
     """
+    import json
+    import uuid
+    from datetime import datetime, timezone
+    from pathlib import Path
+
     from nodechain.core.state import StateManager
     from nodechain.research.runner import ResearchBrief, WorkspaceRunner
+    from nodechain.research.run_descriptor import load_descriptor
 
-    # Verify the run exists and is paused.
-    sm = StateManager(db_path or "data/research_workspace.db")
+    # Discover the workspace and descriptor.
+    ws = workspace_dir or "data/research_workspace"
+    try:
+        desc = load_descriptor(ws, run_id)
+    except FileNotFoundError:
+        console.print(f"[red]Error:[/red] no descriptor for run {run_id} in {ws}")
+        sys.exit(EXIT_NOT_FOUND)
+
+    # Verify the run exists and is paused using the descriptor's DB path.
+    sm = StateManager(desc.db_path)
     state = sm.load(run_id)
     if state is None:
-        console.print(f"[red]Error:[/red] run {run_id} not found")
+        console.print(f"[red]Error:[/red] run {run_id} not found in {desc.db_path}")
         sys.exit(EXIT_NOT_FOUND)
     if state.status not in ("waiting_for_review", "paused", "paused_for_budget"):
         console.print(
@@ -227,39 +228,73 @@ def research_review(
         )
         sys.exit(EXIT_RESUME_NOT_RESUMABLE)
 
+    # Persist durable review evidence BEFORE attempting resume.
+    review_id = str(uuid.uuid4())
+    submitted_at = datetime.now(timezone.utc).isoformat()
+    decision_map = {
+        "approve": "approve",
+        "reject": "reject",
+        "revise": "request_revision",
+    }
+    runtime_decision = decision_map[decision]
+    review_record = {
+        "review_id": review_id,
+        "run_id": run_id,
+        "reviewer": reviewer,
+        "requested_decision": decision,
+        "runtime_decision": runtime_decision,
+        "reason": reason,
+        "submitted_at": submitted_at,
+        "descriptor_digest": desc.corpus_digest,
+    }
+    review_path = Path(desc.workspace_dir) / f"{run_id}.review.{review_id[:8]}.json"
+    review_path.write_text(
+        json.dumps(review_record, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
     console.print(Panel(
         f"[bold blue]Review Decision[/bold blue]\n\n"
         f"Run ID: {run_id}\n"
-        f"Decision: {decision}\n"
+        f"Decision: {decision} (runtime: {runtime_decision})\n"
         f"Reviewer: {reviewer}\n"
-        f"Reason: {reason}",
+        f"Reason: {reason}\n"
+        f"Review ID: {review_id}\n"
+        f"Evidence: {review_path}",
         title="Resuming Run",
     ))
 
-    # Record the decision through the existing runtime review seam.
-    # The runner sets the env vars that HumanAdapter reads on resume.
-    # We need a brief to reconstruct the orchestrator (resume reconstructs it).
-    if brief is None:
-        brief = state.metadata.get("research_question", "")
-    rb = (
-        ResearchBrief.from_file(brief)
-        if brief and Path(brief).exists()
-        else ResearchBrief.from_question(brief or "review-resume")
-    )
-
+    # Reconstruct the runner from the descriptor (no resupplied inputs).
     runner = WorkspaceRunner(
-        brief=rb,
-        corpus_path=corpus_path,
-        db_path=db_path,
+        brief=ResearchBrief.from_question(desc.question),
+        corpus_path=desc.corpus_path,
+        workspace_dir=desc.workspace_dir,
+        db_path=desc.db_path,
+        trace_dir=desc.trace_dir,
+        chain_id=desc.chain_id,
     )
 
-    # Apply the review decision (sets env vars for the resume path).
+    # Apply the review decision (stores one-shot env vars).
     runner.apply_review(decision, reason, reviewer)
 
-    # Reconstruct the orchestrator and resume.
+    # Reconstruct the orchestrator (resume reconstructs it from persisted state).
     runner._compose()
-    runner.orchestrator.state = state  # restore the paused state
+    # Resume through the existing runtime seam — do NOT manually replace state.
+    # orchestrator.resume(run_id) loads state from the DB internally.
     result = runner.resume()
+
+    # Persist the resume outcome separately.
+    outcome_record = {
+        "review_id": review_id,
+        "run_id": run_id,
+        "resume_status": result.trace.final_status,
+        "resumed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    outcome_path = Path(desc.workspace_dir) / f"{run_id}.outcome.{review_id[:8]}.json"
+    outcome_path.write_text(
+        json.dumps(outcome_record, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
 
     if result.completed:
         console.print(Panel(
