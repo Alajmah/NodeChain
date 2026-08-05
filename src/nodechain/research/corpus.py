@@ -30,6 +30,22 @@ from typing import Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from typing import Literal
+
+
+# --------------------------------------------------------------------------- #
+# Canonical query key (shared with FixtureSearchAdapter)
+# --------------------------------------------------------------------------- #
+
+
+def canonical_query_key(terms: list[str]) -> str:
+    """Compute the canonical query key: lowercase, trimmed, single-space
+    separated, sorted tokens.
+
+    This MUST match FixtureSearchAdapter._query_key() exactly. Both use this
+    shared function so they cannot drift.
+    """
+    return " ".join(sorted(t.lower().strip() for t in terms if isinstance(t, str) and t.strip()))
 
 
 # --------------------------------------------------------------------------- #
@@ -43,7 +59,7 @@ class CorpusSource(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     source_id: str
-    origin_api: str = "fixture"
+    origin_api: Literal["fixture"] = "fixture"
     query_used: str
     retrieved_at: str = "2026-01-01T00:00:00Z"
     title: str = ""
@@ -199,10 +215,26 @@ class FixtureCorpus(BaseModel):
                 content_fields, sort_keys=True, separators=(",", ":")
             )
             expected = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-            if src.source_hash.lower() != expected:
+            if src.source_hash != expected:
                 raise ValueError(
                     f"source {src.source_id} source_hash mismatch: "
                     f"expected {expected}, got {src.source_hash}"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_canonical_query_keys(self) -> "FixtureCorpus":
+        """Reject query keys that are not in canonical form (lowercase, trimmed,
+        single-space separated, sorted tokens). Noncanonical keys caused the
+        capsule digest mismatch — this validator prevents recurrence."""
+        for query_key in self.queries:
+            # The canonical form is computed from the key split on whitespace.
+            tokens = query_key.split()
+            expected_key = canonical_query_key(tokens)
+            if query_key != expected_key:
+                raise ValueError(
+                    f"query key {query_key!r} is not canonical; "
+                    f"expected {expected_key!r}"
                 )
         return self
 
@@ -313,7 +345,8 @@ def corpus_to_fixture_map(corpus: FixtureCorpus) -> dict[str, Any]:
                 "authors": list(src.authors),
                 "abstract": src.abstract,
                 "doi": src.doi or "",
-                "publication_date": src.retrieved_at,
+                "retrieved_at": src.retrieved_at,
+                "publication_date": "",  # not fabricated — separate from retrieval
                 "query_used": key,
             })
         entry_dict["results"] = expanded_results

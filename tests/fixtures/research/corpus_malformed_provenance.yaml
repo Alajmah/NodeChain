@@ -4,12 +4,12 @@ description: Tests malformed_provenance fault crossing adapter boundary
 sources:
 - source_id: src-mp-1
   origin_api: fixture
-  query_used: test query
+  query_used: query test
   title: Test Source
   doi: ''
   source_hash: 3aa40b32d3a4a3e07eed8aa2351931e26b8152a60d4adc2f39020a9ae9debb1e
 queries:
-  test query:
+  query test:
     _fault: malformed_provenance
     results:
     - src-mp-1

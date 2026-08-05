@@ -31,6 +31,12 @@
         "type": "object",
         "required": [
           "source_id",
+          "origin_api",
+          "query_used",
+          "retrieved_at",
+          "title",
+          "authors",
+          "abstract",
           "source_hash"
         ],
         "additionalProperties": false,
@@ -41,7 +47,7 @@
           },
           "origin_api": {
             "type": "string",
-            "minLength": 1
+            "const": "fixture"
           },
           "query_used": {
             "type": "string"
@@ -50,13 +56,11 @@
             "type": "string"
           },
           "title": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           },
           "doi": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "authors": {
             "type": "array",
@@ -70,14 +74,14 @@
           "source_hash": {
             "type": "string",
             "pattern": "^[0-9a-f]{64}$",
-            "description": "SHA-256 of the source content (64 lowercase hex chars)."
+            "description": "SHA-256 of canonical source content (64 lowercase hex chars)."
           }
         }
       }
     },
     "queries": {
       "type": "object",
-      "description": "Deterministic query mappings. Key is the lowercased, sorted, space-joined query terms. Value is an entry with results and optional post-dispatch fault.",
+      "description": "Deterministic query mappings. Key is the canonical query key (lowercase, trimmed, single-space separated, sorted tokens). Value is an entry with source-ID references and optional post-dispatch fault.",
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
@@ -85,8 +89,11 @@
           "results": {
             "type": "array",
             "items": {
-              "type": "object"
-            }
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true,
+            "description": "Source IDs referencing declared sources in the sources collection."
           },
           "_fault": {
             "type": "string",
@@ -96,6 +103,23 @@
               "partial_result_set"
             ],
             "description": "Post-dispatch fault directive. fail_before_dispatch is NOT valid here — it is implemented in the runner's lane-admission layer."
+          },
+          "total_available": {
+            "type": ["integer", "null"],
+            "minimum": 0,
+            "description": "Total available sources for a partial_result_set fault."
+          },
+          "unavailable_source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Source IDs that were unavailable for a partial_result_set fault."
+          },
+          "incompleteness_reason": {
+            "type": ["string", "null"],
+            "description": "Reason for the partial result set."
           }
         }
       }

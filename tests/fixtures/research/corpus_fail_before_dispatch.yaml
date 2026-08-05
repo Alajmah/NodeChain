@@ -4,12 +4,12 @@ description: Tests fail_before_dispatch lane admission
 sources:
 - source_id: src-fbd-1
   origin_api: fixture
-  query_used: test query
+  query_used: query test
   title: Test Source
   doi: ''
   source_hash: ed8dc617ac29cfb36dd4896cf2032bcc401fe24d7abaec56d2d1012d498df513
 queries:
-  test query:
+  query test:
     results:
     - src-fbd-1
 minimum_evidence:

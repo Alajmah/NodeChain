@@ -387,37 +387,90 @@ def _normalize_fixture(raw: dict[str, Any]) -> dict[str, Any]:
     This normalizer preserves those identifiers so the ingested source record
     is traceable to the declared corpus source.
 
-    Required fields: source_id, source_hash, title. Fail closed if any is
-    missing — do not invent identifiers or hashes.
+    Required fields: source_id, source_hash, title, authors, abstract.
+    Fail closed if any is missing or has the wrong type — do not invent
+    identifiers, hashes, or content.
     """
     source_id = raw.get("source_id", "")
     source_hash = raw.get("source_hash", "")
     title = raw.get("title", "")
-    if not source_id or not source_hash or not title:
+    authors = raw.get("authors")
+    abstract = raw.get("abstract")
+
+    # Validate required fields exist.
+    if not source_id or not isinstance(source_id, str):
+        raise ValueError("fixture result missing or invalid source_id")
+    if not source_hash or not isinstance(source_hash, str):
+        raise ValueError("fixture result missing or invalid source_hash")
+    if not title or not isinstance(title, str):
+        raise ValueError("fixture result missing or invalid title")
+    if authors is None:
+        raise ValueError("fixture result missing authors")
+    # Accept both list and tuple (the corpus model stores tuple[str,...]).
+    if isinstance(authors, (list, tuple)):
+        authors = list(authors)
+    if not isinstance(authors, list) or not all(isinstance(a, str) for a in authors):
         raise ValueError(
-            f"fixture result missing required field(s): "
-            f"source_id={bool(source_id)}, source_hash={bool(source_hash)}, "
-            f"title={bool(title)}"
+            f"fixture result invalid authors (expected list[str])"
         )
+    if abstract is None or not isinstance(abstract, str):
+        raise ValueError(
+            f"fixture result missing or invalid abstract (expected str)"
+        )
+
+    # Validate source_hash is exactly lowercase [0-9a-f]{64}.
+    import re
+    if not re.match(r'^[0-9a-f]{64}$', source_hash):
+        raise ValueError(
+            f"fixture source_hash must be exactly 64 lowercase hex chars, "
+            f"got {source_hash[:20]}..."
+        )
+
+    # Recompute the canonical content hash and reject mismatch.
+    import hashlib as _hl
+    import json as _json
+    content_fields = {
+        "source_id": source_id,
+        "title": title,
+        "authors": list(authors),
+        "abstract": abstract,
+        "doi": raw.get("doi", "") or "",
+    }
+    canonical = _json.dumps(content_fields, sort_keys=True, separators=(",", ":"))
+    expected_hash = _hl.sha256(canonical.encode("utf-8")).hexdigest()
+    if source_hash != expected_hash:
+        raise ValueError(
+            f"fixture source_hash mismatch: expected {expected_hash}, "
+            f"got {source_hash}"
+        )
+
+    # Validate optional field types if supplied.
+    source_type = raw.get("source_type", "other")
+    valid_source_types = {"journal_article", "preprint", "conference", "review", "book", "thesis", "other"}
+    if source_type not in valid_source_types:
+        raise ValueError(
+            f"fixture source_type {source_type!r} not in {sorted(valid_source_types)}"
+        )
+
     return {
         "source_id": source_id,
         "source_hash": source_hash,
         "title": title,
-        "authors": raw.get("authors", []),
+        "authors": list(authors),
         "publication_date": raw.get("publication_date", ""),
         "doi": raw.get("doi", ""),
-        "abstract": raw.get("abstract", ""),
-        "source_type": raw.get("source_type", "sealed_fixture"),
+        "abstract": abstract,
+        "source_type": source_type,
         "peer_reviewed": raw.get("peer_reviewed", False),
         "citation_count": raw.get("citation_count", 0),
         "venue": raw.get("venue", "Sealed Fixture Corpus"),
         "subject_areas": raw.get("subject_areas", []),
         "open_access": raw.get("open_access", True),
         "pdf_url": raw.get("pdf_url", ""),
-        "credibility_signals": {
+        "credibility_signals": raw.get("credibility_signals", {
             "fixture_source_id": source_id,
             "fixture_source_hash": source_hash,
-        },
+        }),
     }
 
 

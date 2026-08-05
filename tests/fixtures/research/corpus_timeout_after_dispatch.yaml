@@ -4,12 +4,12 @@ description: Tests timeout_after_dispatch fault
 sources:
 - source_id: src-tad-1
   origin_api: fixture
-  query_used: test query
+  query_used: query test
   title: Test Source
   doi: ''
   source_hash: b9f2f4743f325d0b7d194152503b422363d0833d304b69910606411f67a56a53
 queries:
-  test query:
+  query test:
     _fault: timeout_after_dispatch
 minimum_evidence:
   min_sources: 1

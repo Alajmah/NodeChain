@@ -188,7 +188,10 @@ class FixtureSearchAdapter(BaseSearchAdapter):
 
     @staticmethod
     def _query_key(query: SearchQuery) -> str:
-        return " ".join(sorted(t.lower() for t in query.terms if isinstance(t, str)))
+        # Use the shared canonical function from the corpus module so the
+        # adapter and corpus loader cannot drift.
+        from nodechain.research.corpus import canonical_query_key
+        return canonical_query_key(list(query.terms))
 
     def _verify_corpus_integrity(self) -> None:
         """Recompute the corpus digest and reject on mismatch. This catches

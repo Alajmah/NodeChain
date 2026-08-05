@@ -261,26 +261,26 @@ class WorkspaceRunner:
         )
 
         def capsule_validator(check_run_id: str, adapter_name: str, digest: str) -> bool:
-            """Verify an exact capsule exists for this run + adapter + digest.
+            """Verify an exact capsule exists for this run + adapter + digest
+            with capsule_status='available'.
 
             The capsule-before-wire invariant (INV-004) requires that a
             capsule with capsule_status='available' was persisted before the
             adapter dispatch, with an exact canonical request digest match.
-
-            The pre-call journaling and the guard compute the same digest from
-            the same operation dict (terms/max/filters), so when the
-            context_selector produces correct terms, the capsule and guard
-            digests match exactly.
             """
             try:
                 import sqlite3
 
                 with sqlite3.connect(str(sm.db_path)) as conn:
                     row = conn.execute(
-                        """SELECT COUNT(*) FROM side_effect_replay_capsules
-                           WHERE run_id = ?
-                           AND capsule_digest = ?
-                           AND side_effect_key LIKE ?""",
+                        """SELECT COUNT(*) FROM side_effect_replay_capsules c
+                           JOIN side_effect_ledger l
+                             ON l.run_id = c.run_id
+                             AND l.idempotency_key = c.side_effect_key
+                           WHERE c.run_id = ?
+                           AND c.capsule_digest = ?
+                           AND c.side_effect_key LIKE ?
+                           AND l.capsule_status = 'available'""",
                         (check_run_id, digest, f"search:{adapter_name}:%"),
                     ).fetchone()
                     return row[0] > 0
