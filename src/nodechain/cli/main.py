@@ -4397,6 +4397,10 @@ _trace_replay_commands.register(cli)
 from nodechain.cli.commands import compose as _compose_commands
 _compose_commands.register(cli)
 
+# ── Phase 5: Governed Research Workspace Commands ──────────────────────────
+from nodechain.cli.research import research as _research_commands
+cli.add_command(_research_commands)
+
 
 if __name__ == "__main__":
     main()
