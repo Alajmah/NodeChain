@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "nodechain://schemas/semantic_types/research_fixture_corpus",
+  "title": "ResearchFixtureCorpusV1",
+  "description": "Sealed fixture corpus contract for governed research workspace runs. Provides deterministic source content, query mappings, retrieval metadata, minimum-evidence policy, and fault-injection configuration. The corpus is the sole input substrate for a sealed run — zero external network activity.",
+  "type": "object",
+  "required": [
+    "corpus_version",
+    "scenario_id"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "corpus_version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Version of the corpus contract."
+    },
+    "scenario_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier of the sealed scenario this corpus represents."
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of the scenario."
+    },
+    "sources": {
+      "type": "array",
+      "description": "Stable source records in the sealed corpus.",
+      "items": {
+        "type": "object",
+        "required": [
+          "source_id",
+          "source_hash"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "origin_api": {
+            "type": "string",
+            "minLength": 1
+          },
+          "query_used": {
+            "type": "string"
+          },
+          "retrieved_at": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "doi": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "authors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "abstract": {
+            "type": "string"
+          },
+          "source_hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "SHA-256 of the source content (64 lowercase hex chars)."
+          }
+        }
+      }
+    },
+    "queries": {
+      "type": "object",
+      "description": "Deterministic query mappings. Key is the lowercased, sorted, space-joined query terms. Value is an entry with results and optional post-dispatch fault.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "_fault": {
+            "type": "string",
+            "enum": [
+              "timeout_after_dispatch",
+              "malformed_provenance",
+              "partial_result_set"
+            ],
+            "description": "Post-dispatch fault directive. fail_before_dispatch is NOT valid here — it is implemented in the runner's lane-admission layer."
+          }
+        }
+      }
+    },
+    "minimum_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "min_sources": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "min_evidence_per_claim": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "min_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "fault_injection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fail_before_dispatch_lanes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Scenario IDs whose lane admission should fail before dispatch."
+        }
+      }
+    }
+  }
+}
