@@ -1317,3 +1317,119 @@ def test_reader_rejects_symlink_member(tmp_path: Path) -> None:
     reader = BundleReader(dest)
     with pytest.raises(BundleIntegrityError, match="symlink"):
         reader.verify_integrity()
+
+
+# =========================================================================== #
+# Round-3 correction tests: schema-enforced extension versioning
+# =========================================================================== #
+#
+# The versioned trace-extension guarantee must be enforced by the JSON Schema
+# (dependentRequired), not only by the Pydantic models. BundleWriter accepts
+# raw dictionaries and finalization validates them through JSON Schema, so a
+# caller can bypass model construction. These tests exercise the raw-dict /
+# schema path exclusively (no Pydantic construction of the trace document).
+# --------------------------------------------------------------------------- #
+
+
+def test_schema_rejects_unversioned_root_extensions(tmp_path: Path) -> None:
+    """Raw dict: a trace with root ``extensions`` but no ``extensions_version``
+    is rejected during finalize via the schema's dependentRequired rule."""
+    writer = BundleWriter(tmp_path / "bundle")
+    docs = _all_documents()
+    docs["trace.json"]["extensions"] = {"adapter_data": "unversioned"}
+    # Note: extensions_version deliberately NOT set.
+    for fname in BUNDLE_FILES:
+        if fname == "manifest.json":
+            continue
+        writer.write_document(fname, docs[fname])
+    manifest = writer.compute_manifest(
+        source_commit=COMMIT, run_id=RUN_ID, chain_id=CHAIN_ID,
+        blueprint_version="bp-1", created_at=TS, finalized_at=TS,
+        run_status="completed", input_digest=INPUT_DIGEST,
+        provider_mode="live", fixture_corpus_version="corpus-1",
+    )
+    with pytest.raises(BundleValidationError, match="trace.json"):
+        writer.finalize(manifest)
+    assert not (tmp_path / "bundle").exists()
+
+
+def test_schema_rejects_unversioned_event_extensions(tmp_path: Path) -> None:
+    """Raw dict: a trace event with ``extensions`` but no ``extensions_version``
+    is rejected during finalize via the event schema's dependentRequired rule."""
+    writer = BundleWriter(tmp_path / "bundle")
+    docs = _all_documents()
+    docs["trace.json"]["events"][0]["extensions"] = {"latency_ms": 12}
+    # Note: event extensions_version deliberately NOT set.
+    for fname in BUNDLE_FILES:
+        if fname == "manifest.json":
+            continue
+        writer.write_document(fname, docs[fname])
+    manifest = writer.compute_manifest(
+        source_commit=COMMIT, run_id=RUN_ID, chain_id=CHAIN_ID,
+        blueprint_version="bp-1", created_at=TS, finalized_at=TS,
+        run_status="completed", input_digest=INPUT_DIGEST,
+        provider_mode="live", fixture_corpus_version="corpus-1",
+    )
+    with pytest.raises(BundleValidationError, match="trace.json"):
+        writer.finalize(manifest)
+    assert not (tmp_path / "bundle").exists()
+
+
+def test_schema_accepts_versioned_root_and_event_extensions(
+    tmp_path: Path,
+) -> None:
+    """Raw dict: versioned extensions on both root and event are accepted."""
+    writer = BundleWriter(tmp_path / "bundle")
+    docs = _all_documents()
+    docs["trace.json"]["extensions_version"] = "1.0"
+    docs["trace.json"]["extensions"] = {"adapter_x": {"note": "ok"}}
+    docs["trace.json"]["events"][0]["extensions_version"] = "1.0"
+    docs["trace.json"]["events"][0]["extensions"] = {"latency_ms": 12}
+    for fname in BUNDLE_FILES:
+        if fname == "manifest.json":
+            continue
+        writer.write_document(fname, docs[fname])
+    manifest = writer.compute_manifest(
+        source_commit=COMMIT, run_id=RUN_ID, chain_id=CHAIN_ID,
+        blueprint_version="bp-1", created_at=TS, finalized_at=TS,
+        run_status="completed", input_digest=INPUT_DIGEST,
+        provider_mode="live", fixture_corpus_version="corpus-1",
+    )
+    finalized = writer.finalize(manifest)
+    assert (finalized / "trace.json").exists()
+
+
+def test_reader_rejects_tampered_unversioned_extensions(tmp_path: Path) -> None:
+    """A finalized trace tampered post-hoc to carry unversioned root extensions
+    is rejected by BundleReader even after hashes and bundle_digest are
+    recomputed, because the schema's dependentRequired rule fires during
+    verify_integrity()."""
+    dest = tmp_path / "bundle"
+    _write_valid_bundle(dest)
+    # Tamper: add root extensions without extensions_version.
+    trace_path = dest / "trace.json"
+    tdoc = json.loads(trace_path.read_text())
+    tdoc["extensions"] = {"injected": True}
+    trace_path.write_text(canonical_json(tdoc))
+    # Recompute manifest so hash/digest checks pass; the schema check is the
+    # sole remaining gate.
+    _recompute_manifest_for_directory(dest, "completed")
+    reader = BundleReader(dest)
+    with pytest.raises(BundleValidationError, match="trace.json"):
+        reader.verify_integrity()
+
+
+def test_reader_rejects_tampered_unversioned_event_extensions(
+    tmp_path: Path,
+) -> None:
+    """Same as above but for event-level extensions."""
+    dest = tmp_path / "bundle"
+    _write_valid_bundle(dest)
+    trace_path = dest / "trace.json"
+    tdoc = json.loads(trace_path.read_text())
+    tdoc["events"][0]["extensions"] = {"injected": True}
+    trace_path.write_text(canonical_json(tdoc))
+    _recompute_manifest_for_directory(dest, "completed")
+    reader = BundleReader(dest)
+    with pytest.raises(BundleValidationError, match="trace.json"):
+        reader.verify_integrity()

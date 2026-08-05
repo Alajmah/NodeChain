@@ -10,6 +10,11 @@
     "events"
   ],
   "additionalProperties": false,
+  "dependentRequired": {
+    "extensions": [
+      "extensions_version"
+    ]
+  },
   "properties": {
     "run_id": {
       "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/source_id"
@@ -31,6 +36,11 @@
           "actor"
         ],
         "additionalProperties": false,
+        "dependentRequired": {
+          "extensions": [
+            "extensions_version"
+          ]
+        },
         "properties": {
           "step_id": {
             "type": "integer",
