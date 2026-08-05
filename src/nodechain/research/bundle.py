@@ -44,6 +44,7 @@ from .models import (
 from .serialization import (
     canonical_json,
     canonical_json_bytes,
+    canonical_json_with_set_normalization,
     compute_file_hash,
     compute_sha256,
 )
@@ -149,6 +150,88 @@ BUNDLE_FILES: tuple[str, ...] = (
 _NON_MANIFEST_FILES: tuple[str, ...] = tuple(f for f in BUNDLE_FILES if f != "manifest.json")
 
 SUPPORTED_BUNDLE_VERSION = "1.0"
+
+
+# --------------------------------------------------------------------------- #
+# Filename-aware set-like normalization policy
+# --------------------------------------------------------------------------- #
+#
+# Bundle files are persisted through ``canonical_json_with_set_normalization``
+# (NOT plain ``canonical_json_bytes``) so that the on-disk bytes, per-file
+# hashes, and ``bundle_digest`` are all invariant under reordering of set-like
+# ID arrays. Each bundle filename declares the dotted set-like paths that apply
+# to its document shape. Paths are scoped to the document root of that file
+# (e.g. ``"sources.authors"`` resolves ``root["sources"][*]["authors"]``).
+#
+# Semantically ordered arrays (trace ``events``, plan ``steps``, report
+# ``steps_completed``, policy-decisions, review-decisions, evidence ordering)
+# are deliberately NOT listed and retain their input order.
+_NORMALIZATION_PATHS_BY_FILE: dict[str, tuple[str, ...]] = {
+    "brief.json": (
+        "scope.domains",
+        "constraints.required_adapters",
+        "constraints.excluded_adapters",
+    ),
+    "plan.json": (
+        "adapters_required",
+    ),
+    "sources.json": (
+        "sources.authors",
+    ),
+    "evidence.json": (
+        "evidence.source_ids",
+    ),
+    "claims.json": (
+        "claims.supporting_evidence_ids",
+        "claims.contradicting_evidence_ids",
+        "claims.citation_ids",
+        "claims.uncertainty_markers.affected_claim_ids",
+    ),
+    "citations.json": (
+        "citations.evidence_ids",
+    ),
+    "uncertainties.json": (
+        "uncertainties.affected_claim_ids",
+    ),
+    "failures.json": (
+        "failures.affected_claim_ids",
+    ),
+    "validations.json": (
+        "checks_run",
+    ),
+    "report.json": (
+        "adapters_used",
+    ),
+    # Documents with no set-like scalar arrays use an empty tuple and serialize
+    # through the same normalized path for uniformity (it is a no-op there).
+    "run.json": (),
+    "policy-decisions.json": (),
+    "review-decisions.json": (),
+    "trace.json": (),
+}
+
+
+def _set_like_paths_for(filename: str) -> tuple[str, ...]:
+    """Return the set-like normalization paths declared for ``filename``.
+
+    Every canonical non-manifest filename has an entry (possibly empty).
+    Unknown filenames raise so the policy cannot silently regress.
+    """
+    try:
+        return _NORMALIZATION_PATHS_BY_FILE[filename]
+    except KeyError as exc:
+        raise BundleError(
+            f"no normalization policy for bundle file: {filename!r}"
+        ) from exc
+
+
+def _canonical_bundle_bytes(filename: str, data: Any) -> bytes:
+    """Serialize a bundle document using the filename-aware canonicalization
+    policy (set-like arrays sorted; ordered arrays preserved)."""
+    paths = _set_like_paths_for(filename)
+    return canonical_json_with_set_normalization(
+        data, set_like_paths=paths
+    ).encode("utf-8")
 
 
 # --------------------------------------------------------------------------- #
@@ -455,7 +538,7 @@ class BundleWriter:
         if safe in self._written:
             raise BundleError(f"duplicate document write: {filename!r}")
 
-        payload_bytes = canonical_json_bytes(data)
+        payload_bytes = _canonical_bundle_bytes(safe, data)
         target = self.staging_dir / safe
         # Atomic write: write to temp file in same dir, then os.replace.
         tmp = target.with_suffix(target.suffix + ".tmp")
@@ -809,9 +892,12 @@ def _validate_cross_document_truth(bundle_data: dict[str, dict[str, Any]]) -> No
     _eq("report.json", "run_status", m_run_status, report_doc.get("run_status"))
     _eq("report.json", "replay_eligible", m_replay_eligible, report_doc.get("replay_eligible"))
 
-    # 5. trace run_id agreement with manifest.
+    # 5. trace run_id AND chain_id agreement with manifest. The trace carries
+    #    its own chain_id; a trace from another chain that happens to share a
+    #    run_id must not pass truth check.
     trace_doc = bundle_data.get("trace.json", {})
     _eq("trace.json", "run_id", m_run_id, trace_doc.get("run_id"))
+    _eq("trace.json", "chain_id", m_chain_id, trace_doc.get("chain_id"))
 
     # 6. trace_reference must resolve to the canonical trace file in the bundle.
     if m_trace_reference != "trace.json":
@@ -870,12 +956,25 @@ class BundleReader:
             return json.load(fh)
 
     def verify_integrity(self) -> bool:
-        """Verify that every recorded file hash matches the file on disk, that
-        every required file is present, that cross-references resolve, that the
-        ``bundle_digest`` matches a recomputation, that the inventory equals the
-        exact canonical file set, that every non-manifest document validates
-        against its JSON schema, that no document declares an unsupported
-        bundle version, and that cross-document truth holds.
+        """Verify the complete on-disk contract of a finalized bundle.
+
+        Checks, in order:
+
+        1. The bundle directory's physical member set equals the canonical
+           ``BUNDLE_FILES`` exactly (no extra files, directories, or symlinks;
+           no missing canonical file).
+        2. Every required file is present and contained within the bundle root.
+        3. The manifest inventory equals the exact canonical non-manifest set
+           (no duplicate / missing / extra inventory entries).
+        4. Every recorded per-file hash matches the file now on disk.
+        5. The ``bundle_digest`` matches a recomputation.
+        6. Every non-manifest document validates against its JSON schema.
+        7. No document declares an unsupported ``bundle_version``.
+        8. Cross-document truth holds (run_id / chain_id / status / ... agree
+           with the manifest, including ``trace.chain_id``).
+        9. The manifest ``run_status`` is terminal (``running`` /
+           ``paused_for_review`` are rejected even if internally consistent).
+        10. Cross-reference integrity + duplicate-ID checks.
 
         Returns ``True`` if everything is consistent. Raises
         :class:`BundleIntegrityError` (or
@@ -883,14 +982,43 @@ class BundleReader:
         failures, which are surfaced unchanged so callers can distinguish
         integrity drift from contract violations) on the first problem.
         """
-        # 1. Every required file present and within-bundle.
+        # 1. Physical directory member set must equal the canonical file set
+        #    exactly. This makes the manifest a COMPLETE artifact inventory:
+        #    no unlisted file, directory, or symlink may ride along inside a
+        #    finalized bundle. We check this before per-file hash recomputation
+        #    so an extra member cannot hide behind a passing hash check.
+        actual_members = set()
+        for entry in self.bundle_dir.iterdir():
+            actual_members.add(entry.name)
+        expected_members = set(BUNDLE_FILES)
+        extra_members = actual_members - expected_members
+        missing_members = expected_members - actual_members
+        if extra_members:
+            raise BundleIntegrityError(
+                f"bundle directory contains non-canonical members: "
+                f"{sorted(extra_members)}; expected exactly {sorted(expected_members)}"
+            )
+        if missing_members:
+            raise BundleIntegrityError(
+                f"bundle directory missing canonical members: "
+                f"{sorted(missing_members)}"
+            )
+        # Reject any symlink among the canonical members — a finalized bundle is
+        # a flat directory of real files.
+        for fname in BUNDLE_FILES:
+            if (self.bundle_dir / fname).is_symlink():
+                raise BundleIntegrityError(
+                    f"bundle member must be a real file, not a symlink: {fname}"
+                )
+
+        # 2. Every required file present and within-bundle.
         for fname in BUNDLE_FILES:
             path = self.bundle_dir / fname
             _validate_within_bundle(path, self.bundle_dir)
             if not path.exists():
                 raise BundleIntegrityError(f"missing required file: {fname}")
 
-        # 2. Inventory must equal the exact canonical file set: no duplicates,
+        # 3. Inventory must equal the exact canonical file set: no duplicates,
         #    no missing canonical paths, no extra/noncanonical paths.
         inventory_entries: list[dict[str, Any]] = list(
             self._manifest_doc.get("artifact_inventory", [])
@@ -916,7 +1044,7 @@ class BundleReader:
                 f"manifest inventory contains noncanonical paths: {sorted(extra)}"
             )
 
-        # 3. Recompute per-file hashes; compare against inventory.
+        # 4. Recompute per-file hashes; compare against inventory.
         inventory_by_path: dict[str, str] = {
             entry["path"]: entry["sha256"] for entry in inventory_entries
         }
@@ -932,7 +1060,7 @@ class BundleReader:
                     f"hash mismatch for {fname}: expected {recorded}, got {actual}"
                 )
 
-        # 4. Recompute bundle_digest and compare.
+        # 5. Recompute bundle_digest and compare.
         inventory: list[FileHash] = [
             FileHash(path=p, sha256=s)
             for p, s in inventory_by_path.items()
@@ -944,14 +1072,14 @@ class BundleReader:
                 f"{self._manifest.bundle_digest}, recomputed {recomputed}"
             )
 
-        # 5. Schema-validate every non-manifest document (not just hash check).
+        # 6. Schema-validate every non-manifest document (not just hash check).
         bundle: dict[str, dict[str, Any]] = {}
         for fname in _NON_MANIFEST_FILES:
             with open(self.bundle_dir / fname, "r", encoding="utf-8") as fh:
                 bundle[fname] = json.load(fh)
             _validate_document_schema(fname, bundle[fname])
 
-        # 6. Reject unsupported bundle versions on any document.
+        # 7. Reject unsupported bundle versions on any document.
         for fname, payload in bundle.items():
             if isinstance(payload, dict) and "bundle_version" in payload:
                 if payload["bundle_version"] != SUPPORTED_BUNDLE_VERSION:
@@ -960,13 +1088,22 @@ class BundleReader:
                         f"{payload['bundle_version']!r}"
                     )
 
-        # 7. Cross-document truth (run_id / chain_id / status / ... agree with
-        #    the manifest) and terminal-status enforcement.
+        # 8. Cross-document truth (run_id / chain_id / status / ... agree with
+        #    the manifest).
         bundle_with_manifest = dict(bundle)
         bundle_with_manifest["manifest.json"] = self._manifest_doc
         _validate_cross_document_truth(bundle_with_manifest)
 
-        # 8. Cross-reference integrity + duplicate-ID checks.
+        # 9. Terminal-status enforcement. A bundle whose documents all agree on
+        #    a non-terminal status (running / paused_for_review) would pass the
+        #    truth check above; this gate independently rejects it so a
+        #    half-finished run cannot be read as a finalized bundle even if its
+        #    hashes and cross-document values are internally consistent.
+        _assert_terminal_status(
+            self._manifest.run_status.value, "manifest.run_status"
+        )
+
+        # 10. Cross-reference integrity + duplicate-ID checks.
         _validate_cross_references(bundle)
         _validate_unique_ids(bundle)
 

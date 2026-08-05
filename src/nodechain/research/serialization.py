@@ -91,10 +91,6 @@ DEFAULT_SET_LIKE_PATHS: tuple[str, ...] = (
     "checks_run",            # ResearchValidations
     "adapters_required",     # ResearchPlan
     "adapters_used",         # ResearchWorkspaceReport
-    "excluded_adapters",     # BriefConstraints
-    "authors",               # SourceRecord
-    "domains",               # BriefScope
-    "required_adapters",     # BriefConstraints
     # Per-record arrays (applied to every element of the enclosing collection).
     "evidence.source_ids",
     "claims.supporting_evidence_ids",
@@ -103,6 +99,11 @@ DEFAULT_SET_LIKE_PATHS: tuple[str, ...] = (
     "citations.evidence_ids",
     "uncertainties.affected_claim_ids",
     "failures.affected_claim_ids",
+    # Nested under a containing object/collection (not top-level).
+    "sources.authors",                       # SourceRecord inside sources.sources[]
+    "scope.domains",                         # BriefScope inside brief.scope
+    "constraints.required_adapters",         # BriefConstraints inside brief.constraints
+    "constraints.excluded_adapters",         # BriefConstraints inside brief.constraints
     # Per-record nested ID arrays.
     "claims.uncertainty_markers.affected_claim_ids",
 )

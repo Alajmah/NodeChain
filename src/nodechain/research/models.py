@@ -706,12 +706,13 @@ class ResearchWorkspaceReport(_BundleModel):
 class TraceEvent(_BundleModel):
     """A single execution event in a portable run trace.
 
-    ``model_config`` overrides the base ``extra="forbid"`` to permit arbitrary
-    metadata (mirrors ``additionalProperties: true`` on the event schema).
+    The contract is strict (``extra="forbid"``): unknown event-envelope fields
+    are rejected. Adapter-specific provenance that must travel with an event is
+    carried in the explicit, versioned ``extensions`` object.
     """
 
     model_config = ConfigDict(
-        extra="allow",
+        extra="forbid",
         frozen=True,
         use_enum_values=False,
     )
@@ -720,6 +721,8 @@ class TraceEvent(_BundleModel):
     node_id: str
     event_type: str
     actor: str
+    extensions_version: str | None = None
+    extensions: dict[str, Any] | None = None
 
     @field_validator("node_id", "event_type", "actor")
     @classmethod
@@ -733,17 +736,26 @@ class TraceEvent(_BundleModel):
             raise ValueError("step_id must be >= 0")
         return v
 
+    @model_validator(mode="after")
+    def _extensions_version_required_with_extensions(self) -> "TraceEvent":
+        if self.extensions is not None and not self.extensions_version:
+            raise ValueError(
+                "extensions_version is required when extensions is set on a trace event"
+            )
+        return self
+
 
 class ResearchTrace(_BundleModel):
     """Portable trace document capturing the ordered execution events of a run.
 
-    Unlike other bundle documents this model permits unknown top-level fields
-    (``extra="allow"``) and an optional ``summary`` object, matching the
-    ``additionalProperties: true`` rule on ``research_trace.json``.
+    The contract is strict (``extra="forbid"``): unknown top-level fields are
+    rejected. The explicit, versioned ``extensions`` object is the only place
+    adapter-defined root-level fields may appear. ``summary`` is intentionally
+    free-form descriptive metadata (non-authoritative).
     """
 
     model_config = ConfigDict(
-        extra="allow",
+        extra="forbid",
         frozen=True,
         use_enum_values=False,
     )
@@ -754,6 +766,8 @@ class ResearchTrace(_BundleModel):
     total_cost_usd: float | None = None
     total_duration_ms: int | None = None
     summary: dict[str, Any] | None = None
+    extensions_version: str | None = None
+    extensions: dict[str, Any] | None = None
 
     @field_validator("run_id", "chain_id")
     @classmethod
@@ -777,6 +791,14 @@ class ResearchTrace(_BundleModel):
         if v < 0:
             raise ValueError("total_duration_ms must be >= 0")
         return v
+
+    @model_validator(mode="after")
+    def _extensions_version_required_with_extensions(self) -> "ResearchTrace":
+        if self.extensions is not None and not self.extensions_version:
+            raise ValueError(
+                "extensions_version is required when extensions is set on the trace root"
+            )
+        return self
 
     @model_validator(mode="after")
     def _events_is_chronological(self) -> "ResearchTrace":

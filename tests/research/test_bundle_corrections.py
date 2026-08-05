@@ -19,6 +19,7 @@ Each test targets one of the six blockers:
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
@@ -34,6 +35,7 @@ from nodechain.research.bundle import (
     _validate_cross_document_truth,
 )
 from nodechain.research.exceptions import (
+    BundleError,
     BundleFinalizationError,
     BundleIntegrityError,
     BundleValidationError,
@@ -368,11 +370,18 @@ def test_trace_schema_file_exists() -> None:
     # Core required fields.
     for req in ("run_id", "chain_id", "events"):
         assert req in schema["required"], req
+    # Strict contract: root rejects unknown fields.
+    assert schema["additionalProperties"] is False
     event_item = schema["properties"]["events"]["items"]
     for req in ("step_id", "node_id", "event_type", "actor"):
         assert req in event_item["required"], req
-    # Event metadata is permitted (additionalProperties: true).
-    assert event_item["additionalProperties"] is True
+    # Strict contract: event envelope rejects unknown fields; extensibility is
+    # via the explicit, versioned extensions surface.
+    assert event_item["additionalProperties"] is False
+    assert "extensions" in event_item["properties"]
+    assert "extensions_version" in event_item["properties"]
+    assert "extensions" in schema["properties"]
+    assert "extensions_version" in schema["properties"]
 
 
 def test_research_trace_model_round_trip() -> None:
@@ -444,12 +453,57 @@ def test_trace_schema_validation_rejects_event_missing_core_field(
         writer.finalize(manifest)
 
 
-def test_trace_event_metadata_is_permitted(tmp_path: Path) -> None:
-    """Events may carry arbitrary metadata (additionalProperties: true)."""
+def test_trace_rejects_unknown_envelope_fields(tmp_path: Path) -> None:
+    """Strict trace contract: arbitrary event/root envelope fields are rejected.
+    Adapter-specific provenance must travel in the explicit ``extensions``
+    object."""
     writer = BundleWriter(tmp_path / "bundle")
     docs = _all_documents()
+    # Arbitrary event field -> rejected.
     docs["trace.json"]["events"][0]["custom_meta"] = {"anything": [1, 2]}
+    for fname in BUNDLE_FILES:
+        if fname == "manifest.json":
+            continue
+        writer.write_document(fname, docs[fname])
+    manifest = writer.compute_manifest(
+        source_commit=COMMIT, run_id=RUN_ID, chain_id=CHAIN_ID,
+        blueprint_version="bp-1", created_at=TS, finalized_at=TS,
+        run_status="completed", input_digest=INPUT_DIGEST,
+        provider_mode="live", fixture_corpus_version="corpus-1",
+    )
+    with pytest.raises(BundleValidationError, match="trace.json"):
+        writer.finalize(manifest)
+    assert not (tmp_path / "bundle").exists()
+
+
+def test_trace_rejects_unknown_root_field(tmp_path: Path) -> None:
+    """Strict trace contract: arbitrary root fields are rejected."""
+    writer = BundleWriter(tmp_path / "bundle")
+    docs = _all_documents()
     docs["trace.json"]["custom_top"] = "ok"
+    for fname in BUNDLE_FILES:
+        if fname == "manifest.json":
+            continue
+        writer.write_document(fname, docs[fname])
+    manifest = writer.compute_manifest(
+        source_commit=COMMIT, run_id=RUN_ID, chain_id=CHAIN_ID,
+        blueprint_version="bp-1", created_at=TS, finalized_at=TS,
+        run_status="completed", input_digest=INPUT_DIGEST,
+        provider_mode="live", fixture_corpus_version="corpus-1",
+    )
+    with pytest.raises(BundleValidationError, match="trace.json"):
+        writer.finalize(manifest)
+
+
+def test_trace_explicit_extensions_surface_is_permitted(tmp_path: Path) -> None:
+    """The explicit, versioned ``extensions`` object is the sanctioned extension
+    surface on both the root and individual events."""
+    writer = BundleWriter(tmp_path / "bundle")
+    docs = _all_documents()
+    docs["trace.json"]["extensions_version"] = "1.0"
+    docs["trace.json"]["extensions"] = {"adapter_x": {"note": "ok"}}
+    docs["trace.json"]["events"][0]["extensions_version"] = "1.0"
+    docs["trace.json"]["events"][0]["extensions"] = {"latency_ms": 12}
     for fname in BUNDLE_FILES:
         if fname == "manifest.json":
             continue
@@ -462,6 +516,21 @@ def test_trace_event_metadata_is_permitted(tmp_path: Path) -> None:
     )
     finalized = writer.finalize(manifest)
     assert (finalized / "trace.json").exists()
+
+
+def test_trace_extensions_require_version(tmp_path: Path) -> None:
+    """``extensions`` without ``extensions_version`` is rejected by the model."""
+    from nodechain.research.models import ResearchTrace, TraceEvent
+    with pytest.raises(Exception):
+        TraceEvent(
+            step_id=0, node_id="n", event_type="t", actor="a",
+            extensions={"foo": "bar"},
+        )
+    with pytest.raises(Exception):
+        ResearchTrace(
+            run_id="r", chain_id="c", events=[],
+            extensions={"foo": "bar"},
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -923,3 +992,328 @@ def _manifest_doc_from_docs(docs: dict[str, dict], run_status: str) -> dict:
     }
     base["bundle_digest"] = compute_bundle_digest(inventory, base)
     return base
+
+
+# =========================================================================== #
+# Round-2 correction tests (reviewer blockers on cd624a9)
+# =========================================================================== #
+#
+# These target the five blockers raised against the first correction commit:
+#
+# R2-1 — set-like canonicalization is wired into the production BundleWriter
+#        path (not just the standalone helper), with genuinely multi-element
+#        differently-ordered arrays, proving byte-identical files, identical
+#        per-file hashes, identical bundle_digest, and that ordered arrays
+#        (trace events, plan steps, review/policy decisions) remain
+#        order-sensitive.
+# R2-2 — BundleReader.verify_integrity enforces terminal-only status even when
+#        every document is internally consistent on a non-terminal status, with
+#        hashes and digest recomputed so the rejection is purely the terminal
+#        gate.
+# R2-3 — strict trace contract (covered above: root + event
+#        additionalProperties:false, explicit extensions surface).
+# R2-4 — trace.chain_id is checked against manifest.chain_id, with a tamper
+#        test that recomputes hashes and digest before reader verification.
+# R2-5 — physical directory member-set verification: extra files / directories
+#        / symlinks are rejected even when the manifest inventory is correct.
+# --------------------------------------------------------------------------- #
+
+
+def _write_bundle_with_documents(dest: Path, docs: dict[str, dict]) -> Path:
+    """Write a full bundle from the supplied document dict and finalize it."""
+    writer = BundleWriter(dest)
+    for fname in BUNDLE_FILES:
+        if fname == "manifest.json":
+            continue
+        writer.write_document(fname, docs[fname])
+    manifest = writer.compute_manifest(
+        source_commit=COMMIT, run_id=RUN_ID, chain_id=CHAIN_ID,
+        blueprint_version="bp-1", created_at=TS, finalized_at=TS,
+        run_status="completed", input_digest=INPUT_DIGEST,
+        provider_mode="live", fixture_corpus_version="corpus-1",
+    )
+    return writer.finalize(manifest)
+
+
+# --------------------------------------------------------------------------- #
+# R2-1: production-path set-like canonicalization
+# --------------------------------------------------------------------------- #
+
+
+def _docs_with_multi_element_set_like_arrays() -> dict[str, dict]:
+    """Documents whose set-like scalar arrays have >= 3 distinct elements so
+    that reordering is a genuine permutation (not a no-op on 0/1-element
+    arrays). All IDs referenced are real and cross-reference-valid: extra
+    sources/evidence/citations are added so the multi-element arrays all point
+    at entities that exist."""
+    docs = _all_documents()
+    # Add two more sources so source arrays can be multi-element.
+    docs["sources.json"]["sources"].extend([
+        {"source_id": "src-2", "origin_api": "arxiv", "query_used": "q2",
+         "retrieved_at": TS, "title": "B", "doi": "10.1000/2",
+         "authors": ["amy", "zoe"], "abstract": "B.", "source_hash": "c" * 64},
+        {"source_id": "src-3", "origin_api": "arxiv", "query_used": "q3",
+         "retrieved_at": TS, "title": "C", "doi": "10.1000/3",
+         "authors": ["bob"], "abstract": "C.", "source_hash": "d" * 64},
+    ])
+    # sources.authors — nested per-source (multi-element on src-1).
+    docs["sources.json"]["sources"][0]["authors"] = ["zoe", "amy", "bob"]
+    # brief scope.domains + constraints.required/excluded_adapters.
+    docs["brief.json"]["scope"]["domains"] = ["physics", "math", "cs"]
+    docs["brief.json"]["constraints"]["required_adapters"] = ["arxiv", "web", "kb"]
+    docs["brief.json"]["constraints"]["excluded_adapters"] = ["x", "y", "z"]
+    # Add two more evidence records so evidence arrays can be multi-element.
+    docs["evidence.json"]["evidence"].extend([
+        {"evidence_id": "ev-2", "source_ids": ["src-2"], "extracted_text": "e2",
+         "evidence_type": "quote", "confidence": 0.8},
+        {"evidence_id": "ev-3", "source_ids": ["src-3"], "extracted_text": "e3",
+         "evidence_type": "quote", "confidence": 0.7},
+    ])
+    # evidence.source_ids — per-record, multi-element.
+    docs["evidence.json"]["evidence"][0]["source_ids"] = ["src-3", "src-1", "src-2"]
+    # Add a second citation so citation arrays can be multi-element.
+    docs["citations.json"]["citations"].append({
+        "citation_id": "cit-2", "source_id": "src-2",
+        "evidence_ids": ["ev-2"], "formatted_citation": "Author (2021). B.",
+    })
+    # claims supporting/contradicting/citation ids — per-record, multi-element.
+    docs["claims.json"]["claims"][0]["supporting_evidence_ids"] = ["ev-3", "ev-1", "ev-2"]
+    docs["claims.json"]["claims"][0]["contradicting_evidence_ids"] = ["ev-2", "ev-1"]
+    docs["claims.json"]["claims"][0]["citation_ids"] = ["cit-2", "cit-1"]
+    # citations.evidence_ids — per-record, multi-element.
+    docs["citations.json"]["citations"][0]["evidence_ids"] = ["ev-2", "ev-1"]
+    # validations.checks_run — top-level scalar array.
+    docs["validations.json"]["checks_run"] = ["c3", "c1", "c2"]
+    # report.adapters_used — top-level scalar array.
+    docs["report.json"]["adapters_used"] = ["wb", "arxiv", "kb"]
+    return docs
+
+
+def test_production_canonicalization_byte_identical_under_permutation(
+    tmp_path: Path,
+) -> None:
+    """Two complete bundles that differ ONLY in the order of multi-element
+    set-like arrays must produce byte-identical canonical files for every
+    affected document."""
+    docs_a = _docs_with_multi_element_set_like_arrays()
+    docs_b = _docs_with_multi_element_set_like_arrays()
+    # Reverse every set-like array in docs_b (a genuine permutation, not a
+    # no-op, because each has >= 2 distinct elements).
+    docs_b["sources.json"]["sources"][0]["authors"].reverse()
+    docs_b["brief.json"]["scope"]["domains"].reverse()
+    docs_b["brief.json"]["constraints"]["required_adapters"].reverse()
+    docs_b["brief.json"]["constraints"]["excluded_adapters"].reverse()
+    docs_b["evidence.json"]["evidence"][0]["source_ids"].reverse()
+    docs_b["claims.json"]["claims"][0]["supporting_evidence_ids"].reverse()
+    docs_b["claims.json"]["claims"][0]["contradicting_evidence_ids"].reverse()
+    docs_b["claims.json"]["claims"][0]["citation_ids"].reverse()
+    docs_b["citations.json"]["citations"][0]["evidence_ids"].reverse()
+    docs_b["validations.json"]["checks_run"].reverse()
+    docs_b["report.json"]["adapters_used"].reverse()
+
+    finalized_a = _write_bundle_with_documents(tmp_path / "a", docs_a)
+    finalized_b = _write_bundle_with_documents(tmp_path / "b", docs_b)
+
+    # 1. Affected canonical JSON files are byte-identical.
+    for fname in (
+        "brief.json", "sources.json", "evidence.json", "claims.json",
+        "citations.json", "validations.json", "report.json",
+    ):
+        bytes_a = (finalized_a / fname).read_bytes()
+        bytes_b = (finalized_b / fname).read_bytes()
+        assert bytes_a == bytes_b, f"permutation changed bytes of {fname}"
+
+    # 2. Per-file hashes are identical across the whole bundle.
+    from nodechain.research.serialization import compute_file_hash
+    for fname in BUNDLE_FILES:
+        ha = compute_file_hash(finalized_a / fname)
+        hb = compute_file_hash(finalized_b / fname)
+        assert ha == hb, f"permutation changed hash of {fname}"
+
+    # 3. bundle_digest is identical.
+    ma = json.loads((finalized_a / "manifest.json").read_text())
+    mb = json.loads((finalized_b / "manifest.json").read_text())
+    assert ma["bundle_digest"] == mb["bundle_digest"], "permutation changed bundle_digest"
+
+
+def test_production_canonicalization_preserves_ordered_arrays(
+    tmp_path: Path,
+) -> None:
+    """Semantically ordered arrays (trace events, plan steps, review/policy
+    decisions) remain order-sensitive: swapping their order changes bytes,
+    hashes, and the digest."""
+    docs_a = _all_documents()
+    docs_b = _all_documents()
+    # Swap two trace events (chronological order is semantic).
+    evs_b = docs_b["trace.json"]["events"]
+    evs_b[0], evs_b[1] = evs_b[1], evs_b[0]
+
+    finalized_a = _write_bundle_with_documents(tmp_path / "a", docs_a)
+    finalized_b = _write_bundle_with_documents(tmp_path / "b", docs_b)
+
+    bytes_a = (finalized_a / "trace.json").read_bytes()
+    bytes_b = (finalized_b / "trace.json").read_bytes()
+    assert bytes_a != bytes_b, "trace event swap did not change bytes"
+    ma = json.loads((finalized_a / "manifest.json").read_text())
+    mb = json.loads((finalized_b / "manifest.json").read_text())
+    assert ma["bundle_digest"] != mb["bundle_digest"], (
+        "trace event swap did not change bundle_digest"
+    )
+
+
+def test_writer_rejects_unknown_filename_in_normalization_policy() -> None:
+    """The filename-aware policy must reject filenames it has no entry for."""
+    with pytest.raises(BundleError, match="no normalization policy"):
+        _ = bundle_mod._set_like_paths_for("not-a-bundle-file.json")
+
+
+# --------------------------------------------------------------------------- #
+# R2-2: reader terminal-only enforcement (recomputed running bundle)
+# --------------------------------------------------------------------------- #
+
+
+def _recompute_manifest_for_directory(dest: Path, run_status: str) -> None:
+    """Rewrite manifest.json for ``dest`` so that run_status reflects
+    ``run_status`` AND every per-file hash + bundle_digest is recomputed
+    against the current on-disk bytes. Used to build an adversarial bundle
+    whose ONLY defect is a non-terminal status."""
+    from nodechain.research.bundle import (
+        _NON_MANIFEST_FILES, compute_bundle_digest,
+    )
+    from nodechain.research.serialization import compute_file_hash
+
+    manifest_path = dest / "manifest.json"
+    doc = json.loads(manifest_path.read_text())
+    inventory = [
+        {"path": f, "sha256": compute_file_hash(dest / f)}
+        for f in _NON_MANIFEST_FILES
+    ]
+    doc["artifact_inventory"] = inventory
+    doc["run_status"] = run_status
+    doc.pop("bundle_digest", None)
+    doc["bundle_digest"] = compute_bundle_digest(inventory, doc)
+    manifest_path.write_text(canonical_json(doc))
+
+
+def _set_run_status_everywhere(dest: Path, status: str) -> None:
+    """Mutate run.json and report.json to agree on ``status`` so cross-document
+    truth does not reject the bundle before the terminal gate, then recompute
+    the manifest (hashes + digest) so the only remaining defect is the
+    non-terminal status itself."""
+    for fname, key in (("run.json", "status"), ("report.json", "run_status")):
+        p = dest / fname
+        d = json.loads(p.read_text())
+        d[key] = status
+        p.write_text(canonical_json(d))
+    _recompute_manifest_for_directory(dest, status)
+
+
+def test_reader_rejects_consistent_running_bundle(tmp_path: Path) -> None:
+    """A bundle whose manifest/run/report all agree on 'running' (with hashes
+    and digest recomputed) is still rejected by the reader's terminal gate."""
+    dest = tmp_path / "bundle"
+    _write_valid_bundle(dest)
+    _set_run_status_everywhere(dest, "running")
+    reader = BundleReader(dest)
+    with pytest.raises(BundleValidationError, match="non-terminal run_status"):
+        reader.verify_integrity()
+
+
+def test_reader_rejects_consistent_paused_bundle(tmp_path: Path) -> None:
+    """Same as above for 'paused_for_review'."""
+    dest = tmp_path / "bundle"
+    _write_valid_bundle(dest)
+    _set_run_status_everywhere(dest, "paused_for_review")
+    reader = BundleReader(dest)
+    with pytest.raises(BundleValidationError, match="non-terminal run_status"):
+        reader.verify_integrity()
+
+
+def test_reader_accepts_consistent_terminal_bundle_after_recompute(
+    tmp_path: Path,
+) -> None:
+    """Sanity: the same recompute flow with a terminal status passes."""
+    dest = tmp_path / "bundle"
+    _write_valid_bundle(dest)
+    _set_run_status_everywhere(dest, "failed")
+    reader = BundleReader(dest)
+    assert reader.verify_integrity() is True
+
+
+# --------------------------------------------------------------------------- #
+# R2-4: trace.chain_id checked against manifest.chain_id
+# --------------------------------------------------------------------------- #
+
+
+def test_reader_rejects_trace_from_other_chain(tmp_path: Path) -> None:
+    """A trace whose run_id matches the manifest but whose chain_id differs
+    must be rejected, even after hashes and digest are recomputed."""
+    dest = tmp_path / "bundle"
+    _write_valid_bundle(dest)
+    # Tamper only trace.chain_id to a different chain.
+    trace_path = dest / "trace.json"
+    tdoc = json.loads(trace_path.read_text())
+    tdoc["chain_id"] = "other-chain"
+    trace_path.write_text(canonical_json(tdoc))
+    # Recompute manifest so hash/digest checks pass.
+    _recompute_manifest_for_directory(dest, "completed")
+    reader = BundleReader(dest)
+    with pytest.raises(BundleValidationError, match=r"trace\.json.*chain_id"):
+        reader.verify_integrity()
+
+
+def test_truth_check_rejects_trace_chain_id_mismatch_unit() -> None:
+    """Unit-level: _validate_cross_document_truth rejects a trace whose
+    chain_id disagrees with the manifest, independent of hashing."""
+    docs = _all_documents()
+    manifest_doc = _manifest_doc_from_docs(docs, "completed")
+    bundle = dict(docs)
+    bundle["manifest.json"] = manifest_doc
+    # Trace chain_id disagrees.
+    bundle["trace.json"]["chain_id"] = "other-chain"
+    with pytest.raises(BundleValidationError, match=r"trace\.json.*chain_id"):
+        _validate_cross_document_truth(bundle)
+
+
+# --------------------------------------------------------------------------- #
+# R2-5: physical directory member-set verification
+# --------------------------------------------------------------------------- #
+
+
+def test_reader_rejects_extra_physical_file(tmp_path: Path) -> None:
+    """An extra unlisted file in the bundle directory is rejected even though
+    the manifest inventory is canonical."""
+    dest = tmp_path / "bundle"
+    _write_valid_bundle(dest)
+    (dest / "README.txt").write_text("sneaky")
+    reader = BundleReader(dest)
+    with pytest.raises(BundleIntegrityError, match="non-canonical members"):
+        reader.verify_integrity()
+
+
+def test_reader_rejects_extra_physical_directory(tmp_path: Path) -> None:
+    """An extra subdirectory inside the bundle is rejected."""
+    dest = tmp_path / "bundle"
+    _write_valid_bundle(dest)
+    (dest / "subdir").mkdir()
+    (dest / "subdir" / "x.json").write_text("{}")
+    reader = BundleReader(dest)
+    with pytest.raises(BundleIntegrityError, match="non-canonical members"):
+        reader.verify_integrity()
+
+
+def test_reader_rejects_symlink_member(tmp_path: Path) -> None:
+    """A symlink masquerading as a canonical member is rejected (skipped where
+    symlinks cannot be created, e.g. unprivileged Windows)."""
+    dest = tmp_path / "bundle"
+    _write_valid_bundle(dest)
+    target = dest / "brief.json"
+    link = dest / "claims.json"  # replace a canonical file with a symlink
+    try:
+        link.unlink()
+        os.symlink(target, link)
+    except (OSError, NotImplementedError):
+        pytest.skip("cannot create symlinks on this platform")
+    reader = BundleReader(dest)
+    with pytest.raises(BundleIntegrityError, match="symlink"):
+        reader.verify_integrity()
