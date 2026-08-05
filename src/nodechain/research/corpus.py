@@ -60,6 +60,10 @@ class CorpusQueryEntry(BaseModel):
 
     results: tuple[dict[str, Any], ...] = ()
     fault: str | None = Field(default=None, alias="_fault")
+    # partial_result_set structural metadata (used when fault == partial_result_set)
+    total_available: int | None = None
+    unavailable_source_ids: tuple[str, ...] = ()
+    incompleteness_reason: str | None = None
 
     @model_validator(mode="after")
     def _validate_fault(self) -> "CorpusQueryEntry":
@@ -227,5 +231,11 @@ def corpus_to_fixture_map(corpus: FixtureCorpus) -> dict[str, Any]:
         entry_dict: dict[str, Any] = {"results": list(entry.results)}
         if entry.fault:
             entry_dict["_fault"] = entry.fault
+        if entry.total_available is not None:
+            entry_dict["total_available"] = entry.total_available
+        if entry.unavailable_source_ids:
+            entry_dict["unavailable_source_ids"] = list(entry.unavailable_source_ids)
+        if entry.incompleteness_reason:
+            entry_dict["incompleteness_reason"] = entry.incompleteness_reason
         out[key] = entry_dict
     return out

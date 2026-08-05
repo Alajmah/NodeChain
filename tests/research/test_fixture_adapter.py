@@ -196,23 +196,37 @@ def test_timeout_after_dispatch_fault() -> None:
 
 
 def test_malformed_provenance_fault() -> None:
+    """malformed_provenance returns results with forbidden version (crosses
+    adapter boundary for node FPV1 validation to reject)."""
     adapter = FixtureSearchAdapter(
         {"x": {"_fault": "malformed_provenance",
                 "results": [{"origin_api": "fixture", "raw_data": {}}]}}
     )
-    with pytest.raises(ProvenanceError):
-        _run(adapter.search(SearchQuery(terms=["x"])))
+    # The fault returns results with provenance_version=999 instead of raising.
+    # The node's FPV1 validation is expected to reject this.
+    r = _run(adapter.search(SearchQuery(terms=["x"])))
+    assert len(r) == 1
+    assert r[0].provenance_version == 999  # forbidden version crosses boundary
 
 
 def test_partial_result_set_fault() -> None:
-    """partial_result_set returns results (explicitly incomplete) rather than
-    raising — the node records a partially-successful lane."""
+    """partial_result_set returns results with structural incompleteness
+    metadata (total_available, returned_count, unavailable_source_ids,
+    incompleteness_reason)."""
     adapter = FixtureSearchAdapter(
         {"x": {"_fault": "partial_result_set",
-                "results": [{"origin_api": "fixture", "raw_data": {"partial": True}}]}}
+                "results": [{"origin_api": "fixture", "raw_data": {"partial": True}}],
+                "total_available": 5,
+                "unavailable_source_ids": ["src-3", "src-4"],
+                "incompleteness_reason": "timeout_on_2_sources"}}
     )
     r = _run(adapter.search(SearchQuery(terms=["x"])))
     assert len(r) == 1
+    assert r[0].raw_data.get("_partial") is True
+    assert r[0].raw_data.get("_total_available") == 5
+    assert r[0].raw_data.get("_returned_count") == 1
+    assert r[0].raw_data.get("_unavailable_source_ids") == ["src-3", "src-4"]
+    assert r[0].raw_data.get("_incompleteness_reason") == "timeout_on_2_sources"
 
 
 def test_invocation_count_increments() -> None:

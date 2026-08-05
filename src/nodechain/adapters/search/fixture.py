@@ -275,21 +275,41 @@ class FixtureSearchAdapter(BaseSearchAdapter):
                     )
                 )
             if fault == "malformed_provenance":
-                # Return results but with a forbidden adapter-supplied
-                # provenance_version → _finalize_results raises ProvenanceError.
+                # Return results with a forbidden adapter-supplied
+                # provenance_version that BYPASSES _finalize_results() so the
+                # malformed result crosses the adapter boundary. The node's
+                # FPV1 validation (SearchToolNode.validate_live_result) then
+                # rejects it. The clean path still goes through
+                # _finalize_results() for central stamping.
                 raw_results = self._build_results(
                     entry.get("results", ()), query
+                )
+                # Stamp with an invalid version directly — do NOT call
+                # _finalize_results (which would catch this and raise).
+                elapsed_ms = int((time.time() - start) * 1000)
+                for r in raw_results:
+                    r.adapter_latency_ms = elapsed_ms
+                    r.provenance_version = 999  # forbidden version
+                return raw_results
+            if fault == "partial_result_set":
+                # dispatch succeeded; explicitly incomplete set. Return the
+                # partial results with structural incompleteness metadata
+                # embedded in each result's raw_data so downstream nodes can
+                # classify the partial outcome.
+                raw_results = self._build_results(
+                    entry.get("results", ()), query
+                )
+                total_available = entry.get("total_available", 0)
+                unavailable_ids = list(entry.get("unavailable_source_ids", ()))
+                incompleteness_reason = entry.get(
+                    "incompleteness_reason", "partial_result_set_fault"
                 )
                 for r in raw_results:
-                    r.provenance_version = 999  # forbidden
-                return self._finalize_results(
-                    raw_results, int((time.time() - start) * 1000)
-                )
-            if fault == "partial_result_set":
-                # dispatch succeeded; explicitly incomplete set.
-                raw_results = self._build_results(
-                    entry.get("results", ()), query
-                )
+                    r.raw_data["_partial"] = True
+                    r.raw_data["_total_available"] = total_available
+                    r.raw_data["_returned_count"] = len(raw_results)
+                    r.raw_data["_unavailable_source_ids"] = unavailable_ids
+                    r.raw_data["_incompleteness_reason"] = incompleteness_reason
                 return self._finalize_results(
                     raw_results, int((time.time() - start) * 1000)
                 )

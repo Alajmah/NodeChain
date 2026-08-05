@@ -1,0 +1,22 @@
+corpus_version: "1.0"
+scenario_id: "fail-before-dispatch-test"
+description: "Tests fail_before_dispatch lane admission"
+sources:
+  - source_id: src-fbd-1
+    origin_api: fixture
+    query_used: "test query"
+    title: "Test Source"
+    source_hash: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+queries:
+  test query:
+    results:
+      - origin_api: fixture
+        raw_data:
+          title: "Test Result"
+        query_used: "test query"
+minimum_evidence:
+  min_sources: 1
+  min_evidence_per_claim: 1
+fault_injection:
+  fail_before_dispatch_lanes:
+    - "fail-before-dispatch-test"

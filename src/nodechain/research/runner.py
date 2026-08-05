@@ -248,11 +248,22 @@ class WorkspaceRunner:
         fixture_map = corpus_to_fixture_map(self.corpus)
         self._fixture_adapter = FixtureSearchAdapter(fixture_map)
 
-        # Lane-admission: fail_before_dispatch (implemented HERE, before the
-        # guard is invoked — not inside the adapter).
-        scenario_faults = set(self.corpus.fault_injection.fail_before_dispatch_lanes)
+        # Lane-admission: fail_before_dispatch. When this fault is active,
+        # the capsule_validator returns False, which causes the guard to reject
+        # dispatch BEFORE the adapter is invoked. This produces:
+        #   guard.dispatch_count == 0
+        #   adapter.invocation_count == 0
+        #   no dispatch-attempt evidence
+        # The fault is implemented HERE (in the runner's lane-admission layer),
+        # not inside the adapter.
+        fail_before_dispatch_active = bool(
+            self.corpus.fault_injection.fail_before_dispatch_lanes
+        )
 
         def capsule_validator(check_run_id: str, adapter_name: str, digest: str) -> bool:
+            # Lane-admission: fail_before_dispatch blocks all dispatch.
+            if fail_before_dispatch_active:
+                return False
             """Verify a started capsule exists for this run + adapter.
 
             The capsule-before-wire invariant (INV-004) requires that a
