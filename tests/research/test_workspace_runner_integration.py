@@ -75,8 +75,8 @@ def test_search_tool_passes_package_trust(runner: WorkspaceRunner) -> None:
 
 
 def test_search_tool_dispatches_through_guard(runner: WorkspaceRunner) -> None:
-    """The search_tool has an OrdinaryDispatchGuard-wrapped fixture adapter
-    injected via set_adapter_resolver, with allow_unguarded=False."""
+    """The search_tool dispatches through OrdinaryDispatchGuard exactly once,
+    invoking the fixture adapter exactly once, with no failures or retries."""
     result = runner.run()
     # The resolver is wired with the fixture guard.
     assert runner._search_node is not None
@@ -88,9 +88,32 @@ def test_search_tool_dispatches_through_guard(runner: WorkspaceRunner) -> None:
     guard = resolver["fixture"]
     assert isinstance(guard, OrdinaryDispatchGuard)
     assert guard._skip_trust_check is False
-    # The fixture adapter is the guard's target.
     assert runner._fixture_adapter is not None
     assert guard._adapter is runner._fixture_adapter
+
+    # C2 dispatch proof: exactly 1 governed dispatch, 1 adapter invocation.
+    assert len(guard._dispatched_digests) == 1, (
+        f"expected 1 guard dispatch, got {len(guard._dispatched_digests)}"
+    )
+    assert runner._fixture_adapter.invocation_count == 1, (
+        f"expected 1 fixture invocation, got {runner._fixture_adapter.invocation_count}"
+    )
+
+    # No node_failed events for search_tool.
+    failures = [
+        ev for ev in result.trace.events
+        if ev.node_id == "search_tool" and "node_failed" in ev.event_type.value
+    ]
+    assert len(failures) == 0, f"search_tool had {len(failures)} node_failed events"
+
+    # Tool was called exactly once with the fixture adapter.
+    tool_calls = [
+        ev for ev in result.trace.events
+        if ev.node_id == "search_tool" and "tool_called" in ev.event_type.value
+    ]
+    assert len(tool_calls) == 1, (
+        f"expected 1 tool_called event, got {len(tool_calls)}"
+    )
 
 
 def test_chain_pauses_at_risk_classifier(runner: WorkspaceRunner) -> None:
