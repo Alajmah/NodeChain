@@ -217,8 +217,14 @@ class WorkspaceRunner:
         nodes["search_tool"] = FixtureSearchToolNode()
         return nodes
 
-    def _compose(self) -> Orchestrator:
-        """Construct the orchestrator and wire the guarded fixture adapter."""
+    def _compose(self, persisted_run_id: str | None = None) -> Orchestrator:
+        """Construct the orchestrator and wire the guarded fixture adapter.
+
+        When ``persisted_run_id`` is provided (resume path), the guard is
+        bound to that ID so capsule lookups match the original run's
+        side-effect ledger. The orchestrator's resume(persisted_run_id) then
+        loads the persisted state from the DB.
+        """
         # Build explicit local-dev KEK (no process-global env mutation).
         kek_manager = KekManager(local_dev=True, kek_path=self._kek_path)
         sm = StateManager(
@@ -244,8 +250,10 @@ class WorkspaceRunner:
             policy_engine=policy_engine,
         )
 
-        # Wire the guarded fixture adapter (after run_id is known).
-        run_id = orchestrator.state.run_id
+        # Wire the guarded fixture adapter. For resume, bind to the persisted
+        # run_id (for capsule lookup). For initial run, use the orchestrator's
+        # newly allocated run_id.
+        run_id = persisted_run_id or orchestrator.state.run_id
         fixture_map = corpus_to_fixture_map(self.corpus)
         self._fixture_adapter = FixtureSearchAdapter(fixture_map)
 
@@ -347,25 +355,27 @@ class WorkspaceRunner:
         # mode through a scoped context so it doesn't leak to the process.
         with scoped_env({"NODECHAIN_REVIEW_MODE": "pause"}):
             orch = self._compose()
-            trace = asyncio.run(orch.run(self.brief.question))
 
-        # Persist the run descriptor for resume/finalization.
-        desc = RunDescriptor(
-            run_id=orch.state.run_id,
-            chain_id=self.chain_id,
-            question=self.brief.question,
-            focus_areas=tuple(self.brief.focus_areas),
-            corpus_path=str(self._corpus_path),
-            corpus_digest=self.corpus_digest,
-            corpus_version=self.corpus.corpus_version,
-            scenario_id=self.corpus.scenario_id,
-            db_path=self._db_path,
-            trace_dir=self._trace_dir,
-            workspace_dir=self._workspace_dir,
-            kek_path=self._kek_path,
-        )
-        save_descriptor(self._workspace_dir, desc)
-        self._run_descriptor = desc
+            # Persist the descriptor AFTER run_id allocation but BEFORE
+            # execution, so a crash during dispatch leaves a discoverable run.
+            desc = RunDescriptor(
+                run_id=orch.state.run_id,
+                chain_id=self.chain_id,
+                question=self.brief.question,
+                focus_areas=tuple(self.brief.focus_areas),
+                corpus_path=str(self._corpus_path),
+                corpus_digest=self.corpus_digest,
+                corpus_version=self.corpus.corpus_version,
+                scenario_id=self.corpus.scenario_id,
+                db_path=self._db_path,
+                trace_dir=self._trace_dir,
+                workspace_dir=self._workspace_dir,
+                kek_path=self._kek_path,
+            )
+            save_descriptor(self._workspace_dir, desc)
+            self._run_descriptor = desc
+
+            trace = asyncio.run(orch.run(self.brief.question))
 
         return RunResult(
             run_id=orch.state.run_id,
@@ -375,13 +385,27 @@ class WorkspaceRunner:
             runner=self,
         )
 
-    def resume(self) -> "RunResult":
-        """Resume a paused run through the existing runtime resume seam."""
+    def compose_for_resume(self, persisted_run_id: str) -> Orchestrator:
+        """Construct the orchestrator for a resume, bound to the persisted
+        run_id. The guard, capsule validator, and resume call all use this ID.
+
+        This does NOT manually assign orchestrator.state — the existing
+        orchestrator.resume(persisted_run_id) seam loads state from the DB.
+        """
+        return self._compose(persisted_run_id=persisted_run_id)
+
+    def resume(self, run_id: str | None = None) -> "RunResult":
+        """Resume a paused run through the existing runtime resume seam.
+
+        Args:
+            run_id: The persisted run ID to resume. If None, uses the
+                orchestrator's current run_id (initial-run in-memory path).
+        """
         import asyncio
 
         if self.orchestrator is None:
-            raise RuntimeError("no orchestrator — call run() first")
-        run_id = self.orchestrator.state.run_id
+            raise RuntimeError("no orchestrator — call run() or compose_for_resume() first")
+        target_run_id = run_id or self.orchestrator.state.run_id
         # The resume path reads review env vars — apply through scoped context
         # that merges review decision + pause mode. The review env is one-shot:
         # cleared in finally so a later resume cannot silently reuse it.
@@ -389,11 +413,11 @@ class WorkspaceRunner:
         env_updates.update(self._review_env)
         try:
             with scoped_env(env_updates):
-                trace = asyncio.run(self.orchestrator.resume(run_id))
+                trace = asyncio.run(self.orchestrator.resume(target_run_id))
         finally:
             self._review_env = {}  # one-shot: clear after every resume attempt
         return RunResult(
-            run_id=run_id,
+            run_id=target_run_id,
             chain_id=self.chain_id,
             trace=trace,
             state=self.orchestrator.state,

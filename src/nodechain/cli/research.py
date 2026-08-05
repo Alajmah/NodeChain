@@ -245,13 +245,10 @@ def research_review(
         "runtime_decision": runtime_decision,
         "reason": reason,
         "submitted_at": submitted_at,
-        "descriptor_digest": desc.corpus_digest,
+        "descriptor_digest": desc.descriptor_digest,
     }
-    review_path = Path(desc.workspace_dir) / f"{run_id}.review.{review_id[:8]}.json"
-    review_path.write_text(
-        json.dumps(review_record, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
+    from nodechain.research.run_descriptor import save_review_record, save_outcome_record
+    review_path = save_review_record(desc.workspace_dir, run_id, review_record)
 
     console.print(Panel(
         f"[bold blue]Review Decision[/bold blue]\n\n"
@@ -277,11 +274,13 @@ def research_review(
     # Apply the review decision (stores one-shot env vars).
     runner.apply_review(decision, reason, reviewer)
 
-    # Reconstruct the orchestrator (resume reconstructs it from persisted state).
-    runner._compose()
+    # Reconstruct the orchestrator bound to the persisted run_id.
+    # compose_for_resume binds the guard to the persisted ID for capsule lookup.
+    # The existing orchestrator.resume(persisted_run_id) loads state from DB.
+    runner.compose_for_resume(desc.run_id)
     # Resume through the existing runtime seam — do NOT manually replace state.
     # orchestrator.resume(run_id) loads state from the DB internally.
-    result = runner.resume()
+    result = runner.resume(run_id=desc.run_id)
 
     # Persist the resume outcome separately.
     outcome_record = {
@@ -290,10 +289,8 @@ def research_review(
         "resume_status": result.trace.final_status,
         "resumed_at": datetime.now(timezone.utc).isoformat(),
     }
-    outcome_path = Path(desc.workspace_dir) / f"{run_id}.outcome.{review_id[:8]}.json"
-    outcome_path.write_text(
-        json.dumps(outcome_record, indent=2, sort_keys=True),
-        encoding="utf-8",
+    outcome_path = save_outcome_record(
+        desc.workspace_dir, run_id, review_id, outcome_record
     )
 
     if result.completed:
