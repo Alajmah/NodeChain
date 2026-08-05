@@ -158,6 +158,7 @@ class TestFrozenSurfacesMatch:
             "review",
             "recover",
             "api",
+            "research",
         }
         actual_cmds = set(cli.commands.keys())
         assert doc_cmds == actual_cmds

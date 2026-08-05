@@ -16,6 +16,14 @@ import click
 from rich.console import Console
 from rich.panel import Panel
 
+from nodechain.cli.exit_codes import (
+    EXIT_OK,
+    EXIT_NOT_FOUND,
+    EXIT_RUN_PAUSED,
+    EXIT_RUN_FAILED,
+    EXIT_RESUME_NOT_RESUMABLE,
+)
+
 console = Console()
 
 
@@ -118,7 +126,7 @@ def research_run(
             "paused_for_review": True,
             "corpus_digest": result.corpus_digest,
         })
-        sys.exit(11)  # paused exit code
+        sys.exit(EXIT_RUN_PAUSED)  # paused exit code
     elif result.completed:
         console.print(Panel(
             f"[green]COMPLETED[/green]\n\n"
@@ -132,8 +140,8 @@ def research_run(
             "final_status": result.trace.final_status,
             "corpus_digest": result.corpus_digest,
         })
-        sys.exit(0)
-    else:
+        sys.exit(EXIT_OK)
+    elif result.failed:
         console.print(Panel(
             f"[red]FAILED[/red]\n\n"
             f"Run ID: {result.run_id}\n"
@@ -146,7 +154,7 @@ def research_run(
             "final_status": result.trace.final_status,
             "corpus_digest": result.corpus_digest,
         })
-        sys.exit(12)  # failed exit code
+        sys.exit(EXIT_RUN_FAILED)  # failed exit code
 
 
 # --------------------------------------------------------------------------- #
@@ -211,13 +219,13 @@ def research_review(
     state = sm.load(run_id)
     if state is None:
         console.print(f"[red]Error:[/red] run {run_id} not found")
-        sys.exit(1)
+        sys.exit(EXIT_NOT_FOUND)
     if state.status not in ("waiting_for_review", "paused", "paused_for_budget"):
         console.print(
             f"[red]Error:[/red] run {run_id} is not paused "
             f"(status: {state.status})"
         )
-        sys.exit(1)
+        sys.exit(EXIT_RESUME_NOT_RESUMABLE)
 
     console.print(Panel(
         f"[bold blue]Review Decision[/bold blue]\n\n"
@@ -260,7 +268,7 @@ def research_review(
             f"Final status: {result.trace.final_status}",
             title="Run Complete",
         ))
-        sys.exit(0)
+        sys.exit(EXIT_OK)
     elif result.paused:
         console.print(Panel(
             f"[yellow]STILL PAUSED[/yellow]\n\n"
@@ -268,7 +276,7 @@ def research_review(
             f"Status: {result.state.status}",
             title="Review Round",
         ))
-        sys.exit(11)
+        sys.exit(EXIT_RUN_PAUSED)
     else:
         console.print(Panel(
             f"[red]FAILED AFTER REVIEW[/red]\n\n"
@@ -276,7 +284,7 @@ def research_review(
             f"Final status: {result.trace.final_status}",
             title="Run Failed",
         ))
-        sys.exit(12)
+        sys.exit(EXIT_RUN_FAILED)
 
 
 # --------------------------------------------------------------------------- #
