@@ -41,6 +41,42 @@ class FixtureModelAdapter:
         # match corpus keys.
         self._search_terms = search_terms or []
 
+    @staticmethod
+    def _extract_sources_from_text(text: str) -> list[dict[str, Any]]:
+        """Extract source dicts from a node prompt that embeds sources as JSON.
+
+        Nodes pass sources as ``json.dumps(aliased_sources)`` inside a
+        formatted prompt string. This helper finds JSON arrays containing
+        source_id keys by scanning for '[' positions and attempting to parse.
+        """
+        # Find all '[' positions and try to parse a JSON array from each
+        idx = 0
+        while True:
+            pos = text.find('[', idx)
+            if pos == -1:
+                break
+            # Try to find the matching ']' by scanning forward
+            depth = 0
+            for end in range(pos, len(text)):
+                if text[end] == '[':
+                    depth += 1
+                elif text[end] == ']':
+                    depth -= 1
+                    if depth == 0:
+                        candidate_str = text[pos:end + 1]
+                        try:
+                            candidate = json.loads(candidate_str)
+                            if (isinstance(candidate, list)
+                                    and len(candidate) > 0
+                                    and all(isinstance(x, dict) for x in candidate)
+                                    and any("source_id" in x for x in candidate)):
+                                return candidate
+                        except (json.JSONDecodeError, ValueError):
+                            pass
+                        break
+            idx = pos + 1
+        return []
+
     def complete(
         self,
         system_prompt: str,
@@ -89,20 +125,73 @@ class FixtureModelAdapter:
                 ],
             })
         elif "source_quality" in lower or "quality_evaluator" in lower:
+            # Derive qualified sources from the input sources embedded in the
+            # node's prompt text.
+            sources = self._extract_sources_from_text(user_message)
+            qualified = [
+                {
+                    "source_id": s.get("source_id", ""),
+                    "quality_score": 0.8,
+                    "peer_reviewed": s.get("peer_reviewed", False),
+                    "citation_count": s.get("citation_count", 0),
+                }
+                for s in sources if isinstance(s, dict) and s.get("source_id")
+            ]
             content = json.dumps({
-                "qualified_sources": [],
-                "quality_scores": {},
+                "qualified_sources": qualified,
+                "quality_scores": {q["source_id"]: q["quality_score"] for q in qualified},
             })
         elif "evidence_synthesizer" in lower or "evidence synthesizer" in lower:
+            # Derive evidence and claims from the input sources embedded in the
+            # node's prompt text.
+            sources = self._extract_sources_from_text(user_message)
+            source_ids = [s.get("source_id", "") for s in sources if isinstance(s, dict) and s.get("source_id")]
+            # Produce one claim supported by all sources.
+            claims = []
+            if source_ids:
+                claims = [{
+                    "claim_id": "cl-1",
+                    "statement": "Sealed corpus evidence supports the research question.",
+                    "status": "supported",
+                    "supporting_evidence_ids": ["ev-1"],
+                    "contradicting_evidence_ids": [],
+                    "citation_ids": [],
+                    "confidence": 0.7,
+                }]
+            evidence = []
+            if source_ids:
+                evidence = [{
+                    "evidence_id": "ev-1",
+                    "source_ids": source_ids,
+                    "extracted_text": "Evidence derived from sealed fixture corpus sources.",
+                    "evidence_type": "synthesis",
+                    "confidence": 0.7,
+                }]
             content = json.dumps({
-                "claims": [],
-                "evidence_summary": "No evidence synthesized from sealed corpus.",
-                "executive_answer": "Insufficient evidence in the sealed corpus.",
+                "claims": claims,
+                "evidence": evidence,
+                "evidence_summary": f"Synthesized {len(evidence)} evidence from {len(source_ids)} sources.",
+                "executive_answer": "Sealed corpus evidence available." if source_ids else "No evidence synthesized.",
             })
         elif "claim_validator" in lower or "claim validator" in lower:
+            # Derive validated claims from the input claims.
+            import json as _json
+            try:
+                input_data = _json.loads(user_message) if user_message.strip() else {}
+            except Exception:
+                input_data = {}
+            claims = input_data.get("claims", []) if isinstance(input_data, dict) else []
+            validated = [
+                {
+                    "claim_id": c.get("claim_id", ""),
+                    "validation_status": "validated",
+                    "supporting_evidence_ids": c.get("supporting_evidence_ids", []),
+                }
+                for c in claims if isinstance(c, dict) and c.get("claim_id")
+            ]
             content = json.dumps({
-                "validated_claims": [],
-                "validation_summary": "No claims to validate.",
+                "validated_claims": validated,
+                "validation_summary": f"Validated {len(validated)} claim(s).",
             })
         elif "risk_classifier" in lower or "risk classifier" in lower:
             content = json.dumps({

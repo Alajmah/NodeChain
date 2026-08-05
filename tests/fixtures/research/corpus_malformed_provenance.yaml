@@ -1,20 +1,18 @@
-corpus_version: "1.0"
-scenario_id: "malformed-provenance-test"
-description: "Tests malformed_provenance fault crossing adapter boundary"
+corpus_version: '1.0'
+scenario_id: malformed-provenance-test
+description: Tests malformed_provenance fault crossing adapter boundary
 sources:
-  - source_id: src-mp-1
-    origin_api: fixture
-    query_used: "test query"
-    title: "Test Source"
-    source_hash: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+- source_id: src-mp-1
+  origin_api: fixture
+  query_used: test query
+  title: Test Source
+  doi: ''
+  source_hash: 3aa40b32d3a4a3e07eed8aa2351931e26b8152a60d4adc2f39020a9ae9debb1e
 queries:
   test query:
     _fault: malformed_provenance
     results:
-      - origin_api: fixture
-        raw_data:
-          title: "Malformed Result"
-        query_used: "test query"
+    - src-mp-1
 minimum_evidence:
   min_sources: 1
   min_evidence_per_claim: 1

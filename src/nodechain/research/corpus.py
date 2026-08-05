@@ -54,11 +54,16 @@ class CorpusSource(BaseModel):
 
 
 class CorpusQueryEntry(BaseModel):
-    """A deterministic query mapping: query-key → results + optional fault."""
+    """A deterministic query mapping: query-key → source references + fault.
+
+    Each result references exactly one declared source by ID. The
+    corpus_to_fixture_map() expands these references from the authoritative
+    sources collection.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
 
-    results: tuple[dict[str, Any], ...] = ()
+    results: tuple[str, ...] = ()  # source IDs referencing declared CorpusSource entries
     fault: str | None = Field(default=None, alias="_fault")
     # partial_result_set structural metadata (used when fault == partial_result_set)
     total_available: int | None = None
@@ -140,6 +145,65 @@ class FixtureCorpus(BaseModel):
                 raise ValueError(
                     f"source {src.source_id} source_hash must be hex"
                 ) from exc
+        return self
+
+    @model_validator(mode="after")
+    def _validate_source_references(self) -> "FixtureCorpus":
+        """Enforce that query results reference declared sources, source IDs
+        are unique, and no duplicate references within a query."""
+        source_ids = [s.source_id for s in self.sources]
+        # Source IDs must be unique.
+        if len(source_ids) != len(set(source_ids)):
+            seen: set[str] = set()
+            for sid in source_ids:
+                if sid in seen:
+                    raise ValueError(f"duplicate source_id: {sid}")
+                seen.add(sid)
+        declared = set(source_ids)
+        for query_key, entry in self.queries.items():
+            seen_in_query: set[str] = set()
+            for ref in entry.results:
+                if ref not in declared:
+                    raise ValueError(
+                        f"query {query_key!r} references unknown source_id {ref!r}"
+                    )
+                if ref in seen_in_query:
+                    raise ValueError(
+                        f"query {query_key!r} has duplicate source reference {ref!r}"
+                    )
+                seen_in_query.add(ref)
+            # unavailable_source_ids must also reference declared sources
+            for sid in entry.unavailable_source_ids:
+                if sid not in declared:
+                    raise ValueError(
+                        f"query {query_key!r} unavailable_source_ids references "
+                        f"unknown source_id {sid!r}"
+                    )
+        return self
+
+    @model_validator(mode="after")
+    def _verify_source_hashes(self) -> "FixtureCorpus":
+        """Verify each source_hash equals the SHA-256 of the canonical source
+        content (title, authors, abstract, doi)."""
+        import hashlib
+
+        for src in self.sources:
+            content_fields = {
+                "source_id": src.source_id,
+                "title": src.title,
+                "authors": list(src.authors),
+                "abstract": src.abstract,
+                "doi": src.doi or "",
+            }
+            canonical = json.dumps(
+                content_fields, sort_keys=True, separators=(",", ":")
+            )
+            expected = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+            if src.source_hash.lower() != expected:
+                raise ValueError(
+                    f"source {src.source_id} source_hash mismatch: "
+                    f"expected {expected}, got {src.source_hash}"
+                )
         return self
 
 
@@ -224,11 +288,36 @@ def corpus_to_fixture_map(corpus: FixtureCorpus) -> dict[str, Any]:
     """Convert a validated FixtureCorpus into the dict format expected by
     FixtureSearchAdapter.
 
-    The adapter expects ``{query_key: {results: [...], _fault?: ...}}``.
+    Each query's source-ID references are expanded from the authoritative
+    ``sources`` collection into full adapter ``raw_data`` dicts, including
+    source_id, source_hash, title, authors, abstract, doi, publication_date.
+    There is one authoritative source-content copy (the ``sources``
+    collection); query results reference it by ID and are expanded here.
     """
+    # Build authoritative source lookup.
+    sources_by_id: dict[str, CorpusSource] = {s.source_id: s for s in corpus.sources}
+
     out: dict[str, Any] = {}
     for key, entry in corpus.queries.items():
-        entry_dict: dict[str, Any] = {"results": list(entry.results)}
+        entry_dict: dict[str, Any] = {}
+
+        # Expand source-ID references into full raw_data dicts.
+        expanded_results: list[dict[str, Any]] = []
+        for source_id in entry.results:
+            src = sources_by_id[source_id]
+            expanded_results.append({
+                "origin_api": "fixture",
+                "source_id": src.source_id,
+                "source_hash": src.source_hash,
+                "title": src.title,
+                "authors": list(src.authors),
+                "abstract": src.abstract,
+                "doi": src.doi or "",
+                "publication_date": src.retrieved_at,
+                "query_used": key,
+            })
+        entry_dict["results"] = expanded_results
+
         if entry.fault:
             entry_dict["_fault"] = entry.fault
         if entry.total_available is not None:

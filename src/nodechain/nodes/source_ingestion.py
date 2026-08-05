@@ -379,12 +379,55 @@ def _normalize_pubmed(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _normalize_fixture(raw: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a sealed-fixture result.
+
+    Fixture results carry the exact sealed-corpus identifiers (source_id,
+    source_hash) plus the content fields (title, authors, abstract, doi).
+    This normalizer preserves those identifiers so the ingested source record
+    is traceable to the declared corpus source.
+
+    Required fields: source_id, source_hash, title. Fail closed if any is
+    missing — do not invent identifiers or hashes.
+    """
+    source_id = raw.get("source_id", "")
+    source_hash = raw.get("source_hash", "")
+    title = raw.get("title", "")
+    if not source_id or not source_hash or not title:
+        raise ValueError(
+            f"fixture result missing required field(s): "
+            f"source_id={bool(source_id)}, source_hash={bool(source_hash)}, "
+            f"title={bool(title)}"
+        )
+    return {
+        "source_id": source_id,
+        "source_hash": source_hash,
+        "title": title,
+        "authors": raw.get("authors", []),
+        "publication_date": raw.get("publication_date", ""),
+        "doi": raw.get("doi", ""),
+        "abstract": raw.get("abstract", ""),
+        "source_type": raw.get("source_type", "sealed_fixture"),
+        "peer_reviewed": raw.get("peer_reviewed", False),
+        "citation_count": raw.get("citation_count", 0),
+        "venue": raw.get("venue", "Sealed Fixture Corpus"),
+        "subject_areas": raw.get("subject_areas", []),
+        "open_access": raw.get("open_access", True),
+        "pdf_url": raw.get("pdf_url", ""),
+        "credibility_signals": {
+            "fixture_source_id": source_id,
+            "fixture_source_hash": source_hash,
+        },
+    }
+
+
 NORMALIZERS = {
     "semantic_scholar": _normalize_semantic_scholar,
     "arxiv": _normalize_arxiv,
     "openalex": _normalize_openalex,
     "crossref": _normalize_crossref,
     "pubmed": _normalize_pubmed,
+    "fixture": _normalize_fixture,
 }
 
 

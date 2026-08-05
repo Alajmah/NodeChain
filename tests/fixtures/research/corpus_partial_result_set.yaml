@@ -1,29 +1,28 @@
-corpus_version: "1.0"
-scenario_id: "partial-result-set-test"
-description: "Tests partial_result_set structural contract"
+corpus_version: '1.0'
+scenario_id: partial-result-set-test
+description: Tests partial_result_set structural contract
 sources:
-  - source_id: src-prs-1
-    origin_api: fixture
-    query_used: "test query"
-    title: "Available Source"
-    source_hash: "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-  - source_id: src-prs-2
-    origin_api: fixture
-    query_used: "test query"
-    title: "Unavailable Source"
-    source_hash: "1111111111111111111111111111111111111111111111111111111111111111"
+- source_id: src-prs-1
+  origin_api: fixture
+  query_used: test query
+  title: Available Source
+  doi: ''
+  source_hash: bb4e7473ebf4ba4e7792743c1b98643b1dd4e6942f664e7f01422dc0685f572b
+- source_id: src-prs-2
+  origin_api: fixture
+  query_used: test query
+  title: Unavailable Source
+  doi: ''
+  source_hash: 459697815d8ad8f62dec1e636270e9a09b5e64b2d0f3191b22d3abf0a2b9f4b6
 queries:
   test query:
     _fault: partial_result_set
     results:
-      - origin_api: fixture
-        raw_data:
-          title: "Partial Result"
-        query_used: "test query"
+    - src-prs-1
     total_available: 2
     unavailable_source_ids:
-      - src-prs-2
-    incompleteness_reason: "timeout_on_1_source"
+    - src-prs-2
+    incompleteness_reason: timeout_on_1_source
 minimum_evidence:
   min_sources: 1
   min_evidence_per_claim: 1

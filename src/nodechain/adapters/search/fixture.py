@@ -335,13 +335,22 @@ class FixtureSearchAdapter(BaseSearchAdapter):
         """Convert immutable raw corpus entries into SearchAdapterResult
         objects.
 
-        Each entry must be a MappingProxyType supplying ``origin_api``,
-        ``raw_data``, ``query_used``, ``retrieved_at``.
-        ``provenance_version`` must NOT be present (the central boundary stamps
-        it).
+        Each entry is a MappingProxyType. The entry may either:
+        - have a nested ``raw_data`` key (legacy format), or
+        - have source fields at the top level (expanded format from
+          corpus_to_fixture_map: origin_api, source_id, source_hash, title,
+          authors, abstract, doi, etc.)
+
+        In the expanded format, ALL fields except origin_api, query_used,
+        and retrieved_at become the ``raw_data`` dict, preserving the source
+        content for downstream ingestion.
         """
         out: list[SearchAdapterResult] = []
         query_str = " ".join(query.terms)
+        # Fields that are NOT part of raw_data (they map to SearchAdapterResult
+        # top-level fields).
+        _TOP_LEVEL = {"origin_api", "query_used", "retrieved_at",
+                       "adapter_latency_ms", "provenance_version"}
         for item in results_data:
             if not isinstance(item, MappingProxyType):
                 raise FixtureCorpusError(
@@ -351,11 +360,14 @@ class FixtureSearchAdapter(BaseSearchAdapter):
                 raise FixtureCorpusError(
                     "fixture corpus result must not set provenance_version"
                 )
-            # Convert immutable raw_data back to a plain dict for the
-            # SearchAdapterResult model (which expects dict[str, Any]).
-            raw_data = dict(item.get("raw_data", {}))
-            # Recursively convert any nested immutables back to mutables for
-            # downstream compatibility.
+            # If the item has a nested raw_data key, use it (legacy format).
+            if "raw_data" in item:
+                raw_data = dict(item["raw_data"])
+            else:
+                # Expanded format: all non-top-level fields become raw_data.
+                raw_data = {
+                    k: v for k, v in item.items() if k not in _TOP_LEVEL
+                }
             raw_data = _unfreeze(raw_data)
             out.append(
                 SearchAdapterResult(
