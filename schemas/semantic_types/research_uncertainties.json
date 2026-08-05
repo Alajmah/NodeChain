@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "nodechain://schemas/semantic_types/research_uncertainties",
+  "title": "ResearchUncertaintiesV1",
+  "description": "Uncertainty markers recorded for a ResearchWorkspaceBundleV1 run.",
+  "type": "object",
+  "required": ["bundle_version", "run_id", "recorded_at", "uncertainties"],
+  "additionalProperties": false,
+  "properties": {
+    "bundle_version": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/bundle_version"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier of the research run these markers belong to."
+    },
+    "recorded_at": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/timestamp"
+    },
+    "uncertainties": {
+      "type": "array",
+      "items": {
+        "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/uncertainty_marker"
+      },
+      "description": "Recorded uncertainty markers."
+    },
+    "overall_uncertainty": {
+      "type": "string",
+      "enum": ["low", "moderate", "high"],
+      "description": "Aggregate uncertainty assessment for the run."
+    }
+  }
+}

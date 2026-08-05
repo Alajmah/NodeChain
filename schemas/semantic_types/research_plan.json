@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "nodechain://schemas/semantic_types/research_plan",
+  "title": "ResearchPlanV1",
+  "description": "The execution plan for a ResearchWorkspaceBundleV1 run. Sequences node steps and declares required adapters and tools.",
+  "type": "object",
+  "required": [
+    "bundle_version",
+    "run_id",
+    "created_at",
+    "steps",
+    "adapters_required",
+    "estimated_cost_usd"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "bundle_version": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/bundle_version"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier of the research run this plan belongs to."
+    },
+    "created_at": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/timestamp"
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["node_id", "position", "node_type"],
+        "additionalProperties": false,
+        "properties": {
+          "node_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Node id from the blueprint."
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "1-based execution position."
+          },
+          "node_type": {
+            "type": "string",
+            "enum": ["model", "deterministic", "tool"],
+            "description": "Type of the node."
+          },
+          "adapter": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Adapter name for tool nodes."
+          },
+          "query_template": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Templated query for search tool nodes."
+          },
+          "depends_on": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "description": "Node ids this step depends on."
+          }
+        }
+      },
+      "description": "Ordered plan steps."
+    },
+    "adapters_required": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Adapter names the plan depends on."
+    },
+    "estimated_cost_usd": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Estimated model cost for the run, in USD."
+    },
+    "revised_from": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Plan id this plan revises, if produced by a source-quality loop."
+    },
+    "loop_triggered": {
+      "type": "boolean",
+      "description": "Whether this plan was produced after a quality loop trigger.",
+      "default": false
+    }
+  }
+}

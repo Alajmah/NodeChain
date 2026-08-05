@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "nodechain://schemas/semantic_types/research_brief",
+  "title": "ResearchBriefV1",
+  "description": "The normalized research brief that drives a ResearchWorkspaceBundleV1 run. Captures the question, scope, and constraints derived from the raw user query.",
+  "type": "object",
+  "required": [
+    "bundle_version",
+    "run_id",
+    "created_at",
+    "question",
+    "scope",
+    "constraints",
+    "target_depth"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "bundle_version": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/bundle_version"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier of the research run this brief belongs to."
+    },
+    "created_at": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/timestamp"
+    },
+    "question": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The normalized research question."
+    },
+    "scope": {
+      "type": "object",
+      "required": ["domains", "time_range"],
+      "additionalProperties": false,
+      "properties": {
+        "domains": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Subject domains the research is scoped to."
+        },
+        "time_range": {
+          "type": "object",
+          "required": ["start", "end"],
+          "additionalProperties": false,
+          "properties": {
+            "start": {
+              "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/timestamp"
+            },
+            "end": {
+              "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/timestamp"
+            }
+          },
+          "description": "Inclusive temporal window for source eligibility."
+        }
+      },
+      "description": "Scope of the research brief."
+    },
+    "constraints": {
+      "type": "object",
+      "required": ["min_sources", "max_sources", "required_adapters"],
+      "additionalProperties": false,
+      "properties": {
+        "min_sources": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Minimum number of qualifying sources required."
+        },
+        "max_sources": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum number of sources to ingest."
+        },
+        "required_adapters": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Adapter names that must be consulted."
+        },
+        "excluded_adapters": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Adapter names that must not be consulted."
+        }
+      },
+      "description": "Hard constraints derived from the query."
+    },
+    "target_depth": {
+      "type": "string",
+      "enum": ["shallow", "standard", "deep"],
+      "description": "Requested research depth."
+    },
+    "preferred_language": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Preferred output language (BCP-47 tag) for synthesis."
+    },
+    "memory_context_requested": {
+      "type": "boolean",
+      "description": "Whether prior memory context should inform synthesis.",
+      "default": false
+    }
+  }
+}

@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "nodechain://schemas/semantic_types/research_trace",
+  "title": "ResearchTraceV1",
+  "description": "Portable trace document for a ResearchWorkspaceBundleV1 run. Records the ordered sequence of execution events emitted by the chain so the run can be inspected and replayed. The contract is STRICT: unknown fields are rejected at the trace root and on every event. Adapter-specific provenance that must survive portability is carried in the explicit, versioned `extensions` object on the trace root and on each event, never as arbitrary top-level or event-envelope fields.",
+  "type": "object",
+  "required": [
+    "run_id",
+    "chain_id",
+    "events"
+  ],
+  "additionalProperties": false,
+  "dependentRequired": {
+    "extensions": [
+      "extensions_version"
+    ]
+  },
+  "properties": {
+    "run_id": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/source_id"
+    },
+    "chain_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier of the NodeChain chain (blueprint) that produced the trace."
+    },
+    "events": {
+      "type": "array",
+      "description": "Ordered sequence of execution events. Order IS semantically meaningful (this is a chronological trace), so it is NOT subject to set-like canonicalization.",
+      "items": {
+        "type": "object",
+        "required": [
+          "step_id",
+          "node_id",
+          "event_type",
+          "actor"
+        ],
+        "additionalProperties": false,
+        "dependentRequired": {
+          "extensions": [
+            "extensions_version"
+          ]
+        },
+        "properties": {
+          "step_id": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Monotonic step index within the run."
+          },
+          "node_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Node id of the step that emitted the event."
+          },
+          "event_type": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Classifier for the event (e.g. 'step_started', 'step_completed', 'dispatch', 'failure')."
+          },
+          "actor": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Identity of the actor that emitted the event (node id, adapter name, or 'orchestrator')."
+          },
+          "extensions_version": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Version of the per-event extension vocabulary. Required iff `extensions` is present on this event."
+          },
+          "extensions": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Explicit per-event extension surface for adapter-specific provenance. Use only when a field must travel with the portable trace; arbitrary event-envelope fields are rejected."
+          }
+        }
+      }
+    },
+    "total_cost_usd": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Aggregate cost of the run in USD, if known."
+    },
+    "total_duration_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Aggregate wall-clock duration of the run in milliseconds, if known."
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Optional free-form summary statistics about the trace. Summary is explicitly free-form (it is non-authoritative descriptive metadata); authoritative structured data lives in versioned, named fields above."
+    },
+    "extensions_version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Version of the trace-root extension vocabulary. Required iff `extensions` is present at the trace root."
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Explicit trace-root extension surface. The only place arbitrary adapter-defined fields may appear on the trace root; unknown top-level fields outside this object are rejected."
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "nodechain://schemas/semantic_types/research_claims",
+  "title": "ResearchClaimsV1",
+  "description": "Synthesized research claims for a ResearchWorkspaceBundleV1 run, each carrying provenance, status, and validation history.",
+  "type": "object",
+  "required": ["bundle_version", "run_id", "synthesized_at", "claims"],
+  "additionalProperties": false,
+  "properties": {
+    "bundle_version": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/bundle_version"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier of the research run these claims belong to."
+    },
+    "synthesized_at": {
+      "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/timestamp"
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "$ref": "nodechain://schemas/semantic_types/research_workspace_definitions#/$defs/claim_record"
+      },
+      "description": "Synthesized claim records."
+    },
+    "synthesis_model": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier of the model used to synthesize claims."
+    },
+    "executive_answer": {
+      "type": "string",
+      "description": "High-level answer derived from the claim set."
+    }
+  }
+}
