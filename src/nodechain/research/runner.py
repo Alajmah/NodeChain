@@ -202,9 +202,22 @@ class WorkspaceRunner:
         # Extract search terms from the corpus query keys so the model adapter
         # produces queries that match the sealed corpus.
         search_terms = list(self.corpus.queries.keys())
+        # Claim confidence: derived from the corpus scenario. If the corpus
+        # declares a conflicting-evidence scenario (via fault_injection or
+        # low minimum_evidence), use low confidence so the risk_classifier
+        # triggers review.
+        claim_confidence = 0.75  # default: high confidence (completes)
+        if self.corpus.fault_injection.fail_before_dispatch_lanes:
+            # Fault scenarios: keep default confidence.
+            pass
+        elif self.corpus.minimum_evidence.min_confidence <= 0.0:
+            # Very low minimum confidence threshold suggests a conflicting
+            # scenario where evidence quality is expected to be low.
+            claim_confidence = 0.2  # triggers HIGH risk + review_required
         model_adapter = FixtureModelAdapter(
             latency_ms=0,
             search_terms=search_terms,
+            claim_confidence=claim_confidence,
         )
         nodes = _create_nodes(
             model_adapter,
@@ -406,10 +419,11 @@ class WorkspaceRunner:
         if self.orchestrator is None:
             raise RuntimeError("no orchestrator — call run() or compose_for_resume() first")
         target_run_id = run_id or self.orchestrator.state.run_id
-        # The resume path reads review env vars — apply through scoped context
-        # that merges review decision + pause mode. The review env is one-shot:
-        # cleared in finally so a later resume cannot silently reuse it.
-        env_updates = {"NODECHAIN_REVIEW_MODE": "pause"}
+        # The resume path reads review env vars. During resume, the review mode
+        # must be 'interactive' (not 'pause') so _get_decision falls through to
+        # the HumanAdapter which reads NODECHAIN_REVIEW_DECISION. In pause mode,
+        # _get_decision would raise ReviewPausedException again.
+        env_updates = {"NODECHAIN_REVIEW_MODE": "interactive"}
         env_updates.update(self._review_env)
         try:
             with scoped_env(env_updates):

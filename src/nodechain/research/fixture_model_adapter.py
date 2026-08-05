@@ -37,11 +37,13 @@ class FixtureModelAdapter:
         latency_ms: int = 0,
         *,
         search_terms: list[str] | None = None,
+        claim_confidence: float = 0.75,
     ) -> None:
         self.model = "fixture-mock"
         self.default_max_tokens = 4096
         self._latency_ms = latency_ms
         self._search_terms = search_terms or []
+        self._claim_confidence = claim_confidence
 
     # ------------------------------------------------------------------ #
     # Source extraction from prompt text
@@ -235,7 +237,7 @@ class FixtureModelAdapter:
                 "statement": "Sealed corpus evidence supports the research question.",
                 "supporting_sources": aliases,
                 "contradicting_sources": [],
-                "confidence": 0.75,
+                "confidence": self._claim_confidence,
                 "support_strength": "direct",
                 "source_agreement": "consistent",
                 "uncertainty": "Limited to sealed fixture corpus scope.",
