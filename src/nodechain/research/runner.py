@@ -187,6 +187,7 @@ class WorkspaceRunner:
         self.orchestrator: Orchestrator | None = None
         self._search_node: FixtureSearchToolNode | None = None
         self._fixture_adapter: FixtureSearchAdapter | None = None
+        self._guard: Any = None
         self._run_descriptor: RunDescriptor | None = None
         self._review_env: dict[str, str] = {}
 
@@ -249,40 +250,27 @@ class WorkspaceRunner:
         self._fixture_adapter = FixtureSearchAdapter(fixture_map)
 
         # Lane-admission: fail_before_dispatch. When this fault is active,
-        # the capsule_validator returns False, which causes the guard to reject
-        # dispatch BEFORE the adapter is invoked. This produces:
+        # a lane-admission wrapper rejects dispatch BEFORE the guard's search()
+        # is invoked. This is a product-level admission decision, NOT a
+        # capsule-integrity failure. The guard is never called, so:
         #   guard.dispatch_count == 0
         #   adapter.invocation_count == 0
-        #   no dispatch-attempt evidence
-        # The fault is implemented HERE (in the runner's lane-admission layer),
-        # not inside the adapter.
+        #   no capsule-integrity violation
         fail_before_dispatch_active = bool(
             self.corpus.fault_injection.fail_before_dispatch_lanes
         )
 
         def capsule_validator(check_run_id: str, adapter_name: str, digest: str) -> bool:
-            # Lane-admission: fail_before_dispatch blocks all dispatch.
-            if fail_before_dispatch_active:
-                return False
-            """Verify a started capsule exists for this run + adapter.
+            """Verify an exact capsule exists for this run + adapter + digest.
 
             The capsule-before-wire invariant (INV-004) requires that a
             capsule with capsule_status='available' was persisted before the
-            adapter dispatch. We verify this by checking that a capsule row
-            exists for this run whose side_effect_key starts with
-            ``search:<adapter_name>:``.
+            adapter dispatch, with an exact canonical request digest match.
 
-            We do NOT match by exact capsule_digest because the pre-call
-            journaling creates the capsule from the envelope payload before
-            the search node enriches the query terms. For sealed-fixture
-            runs (where terms are produced by the deterministic model
-            adapter during execution), the journaled operation may differ
-            from the final query. The capsule still proves the journaling
-            path ran and a governed side-effect row was started — which is
-            the invariant the guard enforces.
-
-            This is NOT unconditional: it requires a real capsule row to
-            exist in the ledger for this specific run and adapter.
+            The pre-call journaling and the guard compute the same digest from
+            the same operation dict (terms/max/filters), so when the
+            context_selector produces correct terms, the capsule and guard
+            digests match exactly.
             """
             try:
                 import sqlite3
@@ -291,8 +279,9 @@ class WorkspaceRunner:
                     row = conn.execute(
                         """SELECT COUNT(*) FROM side_effect_replay_capsules
                            WHERE run_id = ?
+                           AND capsule_digest = ?
                            AND side_effect_key LIKE ?""",
-                        (check_run_id, f"search:{adapter_name}:%"),
+                        (check_run_id, digest, f"search:{adapter_name}:%"),
                     ).fetchone()
                     return row[0] > 0
             except Exception:
@@ -304,6 +293,34 @@ class WorkspaceRunner:
             capsule_validator=capsule_validator,
             skip_trust_check=False,  # MUST be False
         )
+
+        # Lane-admission wrapper for fail_before_dispatch: wraps the guard so
+        # search() is rejected BEFORE the guard processes it. The guard's
+        # dispatch count stays 0 and the adapter is never invoked. This is a
+        # product-level admission decision, not a capsule-integrity failure.
+        if fail_before_dispatch_active:
+            original_search = guard.search
+
+            async def fail_before_search(query):
+                from nodechain.adapters.search.base_search import (
+                    SearchAdapterError,
+                )
+                from nodechain.adapters.search.failure_types import (
+                    AdapterFailure,
+                    SearchFailureType,
+                )
+                raise SearchAdapterError(
+                    AdapterFailure(
+                        adapter=self._fixture_adapter.adapter_name,
+                        failure_type=SearchFailureType.UNKNOWN,
+                        retryable=False,
+                        message="fail_before_dispatch: lane admission rejected "
+                        "(dispatch did not occur)",
+                    )
+                )
+            guard.search = fail_before_search
+
+        self._guard = guard
         self._search_node.set_adapter_resolver({"fixture": guard})
 
         # Validate contracts.

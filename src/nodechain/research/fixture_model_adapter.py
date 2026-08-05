@@ -66,8 +66,6 @@ class FixtureModelAdapter:
                 "query": user_message.strip(),
             })
         elif "task_planner" in lower or "task planner" in lower:
-            # Use corpus-matched search terms if provided, otherwise extract
-            # from the question.
             terms = self._search_terms or [user_message.strip()]
             content = json.dumps({
                 "tasks": [
@@ -75,7 +73,7 @@ class FixtureModelAdapter:
                         "task_id": 1,
                         "description": " ".join(terms),
                         "source_types": ["academic"],
-                        "search_terms": terms,
+                        "query_terms": terms,
                     }
                 ],
                 "source_routing": {
