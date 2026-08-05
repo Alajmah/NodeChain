@@ -44,6 +44,7 @@ from .corpus import (
     corpus_to_fixture_map,
     load_corpus,
 )
+from .fixture_model_adapter import FixtureModelAdapter
 from nodechain.nodes.fixture_search_tool import FixtureSearchToolNode
 
 
@@ -187,7 +188,7 @@ class WorkspaceRunner:
         """Construct the existing research nodes with FixtureSearchToolNode."""
         from nodechain.cli.run import _create_nodes
 
-        model_adapter = MockModelAdapter(latency_ms=0)
+        model_adapter = FixtureModelAdapter(latency_ms=0)
         nodes = _create_nodes(
             model_adapter,
             self._trace_dir,
@@ -283,6 +284,9 @@ class WorkspaceRunner:
         # mode so the runtime pauses (rather than prompting interactively or
         # auto-approving) when the risk_classifier requests review.
         os.environ.setdefault("NODECHAIN_REVIEW_MODE", "pause")
+        # Sealed runs are inherently local-development (no production KEK).
+        # The KEK is needed for side-effect capsule creation.
+        os.environ.setdefault("NODECHAIN_DEV_MODE", "1")
 
         orch = self._compose()
         trace = asyncio.run(orch.run(self.brief.question))

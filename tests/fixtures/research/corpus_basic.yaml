@@ -1,0 +1,39 @@
+corpus_version: "1.0"
+scenario_id: "basic-research-test"
+description: "Basic sealed corpus for WP 5.2 integration testing"
+sources:
+  - source_id: src-1
+    origin_api: fixture
+    query_used: "rust async safety"
+    title: "Async Rust Safety Analysis"
+    authors: ["A. Author", "B. Coauthor"]
+    abstract: "A comprehensive study of async Rust memory safety."
+    source_hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  - source_id: src-2
+    origin_api: fixture
+    query_used: "rust async safety"
+    title: "Memory Safety in Concurrent Rust"
+    authors: ["C. Researcher"]
+    abstract: "Concurrent Rust memory safety patterns."
+    source_hash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+queries:
+  rust async safety:
+    results:
+      - origin_api: fixture
+        raw_data:
+          title: "Async Rust Safety Analysis"
+          doi: "10.1000/1"
+          authors: ["A. Author", "B. Coauthor"]
+          abstract: "A comprehensive study of async Rust memory safety."
+        query_used: "rust async safety"
+      - origin_api: fixture
+        raw_data:
+          title: "Memory Safety in Concurrent Rust"
+          doi: "10.1000/2"
+          authors: ["C. Researcher"]
+          abstract: "Concurrent Rust memory safety patterns."
+        query_used: "rust async safety"
+minimum_evidence:
+  min_sources: 1
+  min_evidence_per_claim: 1
+  min_confidence: 0.3
