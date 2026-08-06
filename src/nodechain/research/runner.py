@@ -450,68 +450,94 @@ class WorkspaceRunner:
             "tool_called" in ev.event_type.value for ev in search_events
         )
 
-        # Determine the actual fault from runtime evidence + corpus config.
+        # Determine the actual fault from exact runtime evidence.
+        # Each fault type requires type-specific trace evidence.
         faults_observed: list[dict[str, Any]] = []
 
-        # Check fail_before_dispatch from corpus config.
-        if self.corpus.fault_injection.fail_before_dispatch_lanes:
-            # The lane-admission wrapper prevented dispatch.
+        # fail_before_dispatch: requires that dispatch was NOT attempted
+        # (no side_effect_started AND no tool_called) AND the corpus has
+        # fail_before_dispatch_lanes configured.
+        if (self.corpus.fault_injection.fail_before_dispatch_lanes
+                and not side_effect_started and not tool_called):
             faults_observed.append({
                 "failure_type": "fail_before_dispatch",
                 "dispatched": False,
                 "state_before": "pre_dispatch",
                 "state_after": "not_dispatched",
                 "recoverability": "retry_possible",
+                "evidence_required": {
+                    "side_effect_started": False,
+                    "tool_called": False,
+                    "lane_admission_rejected": True,
+                },
             })
 
-        # Check post-dispatch faults from corpus query entries.
-        for query_key, entry in self.corpus.queries.items():
-            if entry.fault is None:
-                continue
-            operation_digest = _hl.md5(
-                f"search:{query_key}".encode("utf-8")
-            ).hexdigest()[:12]
+        # Post-dispatch faults: require side_effect_started (dispatch occurred).
+        if side_effect_started:
+            for query_key, entry in self.corpus.queries.items():
+                if entry.fault is None:
+                    continue
+                operation_digest = _hl.md5(
+                    f"search:{query_key}".encode("utf-8")
+                ).hexdigest()[:12]
 
-            if entry.fault == "timeout_after_dispatch":
-                faults_observed.append({
-                    "failure_type": "timeout_after_dispatch",
-                    "dispatched": True,
-                    "state_before": "dispatch_attempted",
-                    "state_after": "timeout",
-                    "recoverability": "retry_possible",
-                    "operation_digest": operation_digest,
-                    "query_key": query_key,
-                })
-            elif entry.fault == "malformed_provenance":
-                faults_observed.append({
-                    "failure_type": "malformed_provenance",
-                    "dispatched": True,
-                    "state_before": "result_received",
-                    "state_after": "provenance_rejected",
-                    "recoverability": "non_recoverable",
-                    "operation_digest": operation_digest,
-                    "query_key": query_key,
-                })
-            elif entry.fault == "partial_result_set":
-                faults_observed.append({
-                    "failure_type": "partial_result_set",
-                    "dispatched": True,
-                    "state_before": "result_received",
-                    "state_after": "partial",
-                    "recoverability": "degraded_completion",
-                    "operation_digest": operation_digest,
-                    "query_key": query_key,
-                    "total_available": entry.total_available,
-                    "unavailable_source_ids": list(entry.unavailable_source_ids),
-                    "incompleteness_reason": entry.incompleteness_reason,
-                })
+                if entry.fault == "timeout_after_dispatch":
+                    # Requires: node_failed event (adapter raised).
+                    if not node_failed:
+                        continue
+                    faults_observed.append({
+                        "failure_type": "timeout_after_dispatch",
+                        "dispatched": True,
+                        "state_before": "dispatch_attempted",
+                        "state_after": "timeout",
+                        "recoverability": "retry_possible",
+                        "operation_digest": operation_digest,
+                        "query_key": query_key,
+                        "evidence_required": {
+                            "side_effect_started": True,
+                            "node_failed": True,
+                        },
+                    })
+                elif entry.fault == "malformed_provenance":
+                    # Requires: validation_failed or node_failed event.
+                    if not validation_failed_events and not node_failed:
+                        continue
+                    faults_observed.append({
+                        "failure_type": "malformed_provenance",
+                        "dispatched": True,
+                        "state_before": "result_received",
+                        "state_after": "provenance_rejected",
+                        "recoverability": "non_recoverable",
+                        "operation_digest": operation_digest,
+                        "query_key": query_key,
+                        "evidence_required": {
+                            "side_effect_started": True,
+                            "validation_failed": len(validation_failed_events),
+                        },
+                    })
+                elif entry.fault == "partial_result_set":
+                    # Requires: tool_called (adapter returned results).
+                    if not tool_called:
+                        continue
+                    faults_observed.append({
+                        "failure_type": "partial_result_set",
+                        "dispatched": True,
+                        "state_before": "result_received",
+                        "state_after": "partial",
+                        "recoverability": "degraded_completion",
+                        "operation_digest": operation_digest,
+                        "query_key": query_key,
+                        "total_available": entry.total_available,
+                        "unavailable_source_ids": list(entry.unavailable_source_ids),
+                        "incompleteness_reason": entry.incompleteness_reason,
+                        "evidence_required": {
+                            "side_effect_started": True,
+                            "tool_called": True,
+                        },
+                    })
 
-        # Only record faults that were actually reached (dispatched or
-        # attempted). Don't record configured faults that never executed.
+        # Record each fault that was proven by exact runtime evidence.
         for fault in faults_observed:
-            # For post-dispatch faults, verify dispatch evidence exists.
-            if fault.get("dispatched") and not side_effect_started:
-                continue  # fault was configured but never reached
 
             # Deterministic fault ID (hyphens only, no underscores).
             op_digest = fault.get("operation_digest", "predispatch")
@@ -534,6 +560,7 @@ class WorkspaceRunner:
                 "related_artifact_refs": [
                     f"corpus:{self.corpus.scenario_id}:{fault.get('query_key', 'fail_before_dispatch')}",
                 ],
+                "evidence_required": fault.get("evidence_required", {}),
                 "runtime_evidence": {
                     "side_effect_started": side_effect_started,
                     "node_failed": node_failed,

@@ -170,16 +170,20 @@ def test_second_resume_does_not_reuse_prior_decision(tmp_path: Path) -> None:
     runner.apply_review("approve", "first", "reviewer1")
 
     # First resume succeeds.
-    runner.resume(run_id=result.run_id)
+    first_result = runner.resume(run_id=result.run_id)
 
     # _review_env must be empty after first resume.
     assert runner._review_env == {}, "review env not cleared after first resume"
 
+    # Record the persisted state revision after first resume (durable evidence).
+    from nodechain.core.state import StateManager
+    from nodechain.core.capsule_crypto import KekManager
+    sm = StateManager(runner._db_path, kek_manager=KekManager(local_dev=True, kek_path=runner._kek_path))
+    state_after_first = sm.load(result.run_id)
+    revision_after_first = state_after_first.revision if state_after_first else 0
+
     # Second resume WITHOUT apply_review. The run is now terminal (completed
-    # after approve), so a second resume should either raise (terminal-state
-    # rejection) or return without re-executing. Lock the exact truth:
-    # _review_env must be empty (no reuse) AND the second resume must not
-    # re-execute the chain.
+    # after approve). Prove no re-execution by comparing persisted state revision.
     second_exc = None
     second_result = None
     try:
@@ -187,18 +191,23 @@ def test_second_resume_does_not_reuse_prior_decision(tmp_path: Path) -> None:
     except Exception as e:
         second_exc = e
 
-    # Assert: either an exception occurred (terminal reject) OR the result
-    # shows no additional execution (same final_status, no new trace events).
     assert runner._review_env == {}, "review env leaked after second resume"
     assert "NODECHAIN_REVIEW_DECISION" not in os.environ
 
+    # Lock the exact truth: either the second resume raised (terminal reject)
+    # or it returned without re-executing any nodes. Prove by comparing the
+    # persisted completed_steps set (durable execution evidence), not the
+    # revision counter (which increments on state re-save, not just execution).
     if second_exc is not None:
-        # Terminal reject is the expected behavior for a completed run.
+        # Terminal reject is valid.
         pass
     elif second_result is not None:
-        # If resume returned, it must not have re-executed (no new completed steps).
-        assert second_result.trace.final_status in ("completed", "failed"), (
-            f"unexpected second-resume status: {second_result.trace.final_status}"
+        state_after_second = sm.load(result.run_id)
+        steps_after_first = set(state_after_first.completed_steps.keys()) if state_after_first else set()
+        steps_after_second = set(state_after_second.completed_steps.keys()) if state_after_second else set()
+        assert steps_after_second == steps_after_first, (
+            f"second resume changed completed_steps from {steps_after_first} "
+            f"to {steps_after_second} — chain re-executed nodes"
         )
 
 

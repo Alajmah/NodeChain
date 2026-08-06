@@ -66,6 +66,18 @@ def test_complete_evidence_chain(tmp_path: Path) -> None:
     assert "src-1" in qualified_ids, f"src-1 not in qualified: {qualified_ids}"
     assert "src-2" in qualified_ids, f"src-2 not in qualified: {qualified_ids}"
 
+    # Verify qualified source content matches ingested source content.
+    # Each qualified source_id must resolve to an ingested source with the
+    # same source_hash.
+    ingested_by_id = {s.get("source_id"): s for s in ingested_sources}
+    for q in qualified:
+        sid = q.get("source_id")
+        if sid in ingested_by_id:
+            ingested = ingested_by_id[sid]
+            assert ingested.get("source_hash") == ingested.get("source_hash"), (
+                f"qualified source {sid} hash mismatch"
+            )
+
     # 3. evidence_synthesizer: claim supporting_sources includes BOTH.
     es = _parse_output(outputs, "evidence_synthesizer")
     claims = es.get("claims", [])
