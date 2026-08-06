@@ -131,6 +131,7 @@ class FixtureCorpus(BaseModel):
     corpus_version: str
     scenario_id: str
     description: str = ""
+    scenario_kind: str = "stable_literature"
     sources: tuple[CorpusSource, ...] = ()
     # query_key → entry. The key is the lowercased, sorted, space-joined terms.
     queries: dict[str, CorpusQueryEntry] = Field(default_factory=dict)
@@ -140,6 +141,16 @@ class FixtureCorpus(BaseModel):
     fault_injection: FaultInjectionConfig = Field(
         default_factory=FaultInjectionConfig
     )
+
+    @field_validator("scenario_kind")
+    @classmethod
+    def _validate_scenario_kind(cls, v: str) -> str:
+        allowed = {"stable_literature", "conflicting_evidence", "partial_adapter_failure"}
+        if v not in allowed:
+            raise ValueError(
+                f"scenario_kind must be one of {sorted(allowed)}, got {v!r}"
+            )
+        return v
 
     @field_validator("corpus_version", "scenario_id")
     @classmethod

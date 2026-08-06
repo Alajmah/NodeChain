@@ -202,22 +202,16 @@ class WorkspaceRunner:
         # Extract search terms from the corpus query keys so the model adapter
         # produces queries that match the sealed corpus.
         search_terms = list(self.corpus.queries.keys())
-        # Claim confidence: derived from the corpus scenario. If the corpus
-        # declares a conflicting-evidence scenario (via fault_injection or
-        # low minimum_evidence), use low confidence so the risk_classifier
-        # triggers review.
-        claim_confidence = 0.75  # default: high confidence (completes)
-        if self.corpus.fault_injection.fail_before_dispatch_lanes:
-            # Fault scenarios: keep default confidence.
-            pass
-        elif self.corpus.minimum_evidence.min_confidence <= 0.0:
-            # Very low minimum confidence threshold suggests a conflicting
-            # scenario where evidence quality is expected to be low.
-            claim_confidence = 0.2  # triggers HIGH risk + review_required
+        # Claim confidence: derived from the corpus scenario_kind.
+        claim_confidence = 0.75  # default: high confidence (stable literature)
+        scenario_kind = getattr(self.corpus, "scenario_kind", "stable_literature")
+        if scenario_kind == "conflicting_evidence":
+            claim_confidence = 0.2  # low confidence from genuinely contradictory evidence
         model_adapter = FixtureModelAdapter(
             latency_ms=0,
             search_terms=search_terms,
             claim_confidence=claim_confidence,
+            scenario_kind=scenario_kind,
         )
         nodes = _create_nodes(
             model_adapter,

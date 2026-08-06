@@ -1,10 +1,11 @@
 corpus_version: "1.0"
 scenario_id: "conflicting-evidence-test"
-description: "Conflicting evidence scenario that triggers risk_classifier review pause"
+scenario_kind: "conflicting_evidence"
+description: "Conflicting evidence scenario with genuinely contradictory sources"
 sources:
   - source_id: src-conf-1
     origin_api: fixture
-    query_used: "memory safety rust"
+    query_used: "memory rust safety"
     retrieved_at: "2026-01-01T00:00:00Z"
     title: "Evidence Supports Hypothesis"
     authors: ["D. Researcher"]
@@ -13,7 +14,7 @@ sources:
     source_hash: "6183934ac296a039d545b8990602ad67821d49d3793a471fe86c1bd02d607e6b"
   - source_id: src-conf-2
     origin_api: fixture
-    query_used: "memory safety rust"
+    query_used: "memory rust safety"
     retrieved_at: "2026-01-01T00:00:00Z"
     title: "Evidence Contradicts Hypothesis"
     authors: ["E. Skeptic"]
@@ -28,4 +29,4 @@ queries:
 minimum_evidence:
   min_sources: 1
   min_evidence_per_claim: 1
-  min_confidence: 0.0
+  min_confidence: 0.5

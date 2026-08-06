@@ -38,12 +38,14 @@ class FixtureModelAdapter:
         *,
         search_terms: list[str] | None = None,
         claim_confidence: float = 0.75,
+        scenario_kind: str = "stable_literature",
     ) -> None:
         self.model = "fixture-mock"
         self.default_max_tokens = 4096
         self._latency_ms = latency_ms
         self._search_terms = search_terms or []
         self._claim_confidence = claim_confidence
+        self._scenario_kind = scenario_kind
 
     # ------------------------------------------------------------------ #
     # Source extraction from prompt text
@@ -214,7 +216,11 @@ class FixtureModelAdapter:
     # ------------------------------------------------------------------ #
 
     def _synthesizer_response(self, user_message: str) -> ModelResponse:
-        """Produce evidence synthesizer output citing aliased sources."""
+        """Produce evidence synthesizer output citing aliased sources.
+
+        For conflicting_evidence scenarios, produces a claim with genuinely
+        contradictory supporting/contradicting sources and mixed agreement.
+        """
         sources = self._extract_aliased_sources(user_message)
         aliases = [
             s.get("source_ref", s.get("source_id", ""))
@@ -232,25 +238,49 @@ class FixtureModelAdapter:
         }
 
         if aliases:
-            claims = [{
-                "claim_id": "cl-1",
-                "statement": "Sealed corpus evidence supports the research question.",
-                "supporting_sources": aliases,
-                "contradicting_sources": [],
-                "confidence": self._claim_confidence,
-                "support_strength": "direct",
-                "source_agreement": "consistent",
-                "uncertainty": "Limited to sealed fixture corpus scope.",
-                "domain": "sealed_research",
-            }]
-            synthesis = {
-                "summary": f"Synthesized evidence from {len(aliases)} sealed sources.",
-                "key_findings": ["Fixture sources are consistent with the research question."],
-                "areas_of_agreement": ["All sources support the primary claim."],
-                "areas_of_disagreement": [],
-                "gaps_identified": ["Sealed corpus scope is limited."],
-                "temporal_analysis": "Sources are contemporary.",
-            }
+            if self._scenario_kind == "conflicting_evidence" and len(aliases) >= 2:
+                # Genuinely contradictory evidence: first source supports,
+                # second source contradicts.
+                claims = [{
+                    "claim_id": "cl-1",
+                    "statement": "Sources disagree on the research question.",
+                    "supporting_sources": [aliases[0]],
+                    "contradicting_sources": [aliases[1]],
+                    "confidence": 0.2,
+                    "support_strength": "weak",
+                    "source_agreement": "contradicted",
+                    "uncertainty": "Sources provide contradictory evidence.",
+                    "domain": "sealed_research",
+                }]
+                synthesis = {
+                    "summary": f"Conflicting evidence from {len(aliases)} sealed sources.",
+                    "key_findings": ["Sources disagree on the primary claim."],
+                    "areas_of_agreement": [],
+                    "areas_of_disagreement": ["Sources contradict on the research question."],
+                    "gaps_identified": ["Conflict unresolved in sealed corpus."],
+                    "temporal_analysis": "Sources are contemporary but contradictory.",
+                }
+            else:
+                # Stable literature: all sources support.
+                claims = [{
+                    "claim_id": "cl-1",
+                    "statement": "Sealed corpus evidence supports the research question.",
+                    "supporting_sources": aliases,
+                    "contradicting_sources": [],
+                    "confidence": self._claim_confidence,
+                    "support_strength": "direct",
+                    "source_agreement": "consistent",
+                    "uncertainty": "Limited to sealed fixture corpus scope.",
+                    "domain": "sealed_research",
+                }]
+                synthesis = {
+                    "summary": f"Synthesized evidence from {len(aliases)} sealed sources.",
+                    "key_findings": ["Fixture sources are consistent with the research question."],
+                    "areas_of_agreement": ["All sources support the primary claim."],
+                    "areas_of_disagreement": [],
+                    "gaps_identified": ["Sealed corpus scope is limited."],
+                    "temporal_analysis": "Sources are contemporary.",
+                }
 
         output = {"claims": claims, "synthesis": synthesis}
         content = json.dumps(output)
