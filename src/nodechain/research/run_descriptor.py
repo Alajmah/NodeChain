@@ -296,3 +296,41 @@ def save_outcome_record(
     """Write a resume outcome record atomically to the per-run outcomes dir."""
     p = outcome_path(workspace_dir, run_id, review_id)
     return _atomic_write(p, json.dumps(record, indent=2, sort_keys=True))
+
+
+# --------------------------------------------------------------------------- #
+# Fault records (immutable write-once, per-fault files)
+# --------------------------------------------------------------------------- #
+
+
+def fault_path(workspace_dir: str | Path, run_id: str, fault_id: str) -> Path:
+    """Return the path to a per-fault record."""
+    _validate_identifier(fault_id)
+    return run_dir(workspace_dir, run_id) / "faults" / f"{fault_id}.json"
+
+
+def save_fault_record(
+    workspace_dir: str | Path, run_id: str, record: dict[str, Any]
+) -> Path:
+    """Write a fault record atomically as an immutable write-once artifact.
+
+    Each fault is a separate file under runs/<run-id>/faults/<fault-id>.json.
+    This avoids mutable-aggregate race conditions and allows independent
+    crash-safe publication.
+    """
+    fid = record.get("fault_id", "unknown")
+    p = fault_path(workspace_dir, run_id, fid)
+    return _atomic_write(p, json.dumps(record, indent=2, sort_keys=True))
+
+
+def list_fault_records(
+    workspace_dir: str | Path, run_id: str
+) -> list[dict[str, Any]]:
+    """List all fault records for a run."""
+    faults_dir = run_dir(workspace_dir, run_id) / "faults"
+    if not faults_dir.exists():
+        return []
+    records = []
+    for f in sorted(faults_dir.glob("*.json")):
+        records.append(json.loads(f.read_text(encoding="utf-8")))
+    return records

@@ -401,6 +401,9 @@ class WorkspaceRunner:
 
             trace = asyncio.run(orch.run(self.brief.question))
 
+        # Record durable fault records for fault-injection scenarios.
+        self._record_faults(orch.state.run_id, trace)
+
         return RunResult(
             run_id=orch.state.run_id,
             chain_id=self.chain_id,
@@ -408,6 +411,41 @@ class WorkspaceRunner:
             state=orch.state,
             runner=self,
         )
+
+    def _record_faults(self, run_id: str, trace: Any) -> None:
+        """Record durable fault records for fault-injection scenarios.
+
+        For each corpus query entry with a fault directive, write an
+        immutable fault record to runs/<run-id>/faults/<fault-id>.json.
+        """
+        from .run_descriptor import save_fault_record
+        from datetime import datetime, timezone
+        import uuid
+
+        for query_key, entry in self.corpus.queries.items():
+            if entry.fault is None:
+                continue
+            fault_id = f"{entry.fault}-{uuid.uuid4().hex[:8]}"
+            record = {
+                "fault_id": fault_id,
+                "run_id": run_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "operation": f"search:{query_key}",
+                "failure_type": entry.fault,
+                "message": f"Injected {entry.fault} fault for query '{query_key}'",
+                "state_before": "dispatch_attempted" if entry.fault != "fail_before_dispatch" else "pre_dispatch",
+                "state_after": "failed" if entry.fault in ("timeout_after_dispatch", "malformed_provenance") else "partial" if entry.fault == "partial_result_set" else "not_dispatched",
+                "recoverability": "non_recoverable" if entry.fault == "malformed_provenance" else "retry_possible",
+                "related_artifact_refs": [f"corpus:{self.corpus.scenario_id}:{query_key}"],
+            }
+            if entry.fault == "partial_result_set":
+                record["total_available"] = entry.total_available
+                record["unavailable_source_ids"] = list(entry.unavailable_source_ids)
+                record["incompleteness_reason"] = entry.incompleteness_reason
+            try:
+                save_fault_record(self._workspace_dir, run_id, record)
+            except Exception:
+                pass  # fault recording is best-effort; don't crash the run
 
     def compose_for_resume(self, persisted_run_id: str) -> Orchestrator:
         """Construct the orchestrator for a resume, bound to the persisted
