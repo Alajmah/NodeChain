@@ -186,9 +186,12 @@ def test_second_resume_does_not_reuse_prior_decision(tmp_path: Path) -> None:
     invocations_before = runner._fixture_adapter.invocation_count
 
     def load_search_side_effect_rows(run_id: str) -> list[tuple]:
+        """Load complete canonical side-effect ledger rows for comparison."""
         conn = sqlite3.connect(runner._db_path)
         rows = conn.execute(
-            "SELECT idempotency_key, status, capsule_status "
+            "SELECT idempotency_key, status, capsule_status, "
+            "side_effect_type, request_hash, response_hash, "
+            "retryable, parent_side_effect_key, retry_ordinal "
             "FROM side_effect_ledger WHERE run_id = ? ORDER BY idempotency_key",
             (run_id,),
         ).fetchall()
@@ -198,10 +201,11 @@ def test_second_resume_does_not_reuse_prior_decision(tmp_path: Path) -> None:
     ledger_before = load_search_side_effect_rows(result.run_id)
 
     # Execute the second resume. Assertions in finally prove no mutation
-    # regardless of outcome.
+    # regardless of outcome. Validate the exception type if one occurs.
     second_exc = None
+    second_result = None
     try:
-        runner.resume(run_id=result.run_id)
+        second_result = runner.resume(run_id=result.run_id)
     except Exception as exc:
         second_exc = exc
     finally:
@@ -223,6 +227,20 @@ def test_second_resume_does_not_reuse_prior_decision(tmp_path: Path) -> None:
         assert runner._review_env == {}, "review env leaked"
         # Review env vars absent from process.
         assert "NODECHAIN_REVIEW_DECISION" not in os.environ
+
+    # Validate the exception type if one occurred — an unrelated runtime
+    # failure must not satisfy the test.
+    if second_exc is not None:
+        # Expected: terminal-state rejection (ValueError, RecoveryCursorMismatch,
+        # or similar). The exception must relate to the run being terminal.
+        exc_str = str(second_exc).lower()
+        assert any(kw in exc_str for kw in [
+            "completed", "terminal", "not resumable", "recovery",
+            "cursor", "state", "already",
+        ]), (
+            f"unexpected exception type/reason: {type(second_exc).__name__}: "
+            f"{second_exc}"
+        )
 
 
 # --------------------------------------------------------------------------- #

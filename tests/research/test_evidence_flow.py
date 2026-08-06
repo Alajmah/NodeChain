@@ -67,29 +67,25 @@ def test_complete_evidence_chain(tmp_path: Path) -> None:
     assert "src-2" in qualified_ids, f"src-2 not in qualified: {qualified_ids}"
 
     # Verify qualified source content links to ingested source content.
-    # Each qualified source must resolve to an ingested source with matching
-    # source_hash. The qualified source carries source_ref; the ingested
-    # source carries source_hash. We resolve source_ref → ingested source_id
-    # → ingested source_hash.
+    # Each qualified source MUST carry source_ref and source_hash (unconditional).
+    # The source_hash must equal the ingested source_hash for the same source_id.
     ingested_by_id = {s.get("source_id"): s for s in ingested_sources}
     for q in qualified:
         sid = q.get("source_id")
         assert q.get("source_ref"), f"qualified source {sid} missing source_ref"
+        assert q.get("source_hash"), f"qualified source {sid} missing source_hash"
         assert sid in ingested_by_id, (
             f"qualified source {sid} not found in ingested sources"
         )
         ingested = ingested_by_id[sid]
-        # The ingested source must carry a source_hash.
         assert ingested.get("source_hash"), (
             f"ingested source {sid} missing source_hash"
         )
-        # If the qualified source carries a hash, it must match.
-        q_hash = q.get("source_hash")
-        if q_hash:
-            assert q_hash == ingested["source_hash"], (
-                f"qualified source {sid} hash {q_hash} != "
-                f"ingested hash {ingested['source_hash']}"
-            )
+        # Unconditional hash continuity assertion (no if-guard).
+        assert q["source_hash"] == ingested["source_hash"], (
+            f"qualified source {sid} hash {q['source_hash']} != "
+            f"ingested hash {ingested['source_hash']}"
+        )
 
     # 3. evidence_synthesizer: claim supporting_sources includes BOTH.
     es = _parse_output(outputs, "evidence_synthesizer")
