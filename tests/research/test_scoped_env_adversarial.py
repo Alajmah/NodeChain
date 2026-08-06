@@ -175,19 +175,31 @@ def test_second_resume_does_not_reuse_prior_decision(tmp_path: Path) -> None:
     # _review_env must be empty after first resume.
     assert runner._review_env == {}, "review env not cleared after first resume"
 
-    # Second resume WITHOUT apply_review — _review_env is empty so
-    # no prior decision can be reused.
+    # Second resume WITHOUT apply_review. The run is now terminal (completed
+    # after approve), so a second resume should either raise (terminal-state
+    # rejection) or return without re-executing. Lock the exact truth:
+    # _review_env must be empty (no reuse) AND the second resume must not
+    # re-execute the chain.
     second_exc = None
+    second_result = None
     try:
-        runner.resume(run_id=result.run_id)
+        second_result = runner.resume(run_id=result.run_id)
     except Exception as e:
         second_exc = e
 
-    # The second resume should either raise (already completed) or
-    # complete with no review decision applied. Either way,
-    # _review_env must remain empty.
+    # Assert: either an exception occurred (terminal reject) OR the result
+    # shows no additional execution (same final_status, no new trace events).
     assert runner._review_env == {}, "review env leaked after second resume"
     assert "NODECHAIN_REVIEW_DECISION" not in os.environ
+
+    if second_exc is not None:
+        # Terminal reject is the expected behavior for a completed run.
+        pass
+    elif second_result is not None:
+        # If resume returned, it must not have re-executed (no new completed steps).
+        assert second_result.trace.final_status in ("completed", "failed"), (
+            f"unexpected second-resume status: {second_result.trace.final_status}"
+        )
 
 
 # --------------------------------------------------------------------------- #

@@ -60,7 +60,11 @@ def test_snapshot_failure_does_not_produce_paused_result(tmp_path: Path) -> None
 
 
 def test_snapshot_failure_propagates_as_failed_not_paused(tmp_path: Path) -> None:
-    """A snapshot failure during pause must not produce a valid pause token."""
+    """A snapshot failure during pause must not produce a valid pause token.
+
+    Patches review_manager._save_snapshot (not orch.persistence.save_snapshot)
+    so the failure occurs in the actual callback path.
+    """
     runner = WorkspaceRunner(
         brief=ResearchBrief.from_question("Is async Rust memory-safe?"),
         corpus_path=str(CORPUS),
@@ -68,27 +72,34 @@ def test_snapshot_failure_propagates_as_failed_not_paused(tmp_path: Path) -> Non
     )
     orch = runner._compose()
 
-    # Make ALL saves fail when status is waiting_for_review.
-    original_save = orch.persistence.save_snapshot
+    original_save = orch.review_manager._save_snapshot
 
     def failing_save(state):
         if state.status == "waiting_for_review":
             raise OSError("simulated disk failure")
         return original_save(state)
 
-    orch.persistence.save_snapshot = failing_save
+    orch.review_manager._save_snapshot = failing_save
 
     import asyncio
 
-    # The run should not produce a paused result.
-    try:
-        trace = asyncio.run(orch.run("Is async Rust memory-safe?"))
-        # If it returns (orchestrator may catch), the result must NOT be paused.
-        assert trace.final_status != "paused", (
-            "run returned paused despite snapshot failure"
+    trace = asyncio.run(orch.run("Is async Rust memory-safe?"))
+
+    # Assert exact fail-closed truths (no broad except handler).
+    assert trace.final_status == "failed", (
+        f"expected failed, got {trace.final_status}"
+    )
+
+    # Persisted state must NOT be waiting_for_review.
+    from nodechain.core.state import StateManager
+    from nodechain.core.capsule_crypto import KekManager
+    sm = StateManager(runner._db_path, kek_manager=KekManager(local_dev=True, kek_path=runner._kek_path))
+    loaded = sm.load(orch.state.run_id)
+    if loaded is not None:
+        assert loaded.status != "waiting_for_review", (
+            f"persisted status is waiting_for_review despite snapshot failure: {loaded.status}"
         )
-        assert trace.final_status != "waiting_for_review", (
-            "run returned waiting_for_review despite snapshot failure"
-        )
-    except Exception:
-        pass  # Exception propagation is acceptable — the run did not succeed
+
+    # No valid pause/review token exposed.
+    assert trace.final_status != "paused"
+    assert trace.final_status != "waiting_for_review"

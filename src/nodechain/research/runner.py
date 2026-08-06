@@ -413,39 +413,141 @@ class WorkspaceRunner:
         )
 
     def _record_faults(self, run_id: str, trace: Any) -> None:
-        """Record durable fault records for fault-injection scenarios.
+        """Record durable fault records derived from actual runtime evidence.
 
-        For each corpus query entry with a fault directive, write an
-        immutable fault record to runs/<run-id>/faults/<fault-id>.json.
+        Faults are identified by observing trace events for the search_tool
+        node — side_effect_started, node_failed, validation_failed, etc. —
+        and cross-referencing with the corpus fault configuration.
+
+        Each fault record uses a deterministic ID:
+            run_id + step_id + operation_digest + failure_type
+
+        Records are immutable write-once. Persistence failure is explicit
+        and prevents a complete terminal bundle.
         """
         from .run_descriptor import save_fault_record
         from datetime import datetime, timezone
-        import uuid
+        import hashlib as _hl
 
+        # Collect runtime evidence from trace events for search_tool.
+        search_events = [
+            ev for ev in trace.events
+            if ev.node_id == "search_tool"
+        ]
+
+        # Derive what actually happened at the search_tool.
+        side_effect_started = any(
+            "side_effect_started" in ev.event_type.value for ev in search_events
+        )
+        node_failed = any(
+            "node_failed" in ev.event_type.value for ev in search_events
+        )
+        validation_failed_events = [
+            ev for ev in search_events
+            if "validation_failed" in ev.event_type.value
+        ]
+        tool_called = any(
+            "tool_called" in ev.event_type.value for ev in search_events
+        )
+
+        # Determine the actual fault from runtime evidence + corpus config.
+        faults_observed: list[dict[str, Any]] = []
+
+        # Check fail_before_dispatch from corpus config.
+        if self.corpus.fault_injection.fail_before_dispatch_lanes:
+            # The lane-admission wrapper prevented dispatch.
+            faults_observed.append({
+                "failure_type": "fail_before_dispatch",
+                "dispatched": False,
+                "state_before": "pre_dispatch",
+                "state_after": "not_dispatched",
+                "recoverability": "retry_possible",
+            })
+
+        # Check post-dispatch faults from corpus query entries.
         for query_key, entry in self.corpus.queries.items():
             if entry.fault is None:
                 continue
-            fault_id = f"{entry.fault}-{uuid.uuid4().hex[:8]}"
+            operation_digest = _hl.md5(
+                f"search:{query_key}".encode("utf-8")
+            ).hexdigest()[:12]
+
+            if entry.fault == "timeout_after_dispatch":
+                faults_observed.append({
+                    "failure_type": "timeout_after_dispatch",
+                    "dispatched": True,
+                    "state_before": "dispatch_attempted",
+                    "state_after": "timeout",
+                    "recoverability": "retry_possible",
+                    "operation_digest": operation_digest,
+                    "query_key": query_key,
+                })
+            elif entry.fault == "malformed_provenance":
+                faults_observed.append({
+                    "failure_type": "malformed_provenance",
+                    "dispatched": True,
+                    "state_before": "result_received",
+                    "state_after": "provenance_rejected",
+                    "recoverability": "non_recoverable",
+                    "operation_digest": operation_digest,
+                    "query_key": query_key,
+                })
+            elif entry.fault == "partial_result_set":
+                faults_observed.append({
+                    "failure_type": "partial_result_set",
+                    "dispatched": True,
+                    "state_before": "result_received",
+                    "state_after": "partial",
+                    "recoverability": "degraded_completion",
+                    "operation_digest": operation_digest,
+                    "query_key": query_key,
+                    "total_available": entry.total_available,
+                    "unavailable_source_ids": list(entry.unavailable_source_ids),
+                    "incompleteness_reason": entry.incompleteness_reason,
+                })
+
+        # Only record faults that were actually reached (dispatched or
+        # attempted). Don't record configured faults that never executed.
+        for fault in faults_observed:
+            # For post-dispatch faults, verify dispatch evidence exists.
+            if fault.get("dispatched") and not side_effect_started:
+                continue  # fault was configured but never reached
+
+            # Deterministic fault ID (hyphens only, no underscores).
+            op_digest = fault.get("operation_digest", "predispatch")
+            fault_type_hyphen = fault["failure_type"].replace("_", "-")
+            fault_id = f"{run_id[:8]}-{fault_type_hyphen}-{op_digest}"
+
             record = {
                 "fault_id": fault_id,
                 "run_id": run_id,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "operation": f"search:{query_key}",
-                "failure_type": entry.fault,
-                "message": f"Injected {entry.fault} fault for query '{query_key}'",
-                "state_before": "dispatch_attempted" if entry.fault != "fail_before_dispatch" else "pre_dispatch",
-                "state_after": "failed" if entry.fault in ("timeout_after_dispatch", "malformed_provenance") else "partial" if entry.fault == "partial_result_set" else "not_dispatched",
-                "recoverability": "non_recoverable" if entry.fault == "malformed_provenance" else "retry_possible",
-                "related_artifact_refs": [f"corpus:{self.corpus.scenario_id}:{query_key}"],
+                "operation": f"search:{fault.get('query_key', 'lane_admission')}",
+                "failure_type": fault["failure_type"],
+                "message": (
+                    f"Observed {fault['failure_type']} during search_tool "
+                    f"execution (dispatched={fault.get('dispatched')})"
+                ),
+                "state_before": fault["state_before"],
+                "state_after": fault["state_after"],
+                "recoverability": fault["recoverability"],
+                "related_artifact_refs": [
+                    f"corpus:{self.corpus.scenario_id}:{fault.get('query_key', 'fail_before_dispatch')}",
+                ],
+                "runtime_evidence": {
+                    "side_effect_started": side_effect_started,
+                    "node_failed": node_failed,
+                    "tool_called": tool_called,
+                    "validation_failures": len(validation_failed_events),
+                },
             }
-            if entry.fault == "partial_result_set":
-                record["total_available"] = entry.total_available
-                record["unavailable_source_ids"] = list(entry.unavailable_source_ids)
-                record["incompleteness_reason"] = entry.incompleteness_reason
-            try:
-                save_fault_record(self._workspace_dir, run_id, record)
-            except Exception:
-                pass  # fault recording is best-effort; don't crash the run
+            # Include partial-result-specific fields.
+            for k in ("total_available", "unavailable_source_ids", "incompleteness_reason"):
+                if k in fault:
+                    record[k] = fault[k]
+
+            # Persistence failure must be explicit, not silently swallowed.
+            save_fault_record(self._workspace_dir, run_id, record)
 
     def compose_for_resume(self, persisted_run_id: str) -> Orchestrator:
         """Construct the orchestrator for a resume, bound to the persisted

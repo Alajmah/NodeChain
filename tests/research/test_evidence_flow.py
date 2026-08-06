@@ -87,13 +87,13 @@ def test_complete_evidence_chain(tmp_path: Path) -> None:
         f"expected status 'confirmed', got {validated_claim.get('status')}"
     )
 
-    # Validated claim supporting sources must be a subset of qualified sources.
+    # Validated claim supporting sources must be exactly {src-1, src-2}
+    # (matching the qualified source set, not a vacuous subset).
     val_supporting = set(validated_claim.get("supporting_sources", []))
-    if val_supporting:
-        assert val_supporting.issubset(qualified_ids), (
-            f"validated supporting_sources {val_supporting} not subset of "
-            f"qualified {qualified_ids}"
-        )
+    assert val_supporting == {"src-1", "src-2"}, (
+        f"validated supporting_sources must be exactly {{src-1, src-2}}, "
+        f"got {val_supporting}"
+    )
 
     # 5. Guard dispatch count matches adapter invocation count.
     guard = runner._search_node._adapter_resolver["fixture"]

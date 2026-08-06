@@ -62,11 +62,20 @@ def _publish_no_replace(staging: Path, target: Path) -> None:
                 f"target already exists (write-once violated): {target}"
             )
         # Remove the staging pathname (the target is now a hard link to the
-        # same inode).
+        # same inode). Surface cleanup failures via warning so they are not
+        # silently swallowed — the published target is valid, but an orphaned
+        # staging file is an operational artifact to reconcile.
         try:
             staging.unlink()
-        except OSError:
-            pass
+        except OSError as cleanup_exc:
+            import warnings
+            warnings.warn(
+                f"POSIX staging cleanup failed for {staging}: {cleanup_exc}. "
+                f"The published target {target} is valid but an orphaned "
+                f"staging file remains.",
+                ResourceWarning,
+                stacklevel=2,
+            )
 
 
 def _atomic_write(path: Path, content: str) -> Path:
@@ -107,18 +116,19 @@ def _atomic_write(path: Path, content: str) -> Path:
         _publish_no_replace(staging, path)
 
         # 3. Fsync parent directory where supported. Only suppress errors
-        # from unsupported operations (EINVAL, ENOTSUP, EBADF). Real I/O
-        # failures (EIO, ENOSPC, etc.) MUST propagate.
+        # from unsupported operations. EACCES is suppressed on Windows only
+        # (POSIX EACCES indicates a real permission failure that must propagate).
         import errno
+        import sys as _sys
+        _suppress = {errno.EINVAL, errno.ENOTSUP, errno.EBADF}
+        if _sys.platform == "win32":
+            _suppress.add(errno.EACCES)
         dir_fd = None
         try:
             dir_fd = os.open(str(path.parent), os.O_RDONLY)
             os.fsync(dir_fd)
         except OSError as exc:
-            if exc.errno not in {
-                errno.EINVAL, errno.ENOTSUP, errno.EBADF,
-                errno.EACCES,  # Windows: cannot open directory with O_RDONLY
-            }:
+            if exc.errno not in _suppress:
                 raise
         except AttributeError:
             pass  # os.open or os.fsync not available
