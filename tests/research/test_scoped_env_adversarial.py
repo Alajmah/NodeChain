@@ -22,7 +22,7 @@ import pytest
 from nodechain.research.runner import ResearchBrief, WorkspaceRunner
 from nodechain.research.scoped_env import scoped_env
 
-CORPUS = Path(__file__).parent.parent.parent / "tests" / "fixtures" / "research" / "corpus_basic.yaml"
+CORPUS = Path(__file__).parent.parent.parent / "tests" / "fixtures" / "research" / "corpus_conflicting_evidence.yaml"
 
 
 # --------------------------------------------------------------------------- #
@@ -94,8 +94,7 @@ def test_review_env_absent_after_successful_resume(tmp_path: Path) -> None:
         workspace_dir=str(tmp_path / "ws1"),
     )
     result = runner.run()
-    if not result.paused:
-        pytest.skip("chain completed without pausing")
+    assert result.paused, "conflicting-evidence scenario must pause"
     runner.apply_review("approve", "ok", "reviewer")
     assert runner._review_env != {}
     runner.resume(run_id=result.run_id)
@@ -110,8 +109,7 @@ def test_review_env_absent_after_failed_resume(tmp_path: Path) -> None:
         workspace_dir=str(tmp_path / "ws2"),
     )
     result = runner.run()
-    if not result.paused:
-        pytest.skip("chain completed without pausing")
+    assert result.paused, "conflicting-evidence scenario must pause"
     runner.apply_review("approve", "ok", "reviewer")
     assert runner._review_env != {}
     # Simulate a failed resume by passing a bad run_id.
@@ -130,8 +128,7 @@ def test_second_resume_does_not_reuse_prior_decision(tmp_path: Path) -> None:
         workspace_dir=str(tmp_path / "ws3"),
     )
     result = runner.run()
-    if not result.paused:
-        pytest.skip("chain completed without pausing")
+    assert result.paused, "conflicting-evidence scenario must pause"
     runner.apply_review("approve", "first", "reviewer1")
     runner.resume(run_id=result.run_id)
     # _review_env should be empty.
