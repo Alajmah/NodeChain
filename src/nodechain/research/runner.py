@@ -83,10 +83,11 @@ def _research_blueprint(chain_id: str, goal: str) -> ChainBlueprint:
             ),
             NodeDef(node_id="source_ingestion", node_type="deterministic", config={}, position=5),
             NodeDef(node_id="source_quality_evaluator", node_type="model", config={}, position=6),
-            NodeDef(node_id="evidence_synthesizer", node_type="model", config={}, position=7),
-            NodeDef(node_id="claim_validator", node_type="model", config={}, position=8),
-            NodeDef(node_id="risk_classifier", node_type="model", config={}, position=9),
-            NodeDef(node_id="response_generator", node_type="model", config={}, position=10),
+            NodeDef(node_id="qualified_source_linker", node_type="deterministic", config={}, position=7),
+            NodeDef(node_id="evidence_synthesizer", node_type="model", config={}, position=8),
+            NodeDef(node_id="claim_validator", node_type="model", config={}, position=9),
+            NodeDef(node_id="risk_classifier", node_type="model", config={}, position=10),
+            NodeDef(node_id="response_generator", node_type="model", config={}, position=11),
         ],
         connections=[
             ConnectionDef(from_node="goal_interpreter", from_port="normalized_research_goal", to_node="task_planner", to_port="normalized_research_goal"),
@@ -94,7 +95,8 @@ def _research_blueprint(chain_id: str, goal: str) -> ChainBlueprint:
             ConnectionDef(from_node="context_selector", from_port="context_bundle", to_node="search_tool", to_port="context_bundle"),
             ConnectionDef(from_node="search_tool", from_port="raw_search_results", to_node="source_ingestion", to_port="raw_search_results"),
             ConnectionDef(from_node="source_ingestion", from_port="source_set", to_node="source_quality_evaluator", to_port="source_set"),
-            ConnectionDef(from_node="source_quality_evaluator", from_port="qualified_source_set", to_node="evidence_synthesizer", to_port="qualified_source_set"),
+            ConnectionDef(from_node="source_quality_evaluator", from_port="qualified_source_set", to_node="qualified_source_linker", to_port="qualified_source_set"),
+            ConnectionDef(from_node="qualified_source_linker", from_port="qualified_source_set", to_node="evidence_synthesizer", to_port="qualified_source_set"),
             ConnectionDef(from_node="evidence_synthesizer", from_port="evidence_base", to_node="claim_validator", to_port="evidence_base"),
             ConnectionDef(from_node="claim_validator", from_port="validated_evidence_base", to_node="risk_classifier", to_port="validated_evidence_base"),
             ConnectionDef(from_node="risk_classifier", from_port="risk_assessment", to_node="response_generator", to_port="risk_assessment"),
@@ -239,6 +241,9 @@ class WorkspaceRunner:
         )
         # Replace the production SearchToolNode with the fixture specialization.
         nodes["search_tool"] = FixtureSearchToolNode()
+        # Add the QualifiedSourceLinker between quality evaluation and synthesis.
+        from .qualified_source_linker import QualifiedSourceLinkerNode
+        nodes["qualified_source_linker"] = QualifiedSourceLinkerNode()
         return nodes
 
     def _compose(self, persisted_run_id: str | None = None) -> Orchestrator:

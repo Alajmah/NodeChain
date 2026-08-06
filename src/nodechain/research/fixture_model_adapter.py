@@ -235,11 +235,8 @@ class FixtureModelAdapter:
             sid = s.get("source_id", s.get("source_ref", ""))
             if not sid:
                 continue
-            source_hash = s.get("source_hash", "")
             q = {
                 "source_id": sid,
-                "source_ref": f"ingested:{sid}",
-                "source_hash": source_hash,
                 "quality_score": 0.8,
                 "included": True,
                 "peer_reviewed": s.get("peer_reviewed", False),

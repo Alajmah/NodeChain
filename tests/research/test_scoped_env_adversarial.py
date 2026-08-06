@@ -233,21 +233,18 @@ def test_second_resume_does_not_reuse_prior_decision(tmp_path: Path) -> None:
         # Review env vars absent from process.
         assert "NODECHAIN_REVIEW_DECISION" not in os.environ
 
-    # Validate the outcome: either terminal rejection (exception) or
-    # idempotent return (no mutation). The exception type is accepted
-    # broadly but the finally-block assertions already prove no execution
-    # occurred regardless of outcome. An idempotent return must preserve
-    # the original run_id.
-    if second_exc is not None:
-        # Exception path: the run was terminal and resume rejected it.
-        # The finally-block assertions already proved no execution occurred.
-        pass
-    elif second_result is not None:
-        # Idempotent return path: the run_id must be unchanged.
-        assert second_result.run_id == result.run_id, (
-            f"second resume changed run_id from {result.run_id} "
-            f"to {second_result.run_id}"
-        )
+    # The runtime returns idempotently for a second resume on a terminal run
+    # (it does not raise). Lock the exact observed contract.
+    assert second_exc is None, (
+        f"expected idempotent return, got exception: {second_exc}"
+    )
+    assert second_result is not None, "expected a RunResult"
+    assert second_result.run_id == result.run_id, (
+        f"run_id changed: {second_result.run_id} != {result.run_id}"
+    )
+    assert second_result.trace.final_status == "completed", (
+        f"expected completed, got {second_result.trace.final_status}"
+    )
 
 
 # --------------------------------------------------------------------------- #
