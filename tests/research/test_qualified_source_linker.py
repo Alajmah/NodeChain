@@ -79,7 +79,7 @@ def test_valid_two_source_linkage() -> None:
     linked = output["linked_sources"]
     assert len(linked) == 2
     for l in linked:
-        assert l["source_ref"].startswith("ingested:")
+        assert l.get("artifact_ref", "").startswith("ingested:")
         assert l["source_hash"]
         assert l["source_hash"] == next(
             s for s in [s1, s2] if s["source_id"] == l["source_id"]
@@ -158,24 +158,32 @@ def test_missing_source_id_rejected() -> None:
         _run_linker(payload)
 
 
-def test_duplicate_ingested_ids() -> None:
+def test_artifact_ref_mismatch_rejected() -> None:
+    source = _make_source("src-1")
+    source["artifact_ref"] = "ingested:src-2:wronghash"  # wrong ref
+    payload = {
+        "qualified_sources": [_make_qualified("src-1")],
+        "sources": [source],
+    }
+    with pytest.raises(QualifiedSourceLinkageError, match="INGESTED_SOURCE_REF_MISMATCH"):
+        _run_linker(payload)
+
+
+def test_duplicate_ingested_ids_rejected() -> None:
     s1 = _make_source("src-1")
     payload = {
         "qualified_sources": [_make_qualified("src-1")],
-        "sources": [s1, s1],  # duplicate
+        "sources": [s1, dict(s1)],  # exact duplicate
     }
-    # The linker builds a dict by source_id, so duplicates collapse.
-    # This is acceptable behavior (last one wins), not a failure.
-    output = _run_linker(payload)
-    assert len(output["linked_sources"]) == 1
+    with pytest.raises(QualifiedSourceLinkageError, match="DUPLICATE_INGESTED_SOURCE_ID"):
+        _run_linker(payload)
 
 
-def test_duplicate_qualified_ids() -> None:
+def test_duplicate_qualified_ids_rejected() -> None:
     s1 = _make_source("src-1")
     payload = {
         "qualified_sources": [_make_qualified("src-1"), _make_qualified("src-1")],
         "sources": [s1],
     }
-    # Both link successfully to the same source. This is acceptable.
-    output = _run_linker(payload)
-    assert len(output["linked_sources"]) == 2
+    with pytest.raises(QualifiedSourceLinkageError, match="DUPLICATE_QUALIFIED_SOURCE_ID"):
+        _run_linker(payload)

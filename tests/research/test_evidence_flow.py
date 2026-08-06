@@ -92,18 +92,18 @@ def test_complete_evidence_chain(tmp_path: Path) -> None:
     assert "src-1" in supporting, f"src-1 not in supporting_sources: {supporting}"
     assert "src-2" in supporting, f"src-2 not in supporting_sources: {supporting}"
 
-    # 3b. Prove synthesizer consumed the linked set (not raw quality output).
-    # The linker output carries linkage_verified=True; the synthesizer input
-    # should contain linked sources (with source_hash), not bare quality decisions.
-    # We verify this by checking that the synthesizer's source passthrough
-    # contains sources with source_hash (propagated by the linker).
+    # 3b. Prove synthesizer consumed ONLY the linked set.
+    # The linker outputs 'sources' as ONLY the linked source records (no raw
+    # passthrough). The synthesizer's sources should match the linker's
+    # linked set, not the full ingested set. If an excluded source existed,
+    # it would NOT appear in the synthesizer's source list.
     es_sources = es.get("sources", [])
-    es_source_ids_with_hash = {
-        s.get("source_id") for s in es_sources
-        if isinstance(s, dict) and s.get("source_hash")
-    }
-    assert "src-1" in es_source_ids_with_hash or "src-2" in es_source_ids_with_hash, (
-        "synthesizer sources do not carry source_hash — linker was bypassed"
+    es_source_ids = {s.get("source_id") for s in es_sources if isinstance(s, dict)}
+    linked_ids = {l.get("source_id") for l in linked_sources}
+    # Every synthesizer source must be a linked source.
+    assert es_source_ids == linked_ids, (
+        f"synthesizer sources {es_source_ids} != linked set {linked_ids} "
+        f"— raw-source fallback bypassed qualification"
     )
 
     # 4. claim_validator: validated claim supporting_sources ⊆ qualified.

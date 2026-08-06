@@ -45,7 +45,7 @@ QUALIFIED_SOURCE_LINKER_CONTRACT = NodeContract(
     entry=EntryContract(
         input_type="qualified_source_set",
         schema_ref="nodechain://schemas/semantic_types/source_set",
-        required_fields=["qualified_sources"],
+        required_fields=["qualified_sources", "sources"],
     ),
     exit=ExitContract(
         output_type="qualified_source_set",
@@ -98,12 +98,22 @@ class QualifiedSourceLinkerNode(BaseNode):
         quality_summary = payload.get("quality_summary", "")
         loop_required = payload.get("loop_required", False)
 
-        # Build ingested source lookup by source_id.
+        # Build ingested source lookup by source_id. Reject duplicates.
         ingested_by_id: dict[str, dict[str, Any]] = {}
         for s in sources:
             sid = s.get("source_id", "")
-            if sid:
-                ingested_by_id[sid] = s
+            if not sid:
+                continue
+            if sid in ingested_by_id:
+                raise QualifiedSourceLinkageError(
+                    "DUPLICATE_INGESTED_SOURCE_ID",
+                    sid,
+                    f"ingested source {sid} appears more than once",
+                )
+            ingested_by_id[sid] = s
+
+        # Reject duplicate qualified source IDs.
+        seen_qualified: set[str] = set()
 
         # Link each qualified source.
         linked_sources: list[dict[str, Any]] = []
@@ -122,6 +132,14 @@ class QualifiedSourceLinkerNode(BaseNode):
                     "",
                     "qualified source has no source_id",
                 )
+
+            if sid in seen_qualified:
+                raise QualifiedSourceLinkageError(
+                    "DUPLICATE_QUALIFIED_SOURCE_ID",
+                    sid,
+                    f"qualified source {sid} appears more than once",
+                )
+            seen_qualified.add(sid)
 
             ingested = ingested_by_id.get(sid)
             if ingested is None:
@@ -147,21 +165,50 @@ class QualifiedSourceLinkerNode(BaseNode):
                     f"ingested source {sid} has no artifact_ref",
                 )
 
+            # Validate artifact_ref matches expected format.
+            expected_ref = f"ingested:{sid}:{source_hash}"
+            if artifact_ref != expected_ref:
+                raise QualifiedSourceLinkageError(
+                    "INGESTED_SOURCE_REF_MISMATCH",
+                    sid,
+                    f"artifact_ref {artifact_ref} != expected {expected_ref}",
+                )
+
             # Propagate artifact identity deterministically from ingestion.
+            # source_ref is set to source_id for synthesizer citation matching
+            # (the synthesizer matches source_ref against source_id).
+            # artifact_ref carries the full immutable reference.
             linked = {
                 **q,
-                "source_ref": artifact_ref,
+                "source_ref": sid,
+                "artifact_ref": artifact_ref,
                 "source_hash": source_hash,
             }
             linked_sources.append(linked)
 
+        # Build the output: only linked sources reach downstream nodes.
+        # The 'sources' field carries ONLY the linked set so the synthesizer
+        # cannot fall back to raw unqualified sources.
+        linked_source_records = []
+        for linked in linked_sources:
+            sid = linked["source_id"]
+            ingested = ingested_by_id[sid]
+            linked_source_records.append({
+                **ingested,
+                "source_ref": sid,
+                "artifact_ref": linked["artifact_ref"],
+                "source_hash": linked["source_hash"],
+                "quality_score": linked.get("quality_score", 0.0),
+                "included": True,
+            })
+
         output = {
             "linked_sources": linked_sources,
             "excluded_sources": excluded_sources,
-            "qualified_sources": linked_sources,  # backwards compat
+            "qualified_sources": linked_sources,  # backwards compat for synthesizer
             "quality_summary": quality_summary,
             "loop_required": loop_required,
-            "sources": sources,
+            "sources": linked_source_records,  # ONLY linked — no raw passthrough
             "linkage_verified": True,
         }
 
