@@ -191,6 +191,23 @@ class WorkspaceRunner:
         self._run_descriptor: RunDescriptor | None = None
         self._review_env: dict[str, str] = {}
 
+    @classmethod
+    def from_descriptor(cls, desc: RunDescriptor) -> "WorkspaceRunner":
+        """Reconstruct a WorkspaceRunner from a persisted run descriptor.
+
+        This is the fresh-process reconstruction path: a new WorkspaceRunner
+        object is created with all paths from the descriptor, suitable for
+        compose_for_resume + resume.
+        """
+        return cls(
+            brief=ResearchBrief.from_question(desc.question),
+            corpus_path=desc.corpus_path,
+            workspace_dir=desc.workspace_dir,
+            db_path=desc.db_path,
+            trace_dir=desc.trace_dir,
+            chain_id=desc.chain_id,
+        )
+
     # ------------------------------------------------------------------ #
     # Composition
     # ------------------------------------------------------------------ #
