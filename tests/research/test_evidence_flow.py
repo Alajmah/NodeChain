@@ -92,6 +92,20 @@ def test_complete_evidence_chain(tmp_path: Path) -> None:
     assert "src-1" in supporting, f"src-1 not in supporting_sources: {supporting}"
     assert "src-2" in supporting, f"src-2 not in supporting_sources: {supporting}"
 
+    # 3b. Prove synthesizer consumed the linked set (not raw quality output).
+    # The linker output carries linkage_verified=True; the synthesizer input
+    # should contain linked sources (with source_hash), not bare quality decisions.
+    # We verify this by checking that the synthesizer's source passthrough
+    # contains sources with source_hash (propagated by the linker).
+    es_sources = es.get("sources", [])
+    es_source_ids_with_hash = {
+        s.get("source_id") for s in es_sources
+        if isinstance(s, dict) and s.get("source_hash")
+    }
+    assert "src-1" in es_source_ids_with_hash or "src-2" in es_source_ids_with_hash, (
+        "synthesizer sources do not carry source_hash — linker was bypassed"
+    )
+
     # 4. claim_validator: validated claim supporting_sources ⊆ qualified.
     cv = _parse_output(outputs, "claim_validator")
     validated = cv.get("validated_claims", [])
@@ -121,3 +135,48 @@ def test_complete_evidence_chain(tmp_path: Path) -> None:
     resolver = runner._search_node._adapter_resolver
     for prod in ("semantic_scholar", "arxiv", "openalex", "crossref", "pubmed"):
         assert prod not in resolver, f"production adapter {prod} in resolver"
+
+
+def test_unknown_source_fails_before_synthesis(tmp_path: Path) -> None:
+    """A quality decision referencing an unknown source must fail at the
+    QualifiedSourceLinker, before evidence_synthesizer executes."""
+    runner = WorkspaceRunner(
+        brief=ResearchBrief.from_question("Is async Rust memory-safe?"),
+        corpus_path=str(CORPUS),
+        workspace_dir=str(tmp_path / "negative_linkage"),
+    )
+
+    # Monkey-patch the model adapter to produce a qualified source with
+    # an unknown source_id that doesn't exist in the ingested source set.
+    from nodechain.research.fixture_model_adapter import FixtureModelAdapter
+    original_quality = FixtureModelAdapter._quality_evaluator_response
+
+    def poisoned_quality(self, user_message):
+        result = original_quality(self, user_message)
+        # Add an unknown source to the qualified_sources.
+        if result.structured_output and "qualified_sources" in result.structured_output:
+            result.structured_output["qualified_sources"].append({
+                "source_id": "src-UNKNOWN",
+                "quality_score": 0.9,
+                "included": True,
+            })
+            import json as _json
+            result.content = _json.dumps(result.structured_output)
+        return result
+
+    FixtureModelAdapter._quality_evaluator_response = poisoned_quality
+
+    try:
+        result = runner.run()
+        # The chain should FAIL at the linker node (not complete or pause).
+        assert result.trace.final_status == "failed", (
+            f"expected failed (linker rejected unknown source), "
+            f"got {result.trace.final_status}"
+        )
+        # The linker should have raised before evidence_synthesizer ran.
+        completed = set(result.state.completed_steps.values())
+        assert "evidence_synthesizer" not in completed, (
+            "evidence_synthesizer executed despite unknown source"
+        )
+    finally:
+        FixtureModelAdapter._quality_evaluator_response = original_quality
