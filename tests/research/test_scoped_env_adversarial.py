@@ -159,7 +159,14 @@ def test_review_env_absent_after_failed_resume(tmp_path: Path) -> None:
 
 
 def test_second_resume_does_not_reuse_prior_decision(tmp_path: Path) -> None:
-    """A second resume cannot reuse a prior approval (one-shot clearing)."""
+    """A second resume cannot reuse a prior approval or cause any additional
+    side effect, regardless of whether it returns or raises.
+
+    Assertions run in finally so partial re-execution followed by an
+    exception cannot escape detection.
+    """
+    import sqlite3
+
     runner = WorkspaceRunner(
         brief=ResearchBrief.from_question("Is async Rust memory-safe?"),
         corpus_path=str(CORPUS),
@@ -171,52 +178,51 @@ def test_second_resume_does_not_reuse_prior_decision(tmp_path: Path) -> None:
 
     # First resume succeeds.
     first_result = runner.resume(run_id=result.run_id)
-
-    # _review_env must be empty after first resume.
     assert runner._review_env == {}, "review env not cleared after first resume"
 
-    # Record the persisted state revision after first resume (durable evidence).
-    from nodechain.core.state import StateManager
-    from nodechain.core.capsule_crypto import KekManager
-    sm = StateManager(runner._db_path, kek_manager=KekManager(local_dev=True, kek_path=runner._kek_path))
-    state_after_first = sm.load(result.run_id)
-    revision_after_first = state_after_first.revision if state_after_first else 0
+    # Capture durable execution evidence BEFORE the second resume.
+    guard = runner._search_node._adapter_resolver["fixture"]
+    dispatches_before = tuple(guard._dispatched_digests)
+    invocations_before = runner._fixture_adapter.invocation_count
 
-    # Second resume WITHOUT apply_review. The run is now terminal (completed
-    # after approve). Prove no re-execution by comparing persisted state revision.
+    def load_search_side_effect_rows(run_id: str) -> list[tuple]:
+        conn = sqlite3.connect(runner._db_path)
+        rows = conn.execute(
+            "SELECT idempotency_key, status, capsule_status "
+            "FROM side_effect_ledger WHERE run_id = ? ORDER BY idempotency_key",
+            (run_id,),
+        ).fetchall()
+        conn.close()
+        return rows
+
+    ledger_before = load_search_side_effect_rows(result.run_id)
+
+    # Execute the second resume. Assertions in finally prove no mutation
+    # regardless of outcome.
     second_exc = None
-    second_result = None
     try:
-        second_result = runner.resume(run_id=result.run_id)
-    except Exception as e:
-        second_exc = e
-
-    assert runner._review_env == {}, "review env leaked after second resume"
-    assert "NODECHAIN_REVIEW_DECISION" not in os.environ
-
-    # Lock the exact truth: either the second resume raised (terminal reject)
-    # or it returned without re-executing. Prove by comparing the guard's
-    # dispatched digests count (durable dispatch evidence) — if the chain
-    # re-executed search_tool, a new dispatch would increment the count.
-    if second_exc is not None:
-        # Terminal reject is valid.
-        pass
-    elif second_result is not None:
-        # The guard object persists across resumes (same runner instance).
-        # After the first resume, dispatches should be 1. After the second
-        # resume (no re-execution), dispatches should still be 1.
-        guard = runner._search_node._adapter_resolver.get("fixture")
-        if guard is not None:
-            dispatches_after_second = len(guard._dispatched_digests)
-            assert dispatches_after_second == 1, (
-                f"second resume changed guard dispatch count to "
-                f"{dispatches_after_second} — chain re-dispatched"
-            )
-        # Also verify fixture adapter invocation count didn't increase.
-        assert runner._fixture_adapter.invocation_count == 1, (
-            f"second resume changed fixture invocations to "
-            f"{runner._fixture_adapter.invocation_count} — chain re-executed adapter"
+        runner.resume(run_id=result.run_id)
+    except Exception as exc:
+        second_exc = exc
+    finally:
+        # Dispatch digests unchanged.
+        assert tuple(guard._dispatched_digests) == dispatches_before, (
+            "second resume changed guard dispatch digests"
         )
+        # Adapter invocations unchanged.
+        assert runner._fixture_adapter.invocation_count == invocations_before, (
+            "second resume changed fixture invocations"
+        )
+        # Side-effect ledger unchanged.
+        ledger_after = load_search_side_effect_rows(result.run_id)
+        assert ledger_after == ledger_before, (
+            f"second resume changed side-effect ledger: "
+            f"before={ledger_before} after={ledger_after}"
+        )
+        # Review env remains empty.
+        assert runner._review_env == {}, "review env leaked"
+        # Review env vars absent from process.
+        assert "NODECHAIN_REVIEW_DECISION" not in os.environ
 
 
 # --------------------------------------------------------------------------- #
