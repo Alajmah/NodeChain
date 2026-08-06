@@ -44,6 +44,12 @@ def test_simple_alphanumeric_accepted() -> None:
     "\\\\server\\share",
     "foo;rm -rf /",
     "foo\x00bar",
+    "run-1\n",
+    "run-1\r",
+    "run-1\t",
+    "run-1 ",
+    "-run-1",
+    "run.1",
 ])
 def test_unsafe_identifiers_rejected(bad_id: str) -> None:
     with pytest.raises((ValueError, TypeError)):
@@ -56,11 +62,10 @@ def test_unsafe_identifiers_rejected(bad_id: str) -> None:
 
 
 def test_run_dir_stays_under_workspace() -> None:
-    import os
     ws = "/tmp/test_workspace"
     rd = run_dir(ws, "abc-123")
-    # Verify the resolved path is under the workspace
-    assert str(rd.resolve()).startswith(str(Path(ws).resolve()))
+    # Use is_relative_to for sound containment proof (not string prefix).
+    assert rd.resolve().is_relative_to(Path(ws).resolve())
     assert "runs" in str(rd)
     assert "abc-123" in str(rd)
 

@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -105,24 +106,45 @@ def _atomic_write(path: Path, content: str) -> Path:
         # 2. Atomic publication (fails if target exists).
         _publish_no_replace(staging, path)
 
-        # 3. Fsync parent directory where supported.
+        # 3. Fsync parent directory where supported. Only suppress errors
+        # from unsupported operations (EINVAL, ENOTSUP, EBADF). Real I/O
+        # failures (EIO, ENOSPC, etc.) MUST propagate.
+        import errno
         dir_fd = None
         try:
             dir_fd = os.open(str(path.parent), os.O_RDONLY)
             os.fsync(dir_fd)
-        except (OSError, AttributeError):
-            pass
+        except OSError as exc:
+            if exc.errno not in {
+                errno.EINVAL, errno.ENOTSUP, errno.EBADF,
+                errno.EACCES,  # Windows: cannot open directory with O_RDONLY
+            }:
+                raise
+        except AttributeError:
+            pass  # os.open or os.fsync not available
         finally:
             if dir_fd is not None:
-                os.close(dir_fd)
+                try:
+                    os.close(dir_fd)
+                except OSError:
+                    pass
 
     except Exception:
-        # Clean up staging on any failure path.
+        # Clean up staging on any failure path. Record cleanup failures
+        # rather than silently ignoring them — an orphaned staging file is
+        # an operational artifact that should be reconciled.
         try:
             if staging.exists():
                 staging.unlink()
-        except OSError:
-            pass
+        except OSError as cleanup_exc:
+            import warnings
+            warnings.warn(
+                f"staging cleanup failed for {staging}: {cleanup_exc}. "
+                f"The published target is valid but an orphaned staging "
+                f"file remains and should be reconciled.",
+                ResourceWarning,
+                stacklevel=2,
+            )
         raise
 
     return path
@@ -170,14 +192,21 @@ class RunDescriptor(BaseModel):
         return self
 
 
+_IDENTIFIER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9\-]*\Z")
+
+
 def _validate_identifier(name: str) -> str:
     """Validate a run_id or review_id for safe filesystem use.
 
-    Rejects empty strings, path separators, traversal, and non-UUID-like
-    patterns (must contain only [a-zA-Z0-9-]).
+    Uses ``\\Z`` (absolute end-of-string) instead of ``$`` (which matches
+    before a trailing newline). Rejects empty strings, path separators,
+    traversal, whitespace (including \\n, \\r, \\t, space), leading hyphen,
+    dots, and non-UUID-like patterns.
+
+    The grammar is: ``[A-Za-z0-9][A-Za-z0-9-]*`` — alphanumeric start,
+    followed by zero or more alphanumeric or hyphen characters.
     """
-    import re
-    if not name or not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9\-]*$', name):
+    if not isinstance(name, str) or _IDENTIFIER_RE.match(name) is None:
         raise ValueError(f"unsafe filesystem identifier: {name!r}")
     return name
 
