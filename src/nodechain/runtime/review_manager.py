@@ -172,16 +172,17 @@ class ReviewManager:
             },
         ))
 
+        # Durable pause point — snapshot BEFORE _get_decision so pause mode's
+        # ReviewPausedException cannot exit without persisting the waiting
+        # state. This is the single waiting-state snapshot per review request.
+        self._save_snapshot(state)
+
         # Get decision from adapter (may raise ReviewPausedException in pause mode)
         decision_str = await self._get_decision(risk_output, state.outputs, chain_name)
 
         # In pause mode we never reach here (exception raised above). For all
-        # resolved modes, snapshot the waiting state now that we have a decision
-        # path — but the snapshot was already written above for pause. For non-
-        # pause modes the snapshot above is sufficient as the durable pause point;
-        # we restore running status below.
-        self._save_snapshot(state)
-
+        # resolved modes, restore running status — the waiting-state snapshot
+        # above is the durable pause point.
         # Update state back to running
         state.status = "running"
         state.paused_at = None

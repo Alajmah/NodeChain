@@ -469,7 +469,7 @@ class WorkspaceRunner:
         self._review_env = {
             "NODECHAIN_REVIEW_DECISION": runtime_decision,
             "NODECHAIN_REVIEW_REASON": reason,
-            "NODECHAIN_REVIEW_REVIEWER": reviewer,
+            "NODECHAIN_REVIEWER_IDENTITY": reviewer,
         }
 
 
