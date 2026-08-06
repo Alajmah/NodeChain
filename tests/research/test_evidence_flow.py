@@ -32,7 +32,10 @@ def test_complete_evidence_chain(tmp_path: Path) -> None:
 
     # Load state from DB for durable output inspection.
     conn = sqlite3.connect(runner._db_path)
-    row = conn.execute("SELECT state_json FROM chain_states LIMIT 1").fetchone()
+    row = conn.execute(
+        "SELECT state_json FROM chain_states WHERE run_id = ?",
+        (result.run_id,),
+    ).fetchone()
     conn.close()
     assert row is not None
     state = json.loads(row[0])
@@ -55,9 +58,12 @@ def test_complete_evidence_chain(tmp_path: Path) -> None:
     assert len(claims) >= 1, "no claims synthesized"
     claim = claims[0]
     supporting = claim.get("supporting_sources", [])
-    # Supporting sources should include remapped real IDs (src-1, src-2).
-    assert "src-1" in supporting or "src-2" in supporting, (
-        f"supporting_sources do not reference corpus IDs: {supporting}"
+    # Supporting sources must include BOTH src-1 AND src-2 (stable literature).
+    assert "src-1" in supporting, (
+        f"src-1 not in supporting_sources: {supporting}"
+    )
+    assert "src-2" in supporting, (
+        f"src-2 not in supporting_sources: {supporting}"
     )
 
     # 3. claim_validator: validated claims reference evidence.
@@ -73,11 +79,18 @@ def test_complete_evidence_chain(tmp_path: Path) -> None:
     assert validated_claim.get("status") == "confirmed", (
         f"expected status 'confirmed', got {validated_claim.get('status')}"
     )
+    # Validated claim must reference supporting sources.
+    val_supporting = validated_claim.get("supporting_sources", [])
+    assert "src-1" in val_supporting or "src-2" in val_supporting, (
+        f"validated claim does not reference corpus sources: {val_supporting}"
+    )
 
     # 4. Guard dispatch count matches adapter invocation count.
     guard = runner._search_node._adapter_resolver["fixture"]
     assert len(guard._dispatched_digests) == 1
     assert runner._fixture_adapter.invocation_count == 1
 
-    # 5. No production adapter was invoked.
-    assert runner._fixture_adapter.invocation_count >= 1
+    # 5. No production adapter resolver is available (only fixture is wired).
+    resolver = runner._search_node._adapter_resolver
+    for prod in ("semantic_scholar", "arxiv", "openalex", "crossref", "pubmed"):
+        assert prod not in resolver, f"production adapter {prod} in resolver"
