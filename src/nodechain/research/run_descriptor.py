@@ -26,81 +26,104 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 # --------------------------------------------------------------------------- #
 
 
-def _atomic_write(path: Path, content: str) -> Path:
-    """Write ``content`` to ``path`` atomically with true write-once semantics.
+def _publish_no_replace(staging: Path, target: Path) -> None:
+    """Publish a fully-written staging file to target atomically.
 
-    The publication step uses ``os.open(O_CREAT|O_EXCL)`` on the target,
-    which atomically fails if another process created it between our check
-    and publication. This is race-safe: the target either exists before we
-    start (we reject) or we create it exclusively.
+    The staging file must be complete (written, flushed, fsynced) before
+    calling this. The publication is atomic:
+
+    - **POSIX**: ``os.link(staging, target)`` — the hard-link creation is
+      atomic and fails with ``FileExistsError`` if the target exists.
+      Readers see either no target or the complete target.
+    - **Windows**: ``os.rename(staging, target)`` — Python's Windows rename
+      rejects an existing destination.
+
+    After publication, the staging pathname is removed (the target and the
+    staging inode are the same on POSIX after link; on Windows the rename
+    moves the staging file to the target).
+    """
+    import sys
+
+    if sys.platform == "win32":
+        # On Windows, os.rename fails if the target exists.
+        try:
+            os.rename(str(staging), str(target))
+        except FileExistsError:
+            raise FileExistsError(
+                f"target already exists (write-once violated): {target}"
+            )
+    else:
+        # On POSIX, os.link is atomic and fails if target exists.
+        try:
+            os.link(str(staging), str(target))
+        except FileExistsError:
+            raise FileExistsError(
+                f"target already exists (write-once violated): {target}"
+            )
+        # Remove the staging pathname (the target is now a hard link to the
+        # same inode).
+        try:
+            staging.unlink()
+        except OSError:
+            pass
+
+
+def _atomic_write(path: Path, content: str) -> Path:
+    """Write ``content`` to ``path`` with atomic publication.
+
+    The staging file is fully written, flushed, and fsynced BEFORE
+    publication. Publication via ``_publish_no_replace`` is atomic —
+    readers see either no target or the complete target. A crash before
+    publication leaves no target; a crash after publication leaves a valid
+    complete target.
 
     Sequence:
-    1. Create a unique sibling staging file (exclusive O_CREAT|O_EXCL).
-    2. Write content + flush + fsync the staging file.
-    3. Atomically create the target with O_CREAT|O_EXCL (fails if exists).
-    4. Copy staging content to target via the new fd.
-    5. Close + fsync target. Fsync parent dir where supported.
-    6. Clean up staging.
-
-    On any failure, staging is cleaned up and the target is NOT created.
+    1. Create a unique sibling staging file (O_CREAT|O_EXCL).
+    2. Write content + flush + fsync.
+    3. Publish staging → target via os.link/os.rename (fails if exists).
+    4. Fsync parent directory where supported.
+    5. Clean up staging on any failure path.
     """
     import uuid
 
     path.parent.mkdir(parents=True, exist_ok=True)
 
     # Validate path identifier (no traversal or absolute path injection).
-    # The filename must be a simple basename in the parent directory.
     if path.name != path.name.replace("/", "").replace("\\", "").replace("..", ""):
         raise ValueError(f"unsafe path identifier: {path.name}")
 
     staging = path.with_name(f".{path.name}.{uuid.uuid4().hex[:8]}.staging")
 
     try:
-        # 1. Exclusive staging creation.
+        # 1. Exclusive staging creation + full write.
         fd = os.open(str(staging), os.O_WRONLY | os.O_CREAT | os.O_EXCL)
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(content)
             fh.flush()
             os.fsync(fh.fileno())
 
-        # 2. Atomically create the target (O_CREAT|O_EXCL — fails if exists).
-        # This is the race-safe publication: no TOCTOU window.
-        try:
-            target_fd = os.open(
-                str(path),
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-            )
-        except FileExistsError:
-            raise FileExistsError(
-                f"target already exists (write-once violated): {path}"
-            )
+        # 2. Atomic publication (fails if target exists).
+        _publish_no_replace(staging, path)
 
-        # 3. Write content to the target fd.
-        with os.fdopen(target_fd, "w", encoding="utf-8") as tfh:
-            tfh.write(content)
-            tfh.flush()
-            os.fsync(tfh.fileno())
-
-        # 4. Fsync parent directory where supported.
+        # 3. Fsync parent directory where supported.
         dir_fd = None
         try:
             dir_fd = os.open(str(path.parent), os.O_RDONLY)
             os.fsync(dir_fd)
         except (OSError, AttributeError):
-            pass  # Windows or unsupported
+            pass
         finally:
             if dir_fd is not None:
                 os.close(dir_fd)
 
     except Exception:
-        raise
-    finally:
-        # Clean up staging on every path (success and failure).
+        # Clean up staging on any failure path.
         try:
             if staging.exists():
                 staging.unlink()
         except OSError:
             pass
+        raise
 
     return path
 
