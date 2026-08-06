@@ -106,30 +106,25 @@ def test_snapshot_failure_propagates_as_failed_not_paused(tmp_path: Path) -> Non
 
     # The failure must identify snapshot persistence as the cause.
     # Check trace events for a failure event that references the snapshot
-    # or persistence failure.
+    # or persistence failure. Require a concrete reason — not just the
+    # existence of a chain_failed event.
     chain_failed_events = [
         ev for ev in trace.events
         if "chain_failed" in ev.event_type.value.lower()
     ]
     assert len(chain_failed_events) >= 1, "no chain_failed event"
 
-    # The OSError message should appear in the failure metadata or the
-    # chain failure reason.
     failure_evidence = " ".join(
         str(getattr(ev, "decision", ""))
         + " " + str(getattr(ev, "metadata", {}))
         + " " + str(getattr(ev, "reason_codes", []))
         for ev in chain_failed_events
-    )
-    # The simulated disk failure should be reflected somewhere in the
-    # failure trail — either as the OSError message or as a snapshot-
-    # related failure classification.
+    ).lower()
     assert (
-        "simulated disk failure" in failure_evidence.lower()
-        or "snapshot" in failure_evidence.lower()
-        or "persist" in failure_evidence.lower()
-        or "save_snapshot" in failure_evidence.lower()
-        or chain_failed_events[0].event_type.value  # At minimum, chain_failed exists
+        "simulated disk failure" in failure_evidence
+        or "snapshot" in failure_evidence
+        or "persist" in failure_evidence
+        or "save_snapshot" in failure_evidence
     ), (
         f"failure evidence does not identify snapshot persistence as cause: "
         f"{failure_evidence[:200]}"

@@ -435,23 +435,43 @@ class WorkspaceRunner:
             if ev.node_id == "search_tool"
         ]
 
-        # Derive what actually happened at the search_tool.
-        side_effect_started = any(
-            "side_effect_started" in ev.event_type.value for ev in search_events
-        )
-        node_failed = any(
-            "node_failed" in ev.event_type.value for ev in search_events
-        )
+        # Derive what actually happened at the search_tool from exact events.
+        side_effect_events = [
+            ev for ev in search_events
+            if "side_effect_started" in ev.event_type.value
+        ]
+        node_failed_events = [
+            ev for ev in search_events
+            if "node_failed" in ev.event_type.value
+        ]
         validation_failed_events = [
             ev for ev in search_events
             if "validation_failed" in ev.event_type.value
         ]
-        tool_called = any(
-            "tool_called" in ev.event_type.value for ev in search_events
-        )
+        tool_called_events = [
+            ev for ev in search_events
+            if "tool_called" in ev.event_type.value
+        ]
+
+        def _event_refs(events: list) -> list[dict[str, Any]]:
+            """Extract durable references (type, step, decision, metadata) from events."""
+            return [
+                {
+                    "event_type": ev.event_type.value,
+                    "step_id": getattr(ev, "step_id", None),
+                    "decision": str(getattr(ev, "decision", "")),
+                    "metadata": getattr(ev, "metadata", {}),
+                }
+                for ev in events
+            ]
+
+        side_effect_started = len(side_effect_events) > 0
+        node_failed = len(node_failed_events) > 0
+        tool_called = len(tool_called_events) > 0
 
         # Determine the actual fault from exact runtime evidence.
-        # Each fault type requires type-specific trace evidence.
+        # Each fault type requires type-specific trace evidence AND cites
+        # the exact events that prove it.
         faults_observed: list[dict[str, Any]] = []
 
         # fail_before_dispatch: requires that dispatch was NOT attempted
@@ -465,10 +485,11 @@ class WorkspaceRunner:
                 "state_before": "pre_dispatch",
                 "state_after": "not_dispatched",
                 "recoverability": "retry_possible",
-                "evidence_required": {
-                    "side_effect_started": False,
-                    "tool_called": False,
-                    "lane_admission_rejected": True,
+                "proving_events": _event_refs(node_failed_events),
+                "evidence_truth": {
+                    "side_effect_started_count": len(side_effect_events),
+                    "tool_called_count": len(tool_called_events),
+                    "lane_configured": True,
                 },
             })
 
@@ -482,8 +503,8 @@ class WorkspaceRunner:
                 ).hexdigest()[:12]
 
                 if entry.fault == "timeout_after_dispatch":
-                    # Requires: node_failed event (adapter raised).
-                    if not node_failed:
+                    # Requires: node_failed event with the adapter raising.
+                    if not node_failed_events:
                         continue
                     faults_observed.append({
                         "failure_type": "timeout_after_dispatch",
@@ -493,14 +514,17 @@ class WorkspaceRunner:
                         "recoverability": "retry_possible",
                         "operation_digest": operation_digest,
                         "query_key": query_key,
-                        "evidence_required": {
-                            "side_effect_started": True,
-                            "node_failed": True,
+                        "proving_events": _event_refs(node_failed_events + side_effect_events),
+                        "evidence_truth": {
+                            "side_effect_started_count": len(side_effect_events),
+                            "node_failed_count": len(node_failed_events),
                         },
                     })
                 elif entry.fault == "malformed_provenance":
-                    # Requires: validation_failed or node_failed event.
-                    if not validation_failed_events and not node_failed:
+                    # Requires: validation_failed or node_failed event proving
+                    # the malformed result was rejected.
+                    proving = validation_failed_events + node_failed_events
+                    if not proving:
                         continue
                     faults_observed.append({
                         "failure_type": "malformed_provenance",
@@ -510,14 +534,16 @@ class WorkspaceRunner:
                         "recoverability": "non_recoverable",
                         "operation_digest": operation_digest,
                         "query_key": query_key,
-                        "evidence_required": {
-                            "side_effect_started": True,
-                            "validation_failed": len(validation_failed_events),
+                        "proving_events": _event_refs(proving),
+                        "evidence_truth": {
+                            "side_effect_started_count": len(side_effect_events),
+                            "validation_failed_count": len(validation_failed_events),
+                            "node_failed_count": len(node_failed_events),
                         },
                     })
                 elif entry.fault == "partial_result_set":
-                    # Requires: tool_called (adapter returned results).
-                    if not tool_called:
+                    # Requires: tool_called event proving the adapter returned.
+                    if not tool_called_events:
                         continue
                     faults_observed.append({
                         "failure_type": "partial_result_set",
@@ -530,9 +556,10 @@ class WorkspaceRunner:
                         "total_available": entry.total_available,
                         "unavailable_source_ids": list(entry.unavailable_source_ids),
                         "incompleteness_reason": entry.incompleteness_reason,
-                        "evidence_required": {
-                            "side_effect_started": True,
-                            "tool_called": True,
+                        "proving_events": _event_refs(tool_called_events + side_effect_events),
+                        "evidence_truth": {
+                            "side_effect_started_count": len(side_effect_events),
+                            "tool_called_count": len(tool_called_events),
                         },
                     })
 
@@ -550,6 +577,7 @@ class WorkspaceRunner:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "operation": f"search:{fault.get('query_key', 'lane_admission')}",
                 "failure_type": fault["failure_type"],
+                "dispatched": fault.get("dispatched", False),
                 "message": (
                     f"Observed {fault['failure_type']} during search_tool "
                     f"execution (dispatched={fault.get('dispatched')})"
@@ -560,7 +588,8 @@ class WorkspaceRunner:
                 "related_artifact_refs": [
                     f"corpus:{self.corpus.scenario_id}:{fault.get('query_key', 'fail_before_dispatch')}",
                 ],
-                "evidence_required": fault.get("evidence_required", {}),
+                "evidence_truth": fault.get("evidence_truth", {}),
+                "proving_events": fault.get("proving_events", []),
                 "runtime_evidence": {
                     "side_effect_started": side_effect_started,
                     "node_failed": node_failed,

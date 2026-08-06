@@ -95,35 +95,66 @@ def test_concurrent_reader_never_sees_partial_content(tmp_path: Path) -> None:
     content = '{"large": "' + 'x' * 10000 + '"}'
     observations: list[str | None] = []
     stop = threading.Event()
+    reader_ready = threading.Event()
+    writer_errors: list[Exception] = []
+    reader_errors: list[Exception] = []
 
     def reader():
-        while not stop.is_set():
-            try:
-                data = target.read_text(encoding="utf-8")
-                observations.append(data)
-            except FileNotFoundError:
-                observations.append(None)
-            except OSError:
-                observations.append(None)
+        try:
+            reader_ready.set()
+            while not stop.is_set():
+                try:
+                    data = target.read_text(encoding="utf-8")
+                    observations.append(data)
+                except FileNotFoundError:
+                    observations.append(None)
+                except PermissionError:
+                    # Windows: file is briefly inaccessible during atomic
+                    # publication. This is a valid "not yet available"
+                    # observation.
+                    observations.append(None)
+        except Exception as e:
+            reader_errors.append(e)
 
     def writer():
-        _atomic_write(target, content)
+        try:
+            _atomic_write(target, content)
+        except Exception as e:
+            writer_errors.append(e)
 
     t_reader = threading.Thread(target=reader)
     t_writer = threading.Thread(target=writer)
+
+    # Start reader and ensure it's active before the writer begins.
     t_reader.start()
+    assert reader_ready.wait(timeout=5), "reader did not start"
+
     t_writer.start()
     t_writer.join(timeout=5)
     stop.set()
     t_reader.join(timeout=5)
 
-    # Every observation must be either None (target not yet published)
-    # or the exact complete content. Never a prefix or partial.
+    # Both threads must have terminated.
+    assert not t_writer.is_alive(), "writer did not terminate"
+    assert not t_reader.is_alive(), "reader did not terminate"
+
+    # No unexpected errors.
+    assert writer_errors == [], f"writer errors: {writer_errors}"
+    assert reader_errors == [], f"reader errors: {reader_errors}"
+
+    # At least one observation occurred.
+    assert len(observations) > 0, "no reader observations"
+
+    # Every non-None observation must be the exact complete content.
     for obs in observations:
         if obs is not None:
             assert obs == content, (
-                f"reader observed partial content: {obs[:50]}..."
+                f"reader observed partial content of length {len(obs)} "
+                f"(expected {len(content)})"
             )
+
+    # Final target equals complete content.
+    assert target.read_text(encoding="utf-8") == content
 
 
 # --------------------------------------------------------------------------- #

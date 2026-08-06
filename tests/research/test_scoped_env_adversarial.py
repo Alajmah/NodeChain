@@ -195,19 +195,27 @@ def test_second_resume_does_not_reuse_prior_decision(tmp_path: Path) -> None:
     assert "NODECHAIN_REVIEW_DECISION" not in os.environ
 
     # Lock the exact truth: either the second resume raised (terminal reject)
-    # or it returned without re-executing any nodes. Prove by comparing the
-    # persisted completed_steps set (durable execution evidence), not the
-    # revision counter (which increments on state re-save, not just execution).
+    # or it returned without re-executing. Prove by comparing the guard's
+    # dispatched digests count (durable dispatch evidence) — if the chain
+    # re-executed search_tool, a new dispatch would increment the count.
     if second_exc is not None:
         # Terminal reject is valid.
         pass
     elif second_result is not None:
-        state_after_second = sm.load(result.run_id)
-        steps_after_first = set(state_after_first.completed_steps.keys()) if state_after_first else set()
-        steps_after_second = set(state_after_second.completed_steps.keys()) if state_after_second else set()
-        assert steps_after_second == steps_after_first, (
-            f"second resume changed completed_steps from {steps_after_first} "
-            f"to {steps_after_second} — chain re-executed nodes"
+        # The guard object persists across resumes (same runner instance).
+        # After the first resume, dispatches should be 1. After the second
+        # resume (no re-execution), dispatches should still be 1.
+        guard = runner._search_node._adapter_resolver.get("fixture")
+        if guard is not None:
+            dispatches_after_second = len(guard._dispatched_digests)
+            assert dispatches_after_second == 1, (
+                f"second resume changed guard dispatch count to "
+                f"{dispatches_after_second} — chain re-dispatched"
+            )
+        # Also verify fixture adapter invocation count didn't increase.
+        assert runner._fixture_adapter.invocation_count == 1, (
+            f"second resume changed fixture invocations to "
+            f"{runner._fixture_adapter.invocation_count} — chain re-executed adapter"
         )
 
 
