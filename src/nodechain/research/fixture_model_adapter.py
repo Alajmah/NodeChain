@@ -220,18 +220,32 @@ class FixtureModelAdapter:
     # ------------------------------------------------------------------ #
 
     def _quality_evaluator_response(self, user_message: str) -> ModelResponse:
-        """Produce source quality evaluator output with qualified sources."""
+        """Produce source quality evaluator output with qualified sources.
+
+        Each qualified source is deterministically enriched with source_ref
+        and source_hash from the actual ingested source data (extracted from
+        the node's prompt text). The hash is NOT fabricated by the model —
+        it is propagated from the ingested source record.
+        """
         sources = self._extract_aliased_sources(user_message)
-        qualified = [
-            {
-                "source_id": s.get("source_id", s.get("source_ref", "")),
+        qualified = []
+        for s in sources:
+            if not isinstance(s, dict):
+                continue
+            sid = s.get("source_id", s.get("source_ref", ""))
+            if not sid:
+                continue
+            source_hash = s.get("source_hash", "")
+            q = {
+                "source_id": sid,
+                "source_ref": f"ingested:{sid}",
+                "source_hash": source_hash,
                 "quality_score": 0.8,
                 "included": True,
                 "peer_reviewed": s.get("peer_reviewed", False),
                 "citation_count": s.get("citation_count", 0),
             }
-            for s in sources if isinstance(s, dict) and s.get("source_id")
-        ]
+            qualified.append(q)
         output = {
             "qualified_sources": qualified,
             "quality_summary": f"Evaluated {len(qualified)} sources.",

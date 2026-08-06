@@ -66,22 +66,30 @@ def test_complete_evidence_chain(tmp_path: Path) -> None:
     assert "src-1" in qualified_ids, f"src-1 not in qualified: {qualified_ids}"
     assert "src-2" in qualified_ids, f"src-2 not in qualified: {qualified_ids}"
 
-    # Verify qualified source content matches ingested source content.
-    # Each qualified source_id must resolve to an ingested source, and the
-    # qualified source's source_hash must equal the ingested source_hash.
+    # Verify qualified source content links to ingested source content.
+    # Each qualified source must resolve to an ingested source with matching
+    # source_hash. The qualified source carries source_ref; the ingested
+    # source carries source_hash. We resolve source_ref → ingested source_id
+    # → ingested source_hash.
     ingested_by_id = {s.get("source_id"): s for s in ingested_sources}
     for q in qualified:
         sid = q.get("source_id")
-        if sid in ingested_by_id:
-            ingested = ingested_by_id[sid]
-            ingested_hash = ingested.get("source_hash")
-            qualified_hash = q.get("source_hash")
-            # If qualified sources carry a hash, it must match the ingested hash.
-            if qualified_hash is not None:
-                assert qualified_hash == ingested_hash, (
-                    f"qualified source {sid} hash {qualified_hash} != "
-                    f"ingested hash {ingested_hash}"
-                )
+        assert q.get("source_ref"), f"qualified source {sid} missing source_ref"
+        assert sid in ingested_by_id, (
+            f"qualified source {sid} not found in ingested sources"
+        )
+        ingested = ingested_by_id[sid]
+        # The ingested source must carry a source_hash.
+        assert ingested.get("source_hash"), (
+            f"ingested source {sid} missing source_hash"
+        )
+        # If the qualified source carries a hash, it must match.
+        q_hash = q.get("source_hash")
+        if q_hash:
+            assert q_hash == ingested["source_hash"], (
+                f"qualified source {sid} hash {q_hash} != "
+                f"ingested hash {ingested['source_hash']}"
+            )
 
     # 3. evidence_synthesizer: claim supporting_sources includes BOTH.
     es = _parse_output(outputs, "evidence_synthesizer")
