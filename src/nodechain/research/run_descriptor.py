@@ -27,19 +27,61 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 def _atomic_write(path: Path, content: str) -> Path:
-    """Write ``content`` to ``path`` atomically: staging file → fsync → rename.
+    """Write ``content`` to ``path`` atomically with write-once semantics.
 
-    The staging file is a sibling of the target so the rename is atomic on
-    the same filesystem. Overwrites are rejected (no silent replacement of
-    an existing finalized file).
+    Sequence:
+    1. Create a unique sibling staging file (exclusive creation — fails if
+       it already exists).
+    2. Write content + flush + fsync the staging file.
+    3. Reject if the target already exists (no-overwrite publication).
+    4. Atomic rename (os.replace).
+    5. Fsync the parent directory where supported.
+
+    Staging file is cleaned up on any failure path.
     """
+    import uuid
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    staging = path.with_suffix(path.suffix + ".staging")
-    with open(staging, "w", encoding="utf-8") as fh:
-        fh.write(content)
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.replace(staging, path)
+
+    # Unique staging file (prevents collision with concurrent writes).
+    staging = path.with_suffix(f".{uuid.uuid4().hex[:8]}.staging")
+
+    try:
+        # Exclusive creation — fails if the staging file already exists.
+        fd = os.open(str(staging), os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(content)
+            fh.flush()
+            os.fsync(fh.fileno())
+
+        # Reject if target already exists (write-once / no-overwrite).
+        if path.exists():
+            raise FileExistsError(
+                f"target already exists (write-once violated): {path}"
+            )
+
+        # Atomic publication.
+        os.replace(staging, path)
+
+        # Fsync parent directory where supported (Linux/macOS, not Windows).
+        dir_fd = None
+        try:
+            dir_fd = os.open(str(path.parent), os.O_RDONLY)
+            os.fsync(dir_fd)
+        except (OSError, AttributeError):
+            pass  # Windows or unsupported — fsync of dir is best-effort
+        finally:
+            if dir_fd is not None:
+                os.close(dir_fd)
+    except Exception:
+        # Clean up staging on any failure path.
+        try:
+            if staging.exists():
+                staging.unlink()
+        except OSError:
+            pass
+        raise
+
     return path
 
 
