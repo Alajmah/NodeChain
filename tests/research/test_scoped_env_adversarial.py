@@ -58,27 +58,59 @@ def test_exception_restores_all_variables() -> None:
 
 
 def test_concurrent_contexts_cannot_overlap() -> None:
-    """Two threads using scoped_env are serialized by the reentrant lock."""
+    """Thread A holds the lock; thread B is blocked until A releases.
+
+    Uses synchronization events to prove ordering, not sleeps.
+    """
     os.environ.pop("TEST_CONCURRENT", None)
     errors: list[str] = []
-    barrier = threading.Barrier(2)
+    a_entered = threading.Event()
+    a_release = threading.Event()
+    b_entered = threading.Event()
+    b_completed = threading.Event()
 
-    def worker(value: str) -> None:
+    def worker_a() -> None:
         try:
-            barrier.wait(timeout=5)
-            with scoped_env({"TEST_CONCURRENT": value}):
-                # The lock ensures only one thread sees its value at a time.
-                assert os.environ["TEST_CONCURRENT"] == value
+            with scoped_env({"TEST_CONCURRENT": "A"}):
+                a_entered.set()
+                # Hold the lock until told to release.
+                a_release.wait(timeout=10)
         except Exception as e:
-            errors.append(f"{value}: {e}")
+            errors.append(f"A: {e}")
 
-    t1 = threading.Thread(target=worker, args=("A",))
-    t2 = threading.Thread(target=worker, args=("B",))
-    t1.start()
-    t2.start()
-    t1.join(timeout=10)
-    t2.join(timeout=10)
-    assert errors == f"{errors}" or len(errors) == 0, f"concurrent errors: {errors}"
+    def worker_b() -> None:
+        try:
+            with scoped_env({"TEST_CONCURRENT": "B"}):
+                b_entered.set()
+                assert os.environ["TEST_CONCURRENT"] == "B"
+            b_completed.set()
+        except Exception as e:
+            errors.append(f"B: {e}")
+
+    t_a = threading.Thread(target=worker_a)
+    t_a.start()
+    # Wait until A is inside the context.
+    assert a_entered.wait(timeout=5), "A did not enter context"
+
+    # Start B — it should be blocked by the reentrant lock.
+    t_b = threading.Thread(target=worker_b)
+    t_b.start()
+
+    # Prove B has NOT entered while A holds the lock.
+    assert not b_entered.wait(timeout=1), (
+        "B entered context while A held the lock — lock not serializing"
+    )
+
+    # Release A.
+    a_release.set()
+    t_a.join(timeout=5)
+
+    # B should now enter and complete.
+    assert b_entered.wait(timeout=5), "B did not enter after A released"
+    assert b_completed.wait(timeout=5), "B did not complete"
+    t_b.join(timeout=5)
+
+    assert errors == [], f"errors: {errors}"
 
 
 # --------------------------------------------------------------------------- #
@@ -112,11 +144,17 @@ def test_review_env_absent_after_failed_resume(tmp_path: Path) -> None:
     assert result.paused, "conflicting-evidence scenario must pause"
     runner.apply_review("approve", "ok", "reviewer")
     assert runner._review_env != {}
-    # Simulate a failed resume by passing a bad run_id.
+
+    # Resume with a bad run_id to trigger an exception.
+    resume_exc = None
     try:
         runner.resume(run_id="nonexistent-run-id")
-    except Exception:
-        pass  # resume may raise for bad run_id
+    except Exception as e:
+        resume_exc = e
+
+    # An exception MUST have occurred (bad run_id).
+    assert resume_exc is not None, "resume with bad run_id did not raise"
+    # _review_env must be cleared despite the exception.
     assert runner._review_env == {}, "review env not cleared after failed resume"
 
 
@@ -130,10 +168,25 @@ def test_second_resume_does_not_reuse_prior_decision(tmp_path: Path) -> None:
     result = runner.run()
     assert result.paused, "conflicting-evidence scenario must pause"
     runner.apply_review("approve", "first", "reviewer1")
+
+    # First resume succeeds.
     runner.resume(run_id=result.run_id)
-    # _review_env should be empty.
-    assert runner._review_env == {}
-    # A second resume without apply_review should have no decision env.
+
+    # _review_env must be empty after first resume.
+    assert runner._review_env == {}, "review env not cleared after first resume"
+
+    # Second resume WITHOUT apply_review — _review_env is empty so
+    # no prior decision can be reused.
+    second_exc = None
+    try:
+        runner.resume(run_id=result.run_id)
+    except Exception as e:
+        second_exc = e
+
+    # The second resume should either raise (already completed) or
+    # complete with no review decision applied. Either way,
+    # _review_env must remain empty.
+    assert runner._review_env == {}, "review env leaked after second resume"
     assert "NODECHAIN_REVIEW_DECISION" not in os.environ
 
 
