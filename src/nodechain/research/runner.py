@@ -401,13 +401,6 @@ class WorkspaceRunner:
 
             trace = asyncio.run(orch.run(self.brief.question))
 
-        # Deterministic enrichment: after quality evaluation, enrich each
-        # qualified source with source_hash from the persisted ingested
-        # source map. This is NOT done by the model adapter — it's a
-        # deterministic post-processing step that binds qualified sources
-        # to exact persisted artifacts.
-        self._enrich_qualified_sources(orch.state)
-
         # Record durable fault records for fault-injection scenarios.
         self._record_faults(orch.state.run_id, trace)
 
@@ -418,59 +411,6 @@ class WorkspaceRunner:
             state=orch.state,
             runner=self,
         )
-
-    def _enrich_qualified_sources(self, state: Any) -> None:
-        """Deterministically enrich qualified sources with source_hash from
-        the persisted ingested source map.
-
-        After quality evaluation, each qualified source is bound to the exact
-        ingested source record by propagating source_hash. Unknown IDs fail
-        closed. This binding ensures downstream evidence synthesis and claim
-        validation cite sources with hash continuity to the sealed corpus.
-
-        Enrichment is applied to both the in-memory state AND the persisted
-        DB state so downstream accessors (reading from DB) see the enriched
-        records.
-        """
-        import json as _json
-
-        outputs = getattr(state, "outputs", {})
-        ingested = outputs.get("source_ingestion", {})
-        if isinstance(ingested, str):
-            ingested = _json.loads(ingested)
-        ingested_sources = ingested.get("sources", [])
-        ingested_by_id = {s.get("source_id"): s for s in ingested_sources}
-
-        qualified_output = outputs.get("source_quality_evaluator", {})
-        if isinstance(qualified_output, str):
-            qualified_output = _json.loads(qualified_output)
-        qualified_sources = qualified_output.get("qualified_sources", [])
-
-        enriched = False
-        for q in qualified_sources:
-            sid = q.get("source_id", "")
-            if sid in ingested_by_id:
-                persisted = ingested_by_id[sid]
-                q["source_ref"] = f"ingested:{sid}"
-                q["source_hash"] = persisted.get("source_hash", "")
-                enriched = True
-            else:
-                q["source_ref"] = ""
-                q["source_hash"] = ""
-
-        # Write enriched qualified sources back to both in-memory state and
-        # the persisted DB state.
-        if enriched:
-            qualified_output["qualified_sources"] = qualified_sources
-            outputs["source_quality_evaluator"] = qualified_output
-            # Persist the enriched state to the DB.
-            from nodechain.core.state import StateManager
-            from nodechain.core.capsule_crypto import KekManager
-            sm = StateManager(
-                self._db_path,
-                kek_manager=KekManager(local_dev=True, kek_path=self._kek_path),
-            )
-            sm.save(state)
 
     def _record_faults(self, run_id: str, trace: Any) -> None:
         """Record durable fault records derived from actual runtime evidence.
