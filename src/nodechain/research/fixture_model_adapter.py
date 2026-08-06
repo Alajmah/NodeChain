@@ -140,6 +140,10 @@ class FixtureModelAdapter:
             if "claim_id" in item_props and "internal_consistency" in item_props:
                 return self._validator_response(user_message)
 
+        # ── Source quality evaluator (output_schema has 'qualified_sources') ──
+        if "qualified_sources" in schema_keys:
+            return self._quality_evaluator_response(user_message)
+
         # ── Node-identity fallback (prompt-wording based) ──
         if "goal_interpreter" in lower or "goal interpreter" in lower:
             content = json.dumps({
@@ -207,6 +211,36 @@ class FixtureModelAdapter:
 
         return ModelResponse(
             content=content,
+            model=self.model,
+            usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        )
+
+    # ------------------------------------------------------------------ #
+    # Quality evaluator response
+    # ------------------------------------------------------------------ #
+
+    def _quality_evaluator_response(self, user_message: str) -> ModelResponse:
+        """Produce source quality evaluator output with qualified sources."""
+        sources = self._extract_aliased_sources(user_message)
+        qualified = [
+            {
+                "source_id": s.get("source_id", s.get("source_ref", "")),
+                "quality_score": 0.8,
+                "included": True,
+                "peer_reviewed": s.get("peer_reviewed", False),
+                "citation_count": s.get("citation_count", 0),
+            }
+            for s in sources if isinstance(s, dict) and s.get("source_id")
+        ]
+        output = {
+            "qualified_sources": qualified,
+            "quality_summary": f"Evaluated {len(qualified)} sources.",
+            "loop_required": False,
+        }
+        content = json.dumps(output)
+        return ModelResponse(
+            content=content,
+            structured_output=output,
             model=self.model,
             usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
         )
