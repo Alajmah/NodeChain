@@ -59,33 +59,28 @@ def test_complete_evidence_chain(tmp_path: Path) -> None:
     assert "src-1" in ingested_ids, f"src-1 not in ingested IDs: {ingested_ids}"
     assert "src-2" in ingested_ids, f"src-2 not in ingested IDs: {ingested_ids}"
 
-    # 2. source_quality_evaluator: BOTH sources qualified with source_ref.
+    # 2. source_quality_evaluator: BOTH sources qualified.
     sq = _parse_output(outputs, "source_quality_evaluator")
     qualified = sq.get("qualified_sources", [])
     qualified_ids = {q.get("source_id") for q in qualified}
     assert "src-1" in qualified_ids, f"src-1 not in qualified: {qualified_ids}"
     assert "src-2" in qualified_ids, f"src-2 not in qualified: {qualified_ids}"
 
-    # Verify qualified source linkage to ingested sources.
-    # Each qualified source_id must resolve to an ingested source.
-    # NOTE: The quality evaluator's prompt summary does not carry source_hash,
-    # so the model adapter cannot propagate it. Hash continuity requires
-    # execution-time enrichment between quality evaluation and evidence
-    # synthesis — an architectural change that needs a QualifiedSourceLinker
-    # seam between the quality evaluator and synthesizer nodes. That seam
-    # is not available without modifying the existing node implementations.
-    # For now, we prove source_id continuity (the qualified source_id
-    # resolves to the same ingested source_id with the same source_hash).
+    # 2b. qualified_source_linker: linked sources carry source_hash from ingestion.
+    qsl = _parse_output(outputs, "qualified_source_linker")
+    linked_sources = qsl.get("linked_sources", [])
+    assert len(linked_sources) >= 2, (
+        f"expected >=2 linked sources, got {len(linked_sources)}"
+    )
     ingested_by_id = {s.get("source_id"): s for s in ingested_sources}
-    for q in qualified:
-        sid = q.get("source_id")
-        assert sid in ingested_by_id, (
-            f"qualified source {sid} not found in ingested sources"
-        )
-        # The ingested source must carry a source_hash.
-        ingested = ingested_by_id[sid]
-        assert ingested.get("source_hash"), (
-            f"ingested source {sid} missing source_hash"
+    for linked in linked_sources:
+        sid = linked.get("source_id")
+        assert linked.get("source_ref"), f"linked source {sid} missing source_ref"
+        assert linked.get("source_hash"), f"linked source {sid} missing source_hash"
+        assert sid in ingested_by_id, f"linked source {sid} not in ingested set"
+        assert linked["source_hash"] == ingested_by_id[sid]["source_hash"], (
+            f"linked source {sid} hash {linked['source_hash']} != "
+            f"ingested hash {ingested_by_id[sid]['source_hash']}"
         )
 
     # 3. evidence_synthesizer: claim supporting_sources includes BOTH.

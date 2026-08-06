@@ -1,23 +1,31 @@
 """Qualified Source Linker — deterministic node between quality evaluation
 and evidence synthesis.
 
-Receives the source ingestion output and quality evaluator output. For every
-included qualified source, resolves the source_id to the ingested source
-record and propagates source_hash and source_ref. Unknown IDs, missing
-hashes, and mismatches fail closed.
+Receives two authoritative inputs:
+1. quality_decision (from source_quality_evaluator): quality judgments
+2. ingested_source_set (from source_ingestion): source artifacts with hashes
 
-This node lives in the nodechain.nodes namespace to pass the PolicyGate
-built-in boundary (privileged node trust).
+For every included qualified source, resolves the source_id to the ingested
+source record and propagates source_hash and artifact_ref. Unknown IDs,
+missing hashes, and mismatches fail closed with explicit reason codes.
+
+Excluded sources are separated and not sent to evidence synthesis.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from nodechain.core.contract import EntryContract, ExitContract, NodeContract, Requirements, SideEffect
-from nodechain.core.envelope import InvocationEnvelope, EnvelopeResponse
-from nodechain.core.port import PortType
+from nodechain.core.contract import (
+    EntryContract,
+    ExitContract,
+    NodeContract,
+    Requirements,
+    SideEffect,
+)
+from nodechain.core.envelope import EnvelopeResponse, InvocationEnvelope
 from nodechain.core.manifest import NodeManifest
+from nodechain.core.port import PortType
 from nodechain.nodes.base_node import BaseNode
 
 
@@ -42,7 +50,7 @@ QUALIFIED_SOURCE_LINKER_CONTRACT = NodeContract(
     exit=ExitContract(
         output_type="qualified_source_set",
         schema_ref="nodechain://schemas/semantic_types/source_set",
-        guaranteed_fields=["qualified_sources", "quality_summary", "loop_required"],
+        guaranteed_fields=["linked_sources", "qualified_sources", "quality_summary", "loop_required"],
     ),
     side_effects=[],
     requirements=Requirements(
@@ -54,16 +62,15 @@ QUALIFIED_SOURCE_LINKER_CONTRACT = NodeContract(
 
 
 class QualifiedSourceLinkerNode(BaseNode):
-    """Deterministic linker that binds qualified sources to ingested artifacts.
+    """Deterministically binds qualified sources to ingested artifacts.
 
-    Receives the quality evaluator output (which carries quality judgments)
-    and the source ingestion output (which carries source_hash). For every
-    included qualified source, propagates source_hash and source_ref from
-    the ingested source record. Fails closed on unknown, missing, or
-    mismatched sources.
+    The linker reads quality decisions (qualified_sources) and ingested
+    source records (sources) from its payload. For every included source,
+    it resolves the source_id to the ingested artifact, propagates
+    source_hash and artifact_ref, and fails closed on errors.
 
-    The output replaces qualified_sources with linked_sources that carry
-    both quality decisions and artifact identity.
+    Excluded sources are separated into excluded_sources and do not reach
+    evidence synthesis.
     """
 
     @property
@@ -74,8 +81,8 @@ class QualifiedSourceLinkerNode(BaseNode):
             name="Qualified Source Linker",
             description=(
                 "Deterministically binds qualified sources to ingested "
-                "artifacts by propagating source_hash. Fails closed on "
-                "unknown, missing, or mismatched sources."
+                "artifacts by propagating source_hash and artifact_ref. "
+                "Fails closed on unknown, missing, or mismatched sources."
             ),
             contract=QUALIFIED_SOURCE_LINKER_CONTRACT,
         )
@@ -83,7 +90,9 @@ class QualifiedSourceLinkerNode(BaseNode):
     async def execute(self, envelope: InvocationEnvelope) -> EnvelopeResponse:
         payload = envelope.payload or {}
 
-        # Extract quality decisions and passthrough sources.
+        # Read quality decisions and ingested sources from the payload.
+        # The quality evaluator passes through 'sources' from ingestion,
+        # so both are available in the same payload.
         qualified_sources = payload.get("qualified_sources", [])
         sources = payload.get("sources", [])
         quality_summary = payload.get("quality_summary", "")
@@ -96,18 +105,21 @@ class QualifiedSourceLinkerNode(BaseNode):
             if sid:
                 ingested_by_id[sid] = s
 
-        # Link each included qualified source to its ingested artifact.
+        # Link each qualified source.
         linked_sources: list[dict[str, Any]] = []
+        excluded_sources: list[dict[str, Any]] = []
+
         for q in qualified_sources:
-            if not q.get("included", True):
-                linked_sources.append(q)
+            included = q.get("included", True)
+            if not included:
+                excluded_sources.append(q)
                 continue
 
             sid = q.get("source_id", "")
             if not sid:
                 raise QualifiedSourceLinkageError(
                     "QUALIFIED_SOURCE_MISSING_ID",
-                    sid,
+                    "",
                     "qualified source has no source_id",
                 )
 
@@ -127,17 +139,26 @@ class QualifiedSourceLinkerNode(BaseNode):
                     f"ingested source {sid} has no source_hash",
                 )
 
-            # Propagate artifact identity deterministically.
+            artifact_ref = ingested.get("artifact_ref", "")
+            if not artifact_ref:
+                raise QualifiedSourceLinkageError(
+                    "INGESTED_SOURCE_REF_MISSING",
+                    sid,
+                    f"ingested source {sid} has no artifact_ref",
+                )
+
+            # Propagate artifact identity deterministically from ingestion.
             linked = {
                 **q,
-                "source_ref": f"ingested:{sid}:{source_hash[:12]}",
+                "source_ref": artifact_ref,
                 "source_hash": source_hash,
             }
             linked_sources.append(linked)
 
         output = {
             "linked_sources": linked_sources,
-            "qualified_sources": linked_sources,
+            "excluded_sources": excluded_sources,
+            "qualified_sources": linked_sources,  # backwards compat
             "quality_summary": quality_summary,
             "loop_required": loop_required,
             "sources": sources,

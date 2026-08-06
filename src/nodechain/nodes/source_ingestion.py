@@ -455,6 +455,7 @@ def _normalize_fixture(raw: dict[str, Any]) -> dict[str, Any]:
     return {
         "source_id": source_id,
         "source_hash": source_hash,
+        "artifact_ref": f"ingested:{source_id}:{source_hash}",
         "title": title,
         "authors": list(authors),
         "publication_date": raw.get("publication_date", ""),
