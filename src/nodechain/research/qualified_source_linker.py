@@ -50,7 +50,11 @@ QUALIFIED_SOURCE_LINKER_CONTRACT = NodeContract(
     exit=ExitContract(
         output_type="qualified_source_set",
         schema_ref="nodechain://schemas/semantic_types/source_set",
-        guaranteed_fields=["linked_sources", "qualified_sources", "quality_summary", "loop_required"],
+        guaranteed_fields=[
+            "linked_sources", "qualified_sources", "quality_summary",
+            "loop_required", "sources", "excluded_sources",
+            "synthesis_input_sources", "linkage_verified",
+        ],
     ),
     side_effects=[],
     requirements=Requirements(
@@ -112,10 +116,26 @@ class QualifiedSourceLinkerNode(BaseNode):
                 )
             ingested_by_id[sid] = s
 
-        # Reject duplicate qualified source IDs.
+        # Reject duplicate qualified source IDs. Validate identity BEFORE
+        # included/excluded separation so excluded duplicates are also caught.
         seen_qualified: set[str] = set()
+        for q in qualified_sources:
+            sid = q.get("source_id", "")
+            if not sid:
+                raise QualifiedSourceLinkageError(
+                    "QUALIFIED_SOURCE_MISSING_ID",
+                    "",
+                    "qualified source has no source_id",
+                )
+            if sid in seen_qualified:
+                raise QualifiedSourceLinkageError(
+                    "DUPLICATE_QUALIFIED_SOURCE_ID",
+                    sid,
+                    f"qualified source {sid} appears more than once",
+                )
+            seen_qualified.add(sid)
 
-        # Link each qualified source.
+        # Link each qualified source (identity already validated above).
         linked_sources: list[dict[str, Any]] = []
         excluded_sources: list[dict[str, Any]] = []
 
@@ -126,20 +146,6 @@ class QualifiedSourceLinkerNode(BaseNode):
                 continue
 
             sid = q.get("source_id", "")
-            if not sid:
-                raise QualifiedSourceLinkageError(
-                    "QUALIFIED_SOURCE_MISSING_ID",
-                    "",
-                    "qualified source has no source_id",
-                )
-
-            if sid in seen_qualified:
-                raise QualifiedSourceLinkageError(
-                    "DUPLICATE_QUALIFIED_SOURCE_ID",
-                    sid,
-                    f"qualified source {sid} appears more than once",
-                )
-            seen_qualified.add(sid)
 
             ingested = ingested_by_id.get(sid)
             if ingested is None:
@@ -202,13 +208,26 @@ class QualifiedSourceLinkerNode(BaseNode):
                 "included": True,
             })
 
+        # Build synthesis_input_sources: the exact model-facing projection
+        # that the synthesizer receives. This persists the exact artifact
+        # identity used for evidence synthesis.
+        synthesis_input_sources = [
+            {
+                "source_id": l["source_id"],
+                "artifact_ref": l["artifact_ref"],
+                "source_hash": l["source_hash"],
+            }
+            for l in linked_sources
+        ]
+
         output = {
             "linked_sources": linked_sources,
             "excluded_sources": excluded_sources,
-            "qualified_sources": linked_sources,  # backwards compat for synthesizer
+            "qualified_sources": linked_sources,
             "quality_summary": quality_summary,
             "loop_required": loop_required,
-            "sources": linked_source_records,  # ONLY linked — no raw passthrough
+            "sources": linked_source_records,
+            "synthesis_input_sources": synthesis_input_sources,
             "linkage_verified": True,
         }
 

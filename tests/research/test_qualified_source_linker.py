@@ -187,3 +187,40 @@ def test_duplicate_qualified_ids_rejected() -> None:
     }
     with pytest.raises(QualifiedSourceLinkageError, match="DUPLICATE_QUALIFIED_SOURCE_ID"):
         _run_linker(payload)
+
+
+def test_duplicate_excluded_ids_rejected() -> None:
+    """Duplicate IDs are rejected even for excluded sources."""
+    s1 = _make_source("src-1")
+    payload = {
+        "qualified_sources": [
+            _make_qualified("src-1", included=False),
+            _make_qualified("src-1", included=False),
+        ],
+        "sources": [s1],
+    }
+    with pytest.raises(QualifiedSourceLinkageError, match="DUPLICATE_QUALIFIED_SOURCE_ID"):
+        _run_linker(payload)
+
+
+def test_missing_sources_input_rejected() -> None:
+    """Contract requires 'sources' — missing input must fail."""
+    payload = {
+        "qualified_sources": [_make_qualified("src-1")],
+        # no "sources" key
+    }
+    # The linker reads sources from payload.get("sources", []) which returns [].
+    # With no sources, the qualified source won't be found → QUALIFIED_SOURCE_NOT_INGESTED.
+    with pytest.raises(QualifiedSourceLinkageError, match="QUALIFIED_SOURCE_NOT_INGESTED"):
+        _run_linker(payload)
+
+
+def test_missing_qualified_sources_input_rejected() -> None:
+    """Contract requires 'qualified_sources' — empty input produces empty linked set."""
+    payload = {
+        "sources": [_make_source("src-1")],
+        # no "qualified_sources" key
+    }
+    output = _run_linker(payload)
+    assert output["linked_sources"] == []
+    assert output["synthesis_input_sources"] == []

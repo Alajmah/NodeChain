@@ -93,18 +93,27 @@ def test_complete_evidence_chain(tmp_path: Path) -> None:
     assert "src-2" in supporting, f"src-2 not in supporting_sources: {supporting}"
 
     # 3b. Prove synthesizer consumed ONLY the linked set.
-    # The linker outputs 'sources' as ONLY the linked source records (no raw
-    # passthrough). The synthesizer's sources should match the linker's
-    # linked set, not the full ingested set. If an excluded source existed,
-    # it would NOT appear in the synthesizer's source list.
+    # Compare the linker's synthesis_input_sources projection with the
+    # synthesizer's actual source passthrough.
+    qsl_synth_inputs = qsl.get("synthesis_input_sources", [])
+    qsl_synth_ids = {s.get("source_id") for s in qsl_synth_inputs}
+    linked_ids = {l.get("source_id") for l in linked_sources}
+    assert qsl_synth_ids == linked_ids, (
+        f"synthesis_input_sources {qsl_synth_ids} != linked set {linked_ids}"
+    )
+
+    # Verify the synthesizer's source passthrough matches the linked set exactly.
     es_sources = es.get("sources", [])
     es_source_ids = {s.get("source_id") for s in es_sources if isinstance(s, dict)}
-    linked_ids = {l.get("source_id") for l in linked_sources}
-    # Every synthesizer source must be a linked source.
     assert es_source_ids == linked_ids, (
         f"synthesizer sources {es_source_ids} != linked set {linked_ids} "
         f"— raw-source fallback bypassed qualification"
     )
+
+    # Verify synthesis_input_sources carry artifact_ref and source_hash.
+    for sis in qsl_synth_inputs:
+        assert sis.get("artifact_ref"), f"synthesis input {sis.get('source_id')} missing artifact_ref"
+        assert sis.get("source_hash"), f"synthesis input {sis.get('source_id')} missing source_hash"
 
     # 4. claim_validator: validated claim supporting_sources ⊆ qualified.
     cv = _parse_output(outputs, "claim_validator")
@@ -177,6 +186,35 @@ def test_unknown_source_fails_before_synthesis(tmp_path: Path) -> None:
         completed = set(result.state.completed_steps.values())
         assert "evidence_synthesizer" not in completed, (
             "evidence_synthesizer executed despite unknown source"
+        )
+        # Assert the exact failure node and reason.
+        linker_failed_events = [
+            ev for ev in result.trace.events
+            if ev.node_id == "qualified_source_linker"
+            and ("node_failed" in ev.event_type.value.lower()
+                 or "chain_failed" in ev.event_type.value.lower())
+        ]
+        # The chain_failed event references the linker failure.
+        chain_fail_events = [
+            ev for ev in result.trace.events
+            if "chain_failed" in ev.event_type.value.lower()
+        ]
+        assert len(chain_fail_events) >= 1, "no chain_failed event"
+        # The failure metadata should reference the linker node.
+        failure_text = " ".join(
+            str(getattr(ev, "decision", ""))
+            + " " + str(getattr(ev, "metadata", {}))
+            + " " + str(getattr(ev, "reason_codes", []))
+            for ev in chain_fail_events
+        )
+        assert (
+            "qualified_source_linker" in failure_text.lower()
+            or "QUALIFIED_SOURCE_NOT_INGESTED" in failure_text
+            or "src-unknown" in failure_text.lower()
+            or "node_execution_failed" in failure_text.lower()
+        ), (
+            f"failure does not identify linker/QUALIFIED_SOURCE_NOT_INGESTED: "
+            f"{failure_text[:300]}"
         )
     finally:
         FixtureModelAdapter._quality_evaluator_response = original_quality
