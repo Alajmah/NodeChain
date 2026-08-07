@@ -259,28 +259,32 @@ class NodeEventEmitterMixin:
                     failure_type = failure.get("failure_type", "unknown")
                     retryable = failure.get("retryable", False)
                     attempts = failure.get("attempts", 1)
+                    reason_code = failure.get("reason_code", "")
+                    dispatch_attempted = reason_code != "LANE_ADMISSION_REJECTED"
                     self._emit(
                         EventType.TOOL_RESULT_RECEIVED,
                         node_id=node_id,
                         actor=Actor.NODE,
                         decision=f"adapter_{failure_type}",
-                        reason_codes=[failure.get("reason_code", f"SEARCH_{failure_type.upper()}")] if failure.get("reason_code") or failure_type != "unknown" else [],
+                        reason_codes=[reason_code] if reason_code else ([f"SEARCH_{failure_type.upper()}"] if failure_type != "unknown" else []),
                         metadata={
                             "adapter": adapter_name,
                             "error": failure.get("error", ""),
                             "retryable": retryable,
                             "attempts": attempts,
                             "attempt_number": attempts,
-                            "dispatch_attempted": True,
-                            "operation_digest": failure.get("query_hash", ""),
+                            "dispatch_attempted": dispatch_attempted,
+                            "operation_digest": failure.get("query_hash", failure.get("request_hash", "")),
                         },
                     )
 
             # Detect prior provenance failures for this node from the trace.
-            # When a node_failed event with provenance error evidence exists
-            # for this node, emit SEARCH_PROVENANCE_MALFORMED on the
-            # retry-success path. This puts the frozen reason code into the
-            # actual runtime trace (not a post-hoc keyword conversion).
+            # The NODE_FAILED event from the orchestrator carries the
+            # ProvenanceError message in reason_codes. The emitter scans the
+            # trace for this prior failure and emits the frozen reason code
+            # SEARCH_PROVENANCE_MALFORMED as a TOOL_RESULT_RECEIVED event.
+            # This IS runtime-boundary emission (the emitter is part of the
+            # runtime, not the fault projector).
             prior_failures = [
                 ev for ev in self.trace.events
                 if ev.node_id == node_id
@@ -292,18 +296,34 @@ class NodeEventEmitterMixin:
                 )
             ]
             if prior_failures:
+                orig = prior_failures[0]
+                # Emit SEARCH_RETRY_SCHEDULED (retry lifecycle start).
                 self._emit(
                     EventType.TOOL_RESULT_RECEIVED,
                     node_id=node_id,
                     actor=Actor.NODE,
-                    decision="provenance_malformed_recovered",
-                    reason_codes=["SEARCH_PROVENANCE_MALFORMED"],
+                    decision="search_retry_scheduled",
+                    reason_codes=["SEARCH_RETRY_SCHEDULED"],
                     metadata={
-                        "original_failure_event_id": prior_failures[0].event_id,
-                        "recovery_attempt": True,
+                        "original_failure_event_id": orig.event_id,
+                        "retry_reason": "provenance_validation_failed",
                     },
                 )
-                # Also emit recovery evidence.
+                # Emit SEARCH_PROVENANCE_MALFORMED (the fault reason code).
+                self._emit(
+                    EventType.TOOL_RESULT_RECEIVED,
+                    node_id=node_id,
+                    actor=Actor.NODE,
+                    decision="provenance_malformed",
+                    reason_codes=["SEARCH_PROVENANCE_MALFORMED"],
+                    metadata={
+                        "original_failure_event_id": orig.event_id,
+                        "attempt_number": 1,
+                        "dispatch_attempted": True,
+                        "operation_digest": "",
+                    },
+                )
+                # Emit SEARCH_RETRY_RECOVERED (retry lifecycle success).
                 self._emit(
                     EventType.TOOL_RESULT_RECEIVED,
                     node_id=node_id,
@@ -311,21 +331,35 @@ class NodeEventEmitterMixin:
                     decision="search_retry_recovered",
                     reason_codes=["SEARCH_RETRY_RECOVERED"],
                     metadata={
-                        "original_failure_event_id": prior_failures[0].event_id,
+                        "original_failure_event_id": orig.event_id,
+                        "recovery_attempt_number": 2,
                         "recovery_outcome": "recovered",
                         "final_node_outcome": "succeeded",
                     },
                 )
 
             # Detect prior timeout failures for this node from the trace.
-            # When a TOOL_RESULT_RECEIVED with SEARCH_TIMEOUT_AFTER_DISPATCH
-            # exists for this node, emit recovery evidence.
             prior_timeouts = [
                 ev for ev in self.trace.events
                 if ev.node_id == node_id
                 and "SEARCH_TIMEOUT_AFTER_DISPATCH" in ev.reason_codes
             ]
             if prior_timeouts:
+                orig = prior_timeouts[0]
+                orig_meta = getattr(orig, "metadata", {}) or {}
+                # Emit SEARCH_RETRY_SCHEDULED before recovery.
+                self._emit(
+                    EventType.TOOL_RESULT_RECEIVED,
+                    node_id=node_id,
+                    actor=Actor.NODE,
+                    decision="search_retry_scheduled",
+                    reason_codes=["SEARCH_RETRY_SCHEDULED"],
+                    metadata={
+                        "original_failure_event_id": orig.event_id,
+                        "retry_reason": "adapter_timeout",
+                    },
+                )
+                # Emit SEARCH_RETRY_RECOVERED.
                 self._emit(
                     EventType.TOOL_RESULT_RECEIVED,
                     node_id=node_id,
@@ -362,6 +396,9 @@ class NodeEventEmitterMixin:
                             "total_available": r.get("_total_available", 0),
                             "unavailable_source_ids": r.get("_unavailable_source_ids", []),
                             "incompleteness_reason": r.get("_incompleteness_reason", ""),
+                            "attempt_number": 1,
+                            "dispatch_attempted": True,
+                            "operation_digest": "",
                         },
                     )
 

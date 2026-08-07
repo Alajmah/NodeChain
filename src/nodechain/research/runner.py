@@ -471,6 +471,15 @@ class WorkspaceRunner:
                 if orig_id:
                     recovery_map[orig_id] = ev
 
+        # Build retry-scheduled lookup: map original_failure_event_id → scheduled event.
+        retry_scheduled_map: dict[str, Any] = {}
+        for ev in trace.events:
+            if "SEARCH_RETRY_SCHEDULED" in getattr(ev, "reason_codes", []):
+                meta = getattr(ev, "metadata", {}) or {}
+                orig_id = meta.get("original_failure_event_id")
+                if orig_id:
+                    retry_scheduled_map[orig_id] = ev
+
         # Determine final node outcome for search_tool.
         search_events = [ev for ev in trace.events if ev.node_id == "search_tool"]
         final_node_outcome = "unknown"
@@ -506,8 +515,10 @@ class WorkspaceRunner:
 
             # Check for recovery evidence.
             recovery_ev = recovery_map.get(ev.event_id)
+            scheduled_ev = retry_scheduled_map.get(ev.event_id)
             attempt_outcome = "failed"
-            recovery_outcome = recovery_ev.metadata.get("recovery_outcome") if recovery_ev else None
+            recovery_meta = getattr(recovery_ev, "metadata", {}) if recovery_ev else {}
+            recovery_outcome = recovery_meta.get("recovery_outcome")
 
             record = {
                 "fault_id": fault_id,
