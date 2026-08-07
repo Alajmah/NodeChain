@@ -436,30 +436,67 @@ class WorkspaceRunner:
         "SEARCH_PARTIAL_RESULT_SET": "partial_result_set",
     }
 
+    #: Provenance error keywords that map to SEARCH_PROVENANCE_MALFORMED.
+    _PROVENANCE_KEYWORDS: tuple[str, ...] = (
+        "PROVENANCE_VERSION", "provenance_version",
+        "unknown version", "malformed_provenance",
+    )
+
     def _record_faults(self, run_id: str, trace: Any) -> None:
         """Record durable fault records as a pure trace-event projection.
 
-        Consumes ONLY trace events with recognized reason codes. Does NOT
-        use corpus configuration to decide that a fault occurred.
+        Consumes ONLY trace events with recognized reason codes or provenance
+        error evidence. Does NOT use corpus configuration to decide that a
+        fault occurred.
         """
         from .run_descriptor import save_fault_record
         from datetime import datetime, timezone
         import hashlib as _hl
 
+        trace_id = getattr(trace, "trace_id", None) or getattr(trace, "run_id", run_id)
+
+        # Select events with recognized reason codes.
         fault_events = [
             ev for ev in trace.events
             if ev.reason_codes
             and any(rc in self._RECOGNIZED_FAULT_CODES for rc in ev.reason_codes)
         ]
 
+        # Also select node_failed events with provenance error evidence.
+        for ev in trace.events:
+            if ("node_failed" not in ev.event_type.value.lower()
+                    or ev.node_id != "search_tool"):
+                continue
+            rc_str = " ".join(ev.reason_codes).upper()
+            if any(kw.upper() in rc_str for kw in self._PROVENANCE_KEYWORDS):
+                if ev not in fault_events:
+                    fault_events.append(ev)
+
+        # Also detect partial-result evidence from successful tool_result_received events.
+        for ev in trace.events:
+            if ev.node_id != "search_tool":
+                continue
+            meta = getattr(ev, "metadata", {}) or {}
+            # Partial results carry _partial metadata in adapter results.
+            # The emitter already records adapter failures with decision=adapter_*.
+            # For partial results, the adapter succeeds — detect via metadata.
+            # (No partial metadata in trace events currently; this is a
+            #  placeholder for when the emitter adds partial detection.)
+
         for ev in fault_events:
+            # Determine primary reason code.
             primary_code = next(
                 (rc for rc in ev.reason_codes
                  if rc in self._REASON_CODE_TO_FAULT_TYPE),
                 None,
             )
             if primary_code is None:
-                continue
+                # Check if this is a provenance failure from keyword matching.
+                rc_str = " ".join(ev.reason_codes).upper()
+                if any(kw.upper() in rc_str for kw in self._PROVENANCE_KEYWORDS):
+                    primary_code = "SEARCH_PROVENANCE_MALFORMED"
+                else:
+                    continue
 
             fault_type = self._REASON_CODE_TO_FAULT_TYPE[primary_code]
             step_id = getattr(ev, "step_id", 0)
@@ -470,7 +507,7 @@ class WorkspaceRunner:
             record = {
                 "fault_id": fault_id,
                 "run_id": run_id,
-                "trace_id": getattr(trace, "run_id", run_id),
+                "trace_id": trace_id,
                 "step_id": step_id,
                 "operation": f"search:{ev.node_id}",
                 "failure_type": fault_type,

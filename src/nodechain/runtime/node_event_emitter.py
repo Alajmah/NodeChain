@@ -273,6 +273,32 @@ class NodeEventEmitterMixin:
                         },
                     )
 
+            # Detect partial result sets in the node output.
+            # The fixture adapter marks partial results with _partial metadata.
+            results = output.get("results", [])
+            if isinstance(results, list):
+                partial_results = [
+                    r for r in results
+                    if isinstance(r, dict)
+                    and isinstance(r.get("raw_data"), dict)
+                    and r["raw_data"].get("_partial") is True
+                ]
+                if partial_results:
+                    r = partial_results[0]["raw_data"]
+                    self._emit(
+                        EventType.TOOL_RESULT_RECEIVED,
+                        node_id=node_id,
+                        actor=Actor.NODE,
+                        decision="partial_result_set",
+                        reason_codes=["SEARCH_PARTIAL_RESULT_SET"],
+                        metadata={
+                            "returned_count": r.get("_returned_count", len(partial_results)),
+                            "total_available": r.get("_total_available", 0),
+                            "unavailable_source_ids": r.get("_unavailable_source_ids", []),
+                            "incompleteness_reason": r.get("_incompleteness_reason", ""),
+                        },
+                    )
+
         # v2.42.0: Tool access events
         if node_id != "search_tool" and not node_id.endswith("_search"):
             _observed_tools = set()
