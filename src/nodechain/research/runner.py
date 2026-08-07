@@ -353,6 +353,7 @@ class WorkspaceRunner:
                         retryable=False,
                         message="fail_before_dispatch: lane admission rejected "
                         "(dispatch did not occur)",
+                        reason_code="LANE_ADMISSION_REJECTED",
                     )
                 )
             guard.search = fail_before_search

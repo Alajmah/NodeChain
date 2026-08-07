@@ -56,6 +56,9 @@ class AdapterFailure(BaseModel):
     message: str = ""
     exception_class: str = ""
     timestamp: str = ""
+    reason_code: str = ""
+
+    model_config = {"extra": "allow"}
 
     def __init__(self, **data: Any) -> None:
         if not data.get("timestamp"):

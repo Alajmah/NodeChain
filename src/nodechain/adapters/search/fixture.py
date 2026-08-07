@@ -275,6 +275,7 @@ class FixtureSearchAdapter(BaseSearchAdapter):
                         retryable=False,
                         message="timeout_after_dispatch: injected fault "
                         "(dispatch occurred, outcome unknown)",
+                        reason_code="SEARCH_TIMEOUT_AFTER_DISPATCH",
                     )
                 )
             if fault == "malformed_provenance":

@@ -264,6 +264,7 @@ class NodeEventEmitterMixin:
                         node_id=node_id,
                         actor=Actor.NODE,
                         decision=f"adapter_{failure_type}",
+                        reason_codes=[failure.get("reason_code", f"SEARCH_{failure_type.upper()}")] if failure.get("reason_code") or failure_type != "unknown" else [],
                         metadata={
                             "adapter": adapter_name,
                             "error": failure.get("error", ""),

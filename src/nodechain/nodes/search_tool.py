@@ -410,6 +410,7 @@ class SearchToolNode(BaseNode):
                         "attempts": f.attempts,
                         "status_code": f.status_code,
                         "latency_ms": f.latency_ms,
+                        "reason_code": getattr(f, "reason_code", "") or "",
                     })
                 except Exception as e:
                     adapters_failed.append({
