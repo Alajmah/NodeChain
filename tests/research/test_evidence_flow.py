@@ -207,14 +207,14 @@ def test_unknown_source_fails_before_synthesis(tmp_path: Path) -> None:
             + " " + str(getattr(ev, "reason_codes", []))
             for ev in chain_fail_events
         )
-        assert (
-            "qualified_source_linker" in failure_text.lower()
-            or "QUALIFIED_SOURCE_NOT_INGESTED" in failure_text
-            or "src-unknown" in failure_text.lower()
-            or "node_execution_failed" in failure_text.lower()
-        ), (
-            f"failure does not identify linker/QUALIFIED_SOURCE_NOT_INGESTED: "
-            f"{failure_text[:300]}"
+        assert "qualified_source_linker" in failure_text.lower(), (
+            f"failure does not identify linker node: {failure_text[:300]}"
+        )
+        assert "QUALIFIED_SOURCE_NOT_INGESTED" in failure_text, (
+            f"failure does not cite QUALIFIED_SOURCE_NOT_INGESTED: {failure_text[:300]}"
+        )
+        assert "src-unknown" in failure_text.lower(), (
+            f"failure does not reference src-unknown: {failure_text[:300]}"
         )
     finally:
         FixtureModelAdapter._quality_evaluator_response = original_quality
