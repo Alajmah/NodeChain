@@ -418,197 +418,89 @@ class WorkspaceRunner:
             runner=self,
         )
 
+    #: Recognized fault reason codes for event projection.
+    _RECOGNIZED_FAULT_CODES: frozenset[str] = frozenset({
+        "LANE_ADMISSION_REJECTED",
+        "SEARCH_TIMEOUT_AFTER_DISPATCH",
+        "SEARCH_PROVENANCE_MALFORMED",
+        "SEARCH_PARTIAL_RESULT_SET",
+        "SEARCH_RETRY_SCHEDULED",
+        "SEARCH_RETRY_RECOVERED",
+    })
+
+    #: Map reason codes to fault types.
+    _REASON_CODE_TO_FAULT_TYPE: dict[str, str] = {
+        "LANE_ADMISSION_REJECTED": "fail_before_dispatch",
+        "SEARCH_TIMEOUT_AFTER_DISPATCH": "timeout_after_dispatch",
+        "SEARCH_PROVENANCE_MALFORMED": "malformed_provenance",
+        "SEARCH_PARTIAL_RESULT_SET": "partial_result_set",
+    }
+
     def _record_faults(self, run_id: str, trace: Any) -> None:
-        """Record durable fault records derived from actual runtime evidence.
+        """Record durable fault records as a pure trace-event projection.
 
-        Faults are identified by observing trace events for the search_tool
-        node — side_effect_started, node_failed, validation_failed, etc. —
-        and cross-referencing with the corpus fault configuration.
-
-        Each fault record uses a deterministic ID:
-            run_id + step_id + operation_digest + failure_type
-
-        Records are immutable write-once. Persistence failure is explicit
-        and prevents a complete terminal bundle.
+        Consumes ONLY trace events with recognized reason codes. Does NOT
+        use corpus configuration to decide that a fault occurred.
         """
         from .run_descriptor import save_fault_record
         from datetime import datetime, timezone
         import hashlib as _hl
 
-        # Collect runtime evidence from trace events for search_tool.
-        search_events = [
+        fault_events = [
             ev for ev in trace.events
-            if ev.node_id == "search_tool"
+            if ev.reason_codes
+            and any(rc in self._RECOGNIZED_FAULT_CODES for rc in ev.reason_codes)
         ]
 
-        # Derive what actually happened at the search_tool from exact events.
-        side_effect_events = [
-            ev for ev in search_events
-            if "side_effect_started" in ev.event_type.value
-        ]
-        node_failed_events = [
-            ev for ev in search_events
-            if "node_failed" in ev.event_type.value
-        ]
-        validation_failed_events = [
-            ev for ev in search_events
-            if "validation_failed" in ev.event_type.value
-        ]
-        tool_called_events = [
-            ev for ev in search_events
-            if "tool_called" in ev.event_type.value
-        ]
+        for ev in fault_events:
+            primary_code = next(
+                (rc for rc in ev.reason_codes
+                 if rc in self._REASON_CODE_TO_FAULT_TYPE),
+                None,
+            )
+            if primary_code is None:
+                continue
 
-        def _event_refs(events: list) -> list[dict[str, Any]]:
-            """Extract durable references (type, step, decision, metadata) from events."""
-            return [
-                {
-                    "event_type": ev.event_type.value,
-                    "step_id": getattr(ev, "step_id", None),
-                    "decision": str(getattr(ev, "decision", "")),
-                    "metadata": getattr(ev, "metadata", {}),
-                }
-                for ev in events
-            ]
-
-        side_effect_started = len(side_effect_events) > 0
-        node_failed = len(node_failed_events) > 0
-        tool_called = len(tool_called_events) > 0
-
-        # Determine the actual fault from exact runtime evidence.
-        # Each fault type requires type-specific trace evidence AND cites
-        # the exact events that prove it.
-        faults_observed: list[dict[str, Any]] = []
-
-        # fail_before_dispatch: requires that dispatch was NOT attempted
-        # (no side_effect_started AND no tool_called) AND the corpus has
-        # fail_before_dispatch_lanes configured.
-        if (self.corpus.fault_injection.fail_before_dispatch_lanes
-                and not side_effect_started and not tool_called):
-            faults_observed.append({
-                "failure_type": "fail_before_dispatch",
-                "dispatched": False,
-                "state_before": "pre_dispatch",
-                "state_after": "not_dispatched",
-                "recoverability": "retry_possible",
-                "proving_events": _event_refs(node_failed_events),
-                "evidence_truth": {
-                    "side_effect_started_count": len(side_effect_events),
-                    "tool_called_count": len(tool_called_events),
-                    "lane_configured": True,
-                },
-            })
-
-        # Post-dispatch faults: require side_effect_started (dispatch occurred).
-        if side_effect_started:
-            for query_key, entry in self.corpus.queries.items():
-                if entry.fault is None:
-                    continue
-                operation_digest = _hl.md5(
-                    f"search:{query_key}".encode("utf-8")
-                ).hexdigest()[:12]
-
-                if entry.fault == "timeout_after_dispatch":
-                    # Requires: node_failed event with the adapter raising.
-                    if not node_failed_events:
-                        continue
-                    faults_observed.append({
-                        "failure_type": "timeout_after_dispatch",
-                        "dispatched": True,
-                        "state_before": "dispatch_attempted",
-                        "state_after": "timeout",
-                        "recoverability": "retry_possible",
-                        "operation_digest": operation_digest,
-                        "query_key": query_key,
-                        "proving_events": _event_refs(node_failed_events + side_effect_events),
-                        "evidence_truth": {
-                            "side_effect_started_count": len(side_effect_events),
-                            "node_failed_count": len(node_failed_events),
-                        },
-                    })
-                elif entry.fault == "malformed_provenance":
-                    # Requires: validation_failed or node_failed event proving
-                    # the malformed result was rejected.
-                    proving = validation_failed_events + node_failed_events
-                    if not proving:
-                        continue
-                    faults_observed.append({
-                        "failure_type": "malformed_provenance",
-                        "dispatched": True,
-                        "state_before": "result_received",
-                        "state_after": "provenance_rejected",
-                        "recoverability": "non_recoverable",
-                        "operation_digest": operation_digest,
-                        "query_key": query_key,
-                        "proving_events": _event_refs(proving),
-                        "evidence_truth": {
-                            "side_effect_started_count": len(side_effect_events),
-                            "validation_failed_count": len(validation_failed_events),
-                            "node_failed_count": len(node_failed_events),
-                        },
-                    })
-                elif entry.fault == "partial_result_set":
-                    # Requires: tool_called event proving the adapter returned.
-                    if not tool_called_events:
-                        continue
-                    faults_observed.append({
-                        "failure_type": "partial_result_set",
-                        "dispatched": True,
-                        "state_before": "result_received",
-                        "state_after": "partial",
-                        "recoverability": "degraded_completion",
-                        "operation_digest": operation_digest,
-                        "query_key": query_key,
-                        "total_available": entry.total_available,
-                        "unavailable_source_ids": list(entry.unavailable_source_ids),
-                        "incompleteness_reason": entry.incompleteness_reason,
-                        "proving_events": _event_refs(tool_called_events + side_effect_events),
-                        "evidence_truth": {
-                            "side_effect_started_count": len(side_effect_events),
-                            "tool_called_count": len(tool_called_events),
-                        },
-                    })
-
-        # Record each fault that was proven by exact runtime evidence.
-        for fault in faults_observed:
-
-            # Deterministic fault ID (hyphens only, no underscores).
-            op_digest = fault.get("operation_digest", "predispatch")
-            fault_type_hyphen = fault["failure_type"].replace("_", "-")
-            fault_id = f"{run_id[:8]}-{fault_type_hyphen}-{op_digest}"
+            fault_type = self._REASON_CODE_TO_FAULT_TYPE[primary_code]
+            step_id = getattr(ev, "step_id", 0)
+            fault_id = _hl.sha256(
+                f"{run_id}|{step_id}|{primary_code}".encode("utf-8")
+            ).hexdigest()
 
             record = {
                 "fault_id": fault_id,
                 "run_id": run_id,
+                "trace_id": getattr(trace, "run_id", run_id),
+                "step_id": step_id,
+                "operation": f"search:{ev.node_id}",
+                "failure_type": fault_type,
+                "reason_codes": [primary_code],
+                "proving_event_ids": [ev.event_id],
+                "proving_events": [{
+                    "event_id": ev.event_id,
+                    "event_type": ev.event_type.value,
+                    "step_id": step_id,
+                    "decision": str(getattr(ev, "decision", "")),
+                    "reason_codes": ev.reason_codes,
+                    "metadata": getattr(ev, "metadata", {}),
+                }],
+                "state_before": "pre_dispatch" if primary_code == "LANE_ADMISSION_REJECTED" else "dispatch_attempted",
+                "state_after": {
+                    "fail_before_dispatch": "not_dispatched",
+                    "timeout_after_dispatch": "timeout",
+                    "malformed_provenance": "provenance_rejected",
+                    "partial_result_set": "partial",
+                }.get(fault_type, "unknown"),
+                "recoverability": {
+                    "fail_before_dispatch": "retry_possible",
+                    "timeout_after_dispatch": "retry_possible",
+                    "malformed_provenance": "non_recoverable",
+                    "partial_result_set": "degraded_completion",
+                }.get(fault_type, "unknown"),
+                "related_artifact_refs": [f"trace_event:{ev.event_id}"],
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "operation": f"search:{fault.get('query_key', 'lane_admission')}",
-                "failure_type": fault["failure_type"],
-                "dispatched": fault.get("dispatched", False),
-                "message": (
-                    f"Observed {fault['failure_type']} during search_tool "
-                    f"execution (dispatched={fault.get('dispatched')})"
-                ),
-                "state_before": fault["state_before"],
-                "state_after": fault["state_after"],
-                "recoverability": fault["recoverability"],
-                "related_artifact_refs": [
-                    f"corpus:{self.corpus.scenario_id}:{fault.get('query_key', 'fail_before_dispatch')}",
-                ],
-                "evidence_truth": fault.get("evidence_truth", {}),
-                "proving_events": fault.get("proving_events", []),
-                "runtime_evidence": {
-                    "side_effect_started": side_effect_started,
-                    "node_failed": node_failed,
-                    "tool_called": tool_called,
-                    "validation_failures": len(validation_failed_events),
-                },
             }
-            # Include partial-result-specific fields.
-            for k in ("total_available", "unavailable_source_ids", "incompleteness_reason"):
-                if k in fault:
-                    record[k] = fault[k]
 
-            # Persistence failure must be explicit, not silently swallowed.
             save_fault_record(self._workspace_dir, run_id, record)
 
     def compose_for_resume(self, persisted_run_id: str) -> Orchestrator:
