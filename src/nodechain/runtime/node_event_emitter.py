@@ -270,8 +270,74 @@ class NodeEventEmitterMixin:
                             "error": failure.get("error", ""),
                             "retryable": retryable,
                             "attempts": attempts,
+                            "attempt_number": attempts,
+                            "dispatch_attempted": True,
+                            "operation_digest": failure.get("query_hash", ""),
                         },
                     )
+
+            # Detect prior provenance failures for this node from the trace.
+            # When a node_failed event with provenance error evidence exists
+            # for this node, emit SEARCH_PROVENANCE_MALFORMED on the
+            # retry-success path. This puts the frozen reason code into the
+            # actual runtime trace (not a post-hoc keyword conversion).
+            prior_failures = [
+                ev for ev in self.trace.events
+                if ev.node_id == node_id
+                and "node_failed" in ev.event_type.value.lower()
+                and ev.reason_codes
+                and any(
+                    "PROVENANCE" in rc.upper() or "provenance" in rc.lower()
+                    for rc in ev.reason_codes
+                )
+            ]
+            if prior_failures:
+                self._emit(
+                    EventType.TOOL_RESULT_RECEIVED,
+                    node_id=node_id,
+                    actor=Actor.NODE,
+                    decision="provenance_malformed_recovered",
+                    reason_codes=["SEARCH_PROVENANCE_MALFORMED"],
+                    metadata={
+                        "original_failure_event_id": prior_failures[0].event_id,
+                        "recovery_attempt": True,
+                    },
+                )
+                # Also emit recovery evidence.
+                self._emit(
+                    EventType.TOOL_RESULT_RECEIVED,
+                    node_id=node_id,
+                    actor=Actor.NODE,
+                    decision="search_retry_recovered",
+                    reason_codes=["SEARCH_RETRY_RECOVERED"],
+                    metadata={
+                        "original_failure_event_id": prior_failures[0].event_id,
+                        "recovery_outcome": "recovered",
+                        "final_node_outcome": "succeeded",
+                    },
+                )
+
+            # Detect prior timeout failures for this node from the trace.
+            # When a TOOL_RESULT_RECEIVED with SEARCH_TIMEOUT_AFTER_DISPATCH
+            # exists for this node, emit recovery evidence.
+            prior_timeouts = [
+                ev for ev in self.trace.events
+                if ev.node_id == node_id
+                and "SEARCH_TIMEOUT_AFTER_DISPATCH" in ev.reason_codes
+            ]
+            if prior_timeouts:
+                self._emit(
+                    EventType.TOOL_RESULT_RECEIVED,
+                    node_id=node_id,
+                    actor=Actor.NODE,
+                    decision="search_retry_recovered",
+                    reason_codes=["SEARCH_RETRY_RECOVERED"],
+                    metadata={
+                        "original_failure_event_id": prior_timeouts[0].event_id,
+                        "recovery_outcome": "recovered",
+                        "final_node_outcome": "succeeded",
+                    },
+                )
 
             # Detect partial result sets in the node output.
             # The fixture adapter marks partial results with _partial metadata.

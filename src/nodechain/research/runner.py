@@ -462,53 +462,61 @@ class WorkspaceRunner:
             and any(rc in self._RECOGNIZED_FAULT_CODES for rc in ev.reason_codes)
         ]
 
-        # Also select node_failed events with provenance error evidence.
+        # Build recovery lookup: map original_failure_event_id → recovery event.
+        recovery_map: dict[str, Any] = {}
         for ev in trace.events:
-            if ("node_failed" not in ev.event_type.value.lower()
-                    or ev.node_id != "search_tool"):
-                continue
-            rc_str = " ".join(ev.reason_codes).upper()
-            if any(kw.upper() in rc_str for kw in self._PROVENANCE_KEYWORDS):
-                if ev not in fault_events:
-                    fault_events.append(ev)
+            if "SEARCH_RETRY_RECOVERED" in getattr(ev, "reason_codes", []):
+                meta = getattr(ev, "metadata", {}) or {}
+                orig_id = meta.get("original_failure_event_id")
+                if orig_id:
+                    recovery_map[orig_id] = ev
 
-        # Also detect partial-result evidence from successful tool_result_received events.
-        for ev in trace.events:
-            if ev.node_id != "search_tool":
-                continue
-            meta = getattr(ev, "metadata", {}) or {}
-            # Partial results carry _partial metadata in adapter results.
-            # The emitter already records adapter failures with decision=adapter_*.
-            # For partial results, the adapter succeeds — detect via metadata.
-            # (No partial metadata in trace events currently; this is a
-            #  placeholder for when the emitter adds partial detection.)
+        # Determine final node outcome for search_tool.
+        search_events = [ev for ev in trace.events if ev.node_id == "search_tool"]
+        final_node_outcome = "unknown"
+        for ev in reversed(search_events):
+            if "node_succeeded" in ev.event_type.value.lower():
+                final_node_outcome = "succeeded"
+                break
+            if "node_failed" in ev.event_type.value.lower():
+                final_node_outcome = "failed"
+                break
 
         for ev in fault_events:
-            # Determine primary reason code.
+            # Determine primary reason code (from actual trace, not keyword matching).
             primary_code = next(
                 (rc for rc in ev.reason_codes
                  if rc in self._REASON_CODE_TO_FAULT_TYPE),
                 None,
             )
             if primary_code is None:
-                # Check if this is a provenance failure from keyword matching.
-                rc_str = " ".join(ev.reason_codes).upper()
-                if any(kw.upper() in rc_str for kw in self._PROVENANCE_KEYWORDS):
-                    primary_code = "SEARCH_PROVENANCE_MALFORMED"
-                else:
+                # Check for SEARCH_RETRY_RECOVERED — these are recovery events,
+                # not fault-creating events.
+                if "SEARCH_RETRY_RECOVERED" in ev.reason_codes:
                     continue
+                # Skip unrecognized codes.
+                continue
 
             fault_type = self._REASON_CODE_TO_FAULT_TYPE[primary_code]
             step_id = getattr(ev, "step_id", 0)
+            ev_meta = getattr(ev, "metadata", {}) or {}
             fault_id = _hl.sha256(
                 f"{run_id}|{step_id}|{primary_code}".encode("utf-8")
             ).hexdigest()
+
+            # Check for recovery evidence.
+            recovery_ev = recovery_map.get(ev.event_id)
+            attempt_outcome = "failed"
+            recovery_outcome = recovery_ev.metadata.get("recovery_outcome") if recovery_ev else None
 
             record = {
                 "fault_id": fault_id,
                 "run_id": run_id,
                 "trace_id": trace_id,
                 "step_id": step_id,
+                "attempt_number": ev_meta.get("attempt_number", 1),
+                "operation_digest": ev_meta.get("operation_digest", ""),
+                "dispatch_attempted": ev_meta.get("dispatch_attempted", primary_code != "LANE_ADMISSION_REJECTED"),
                 "operation": f"search:{ev.node_id}",
                 "failure_type": fault_type,
                 "reason_codes": [primary_code],
@@ -519,8 +527,11 @@ class WorkspaceRunner:
                     "step_id": step_id,
                     "decision": str(getattr(ev, "decision", "")),
                     "reason_codes": ev.reason_codes,
-                    "metadata": getattr(ev, "metadata", {}),
+                    "metadata": ev_meta,
                 }],
+                "attempt_outcome": attempt_outcome,
+                "recovery_outcome": recovery_outcome or "not_recovered",
+                "final_node_outcome": final_node_outcome,
                 "state_before": "pre_dispatch" if primary_code == "LANE_ADMISSION_REJECTED" else "dispatch_attempted",
                 "state_after": {
                     "fail_before_dispatch": "not_dispatched",
