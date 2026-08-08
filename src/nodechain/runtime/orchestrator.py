@@ -427,37 +427,60 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
                         {"node_id": node_id, "step": self._step},
                     )
 
-                    # Emit SEARCH_RETRY_SCHEDULED at the actual retry-decision
-                    # boundary, BEFORE the retry attempt executes. This is the
-                    # truthful chronological position: failure observed →
-                    # runtime decides to retry → retry executes.
-                    # Correlate to the original NODE_FAILED event.
-                    node_failed_events = [
-                        ev for ev in self.trace.events
-                        if ev.node_id == node_id
-                        and "node_failed" in ev.event_type.value.lower()
-                    ]
-                    if node_failed_events:
-                        orig_failure = node_failed_events[-1]
-                        orig_meta = getattr(orig_failure, "metadata", {}) or {}
-                        self._emit(
-                            EventType.TOOL_RESULT_RECEIVED,
-                            node_id=node_id,
-                            actor=Actor.RUNTIME,
-                            decision="search_retry_scheduled",
-                            reason_codes=["SEARCH_RETRY_SCHEDULED"],
-                            metadata={
-                                "original_failure_event_id": orig_failure.event_id,
-                                "retry_attempt_number": 2,
-                                "retry_reason": response.error or str(failure_type),
-                                "operation_digest": orig_meta.get("operation_digest", ""),
-                            },
-                        )
+                    # Wrap invoke_fn so SEARCH_RETRY_SCHEDULED is emitted ONLY
+                    # when a retry-capable handler actually calls the retry
+                    # invocation — not unconditionally before handle().
+                    # Non-retry handlers (escalation, pause, skip) never call
+                    # the wrapper, so they never fabricate scheduling evidence.
+                    orig_failed_ev = None
+                    for ev in reversed(self.trace.events):
+                        if (ev.node_id == node_id
+                                and "node_failed" in ev.event_type.value.lower()):
+                            orig_failed_ev = ev
+                            break
+
+                    # Derive operation_digest from the side-effect trace.
+                    retry_digest = ""
+                    if orig_failed_ev is not None:
+                        for se_ev in self.trace.events:
+                            if (se_ev.node_id == node_id
+                                    and "side_effect_started" in se_ev.event_type.value.lower()):
+                                se_meta = getattr(se_ev, "metadata", {}) or {}
+                                ikey = se_meta.get("idempotency_key", "")
+                                if ":" in ikey:
+                                    parts = ikey.split(":")
+                                    if len(parts) >= 3:
+                                        retry_digest = parts[-1]
+                                        break
+
+                    failed_node_id = node_id
+                    failed_orig_ev = orig_failed_ev
+                    failed_error = response.error or str(failure_type)
+                    failed_digest = retry_digest
+
+                    async def invoke_retry_with_trace(retry_node, retry_envelope):
+                        """Wrapped invoke_fn that emits SEARCH_RETRY_SCHEDULED
+                        immediately before the retry actually dispatches."""
+                        if failed_orig_ev is not None:
+                            self._emit(
+                                EventType.TOOL_RESULT_RECEIVED,
+                                node_id=failed_node_id,
+                                actor=Actor.RUNTIME,
+                                decision="search_retry_scheduled",
+                                reason_codes=["SEARCH_RETRY_SCHEDULED"],
+                                metadata={
+                                    "original_failure_event_id": failed_orig_ev.event_id,
+                                    "retry_attempt_number": 2,
+                                    "retry_reason": failed_error,
+                                    "operation_digest": failed_digest,
+                                },
+                            )
+                        return await self._invoke_node(retry_node, retry_envelope)
 
                     result = await self.failure_manager.handle(
                         failure_type, node, envelope,
                         response.error or "", {"outputs": self.state.outputs},
-                        invoke_fn=self._invoke_node,
+                        invoke_fn=invoke_retry_with_trace,
                     )
                     if not result.recovered:
                         self._record_last_failure(
