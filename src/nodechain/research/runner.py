@@ -410,6 +410,24 @@ class WorkspaceRunner:
         # Record durable fault records for fault-injection scenarios.
         self._record_faults(orch.state.run_id, trace)
 
+        # Finalize terminal bundle if the run reached a terminal state.
+        if trace.final_status in ("completed", "failed"):
+            from .bundle_finalizer import finalize_bundle, BundleFinalizationError
+            try:
+                self._bundle_path = finalize_bundle(
+                    workspace_dir=self._workspace_dir,
+                    run_id=orch.state.run_id,
+                    desc=desc,
+                    trace=trace,
+                    state=orch.state,
+                    corpus=self.corpus,
+                    source_commit=desc.chain_id,
+                )
+            except BundleFinalizationError:
+                self._bundle_path = None  # finalization failure is non-fatal for the run
+        else:
+            self._bundle_path = None
+
         return RunResult(
             run_id=orch.state.run_id,
             chain_id=self.chain_id,
