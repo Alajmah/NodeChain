@@ -460,8 +460,12 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
 
                     async def invoke_retry_with_trace(retry_node, retry_envelope):
                         """Wrapped invoke_fn that emits SEARCH_RETRY_SCHEDULED
-                        immediately before the retry actually dispatches."""
-                        if failed_orig_ev is not None:
+                        immediately before the retry actually dispatches.
+                        Scoped to search_tool provenance recovery only —
+                        unrelated node retries must not be mislabeled."""
+                        if (failed_orig_ev is not None
+                                and failed_node_id == "search_tool"
+                                and "SEARCH_PROVENANCE_MALFORMED" in failed_error):
                             self._emit(
                                 EventType.TOOL_RESULT_RECEIVED,
                                 node_id=failed_node_id,
