@@ -455,12 +455,20 @@ class WorkspaceRunner:
 
         trace_id = getattr(trace, "trace_id", None) or getattr(trace, "run_id", run_id)
 
-        # Select events with recognized reason codes.
-        fault_events = [
-            ev for ev in trace.events
-            if ev.reason_codes
-            and any(rc in self._RECOGNIZED_FAULT_CODES for rc in ev.reason_codes)
-        ]
+        # Select events with recognized reason codes (exact match or prefix).
+        fault_events = []
+        for ev in trace.events:
+            if not ev.reason_codes:
+                continue
+            for rc in ev.reason_codes:
+                for known in self._REASON_CODE_TO_FAULT_TYPE:
+                    if rc == known or rc.startswith(known + ":"):
+                        fault_events.append(ev)
+                        break
+                else:
+                    if rc in self._RECOGNIZED_FAULT_CODES:
+                        fault_events.append(ev)
+                        break
 
         # Build recovery lookup: map original_failure_event_id → recovery event.
         recovery_map: dict[str, Any] = {}
@@ -492,12 +500,17 @@ class WorkspaceRunner:
                 break
 
         for ev in fault_events:
-            # Determine primary reason code (from actual trace, not keyword matching).
-            primary_code = next(
-                (rc for rc in ev.reason_codes
-                 if rc in self._REASON_CODE_TO_FAULT_TYPE),
-                None,
-            )
+            # Determine primary reason code. The actual trace event may carry
+            # the reason code as a prefix (e.g. "SEARCH_PROVENANCE_MALFORMED: ...").
+            # Extract the canonical code by checking prefix matches.
+            primary_code = None
+            for rc in ev.reason_codes:
+                for known in self._REASON_CODE_TO_FAULT_TYPE:
+                    if rc == known or rc.startswith(known + ":"):
+                        primary_code = known
+                        break
+                if primary_code:
+                    break
             if primary_code is None:
                 # Check for SEARCH_RETRY_RECOVERED — these are recovery events,
                 # not fault-creating events.
