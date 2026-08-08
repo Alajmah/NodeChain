@@ -274,7 +274,7 @@ class NodeEventEmitterMixin:
                             "attempts": attempts,
                             "attempt_number": attempts,
                             "dispatch_attempted": dispatch_attempted,
-                            "operation_digest": failure.get("query_hash", failure.get("request_hash", "")),
+                            "operation_digest": failure.get("request_hash", failure.get("query_hash", "")),
                         },
                     )
 
@@ -328,6 +328,22 @@ class NodeEventEmitterMixin:
                     },
                 )
 
+            # Extract operation_digest from prior side_effect_started events.
+            # The side_effect_started idempotency_key format is
+            # "search:<adapter>:<request_hash>" — the request_hash is the
+            # operation_digest.
+            se_digest = ""
+            for ev in self.trace.events:
+                if (ev.node_id == node_id
+                        and "side_effect_started" in ev.event_type.value.lower()):
+                    meta = getattr(ev, "metadata", {}) or {}
+                    ikey = meta.get("idempotency_key", "")
+                    if ":" in ikey:
+                        parts = ikey.split(":")
+                        if len(parts) >= 3:
+                            se_digest = parts[-1]
+                            break
+
             # Detect partial result sets in the node output.
             # The fixture adapter marks partial results with _partial metadata.
             results = output.get("results", [])
@@ -353,7 +369,7 @@ class NodeEventEmitterMixin:
                             "incompleteness_reason": r.get("_incompleteness_reason", ""),
                             "attempt_number": 1,
                             "dispatch_attempted": True,
-                            "operation_digest": "",
+                            "operation_digest": se_digest,
                         },
                     )
 

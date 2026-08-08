@@ -522,6 +522,22 @@ class WorkspaceRunner:
             fault_type = self._REASON_CODE_TO_FAULT_TYPE[primary_code]
             step_id = getattr(ev, "step_id", 0)
             ev_meta = getattr(ev, "metadata", {}) or {}
+
+            # Extract operation_digest: from the event metadata if available,
+            # otherwise from the trace's side_effect_started idempotency_key.
+            operation_digest = ev_meta.get("operation_digest", "")
+            if not operation_digest:
+                for se_ev in trace.events:
+                    if (se_ev.node_id == ev.node_id
+                            and "side_effect_started" in se_ev.event_type.value.lower()):
+                        se_meta = getattr(se_ev, "metadata", {}) or {}
+                        ikey = se_meta.get("idempotency_key", "")
+                        if ":" in ikey:
+                            parts = ikey.split(":")
+                            if len(parts) >= 3:
+                                operation_digest = parts[-1]
+                                break
+
             fault_id = _hl.sha256(
                 f"{run_id}|{step_id}|{primary_code}".encode("utf-8")
             ).hexdigest()
@@ -539,7 +555,7 @@ class WorkspaceRunner:
                 "trace_id": trace_id,
                 "step_id": step_id,
                 "attempt_number": ev_meta.get("attempt_number", 1),
-                "operation_digest": ev_meta.get("operation_digest", ""),
+                "operation_digest": operation_digest,
                 "dispatch_attempted": ev_meta.get("dispatch_attempted", primary_code != "LANE_ADMISSION_REJECTED"),
                 "operation": f"search:{ev.node_id}",
                 "failure_type": fault_type,
