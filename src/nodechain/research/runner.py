@@ -412,19 +412,17 @@ class WorkspaceRunner:
 
         # Finalize terminal bundle if the run reached a terminal state.
         if trace.final_status in ("completed", "failed"):
-            from .bundle_finalizer import finalize_bundle, BundleFinalizationError
-            try:
-                self._bundle_path = finalize_bundle(
-                    workspace_dir=self._workspace_dir,
-                    run_id=orch.state.run_id,
-                    desc=desc,
-                    trace=trace,
-                    state=orch.state,
-                    corpus=self.corpus,
-                    source_commit=desc.chain_id,
-                )
-            except BundleFinalizationError:
-                self._bundle_path = None  # finalization failure is non-fatal for the run
+            from .bundle_finalizer import finalize_bundle
+            # Finalization failure propagates — no silent recovery.
+            self._bundle_path = finalize_bundle(
+                workspace_dir=self._workspace_dir,
+                run_id=orch.state.run_id,
+                desc=desc,
+                trace=trace,
+                state=orch.state,
+                corpus=self.corpus,
+                source_commit=desc.chain_id,
+            )
         else:
             self._bundle_path = None
 
@@ -641,6 +639,21 @@ class WorkspaceRunner:
                 trace = asyncio.run(self.orchestrator.resume(target_run_id))
         finally:
             self._review_env = {}  # one-shot: clear after every resume attempt
+
+        # Finalize terminal bundle if the resumed run reached a terminal state.
+        if trace.final_status in ("completed", "failed") and self._run_descriptor:
+            from .bundle_finalizer import finalize_bundle
+            # Finalization failure propagates.
+            self._bundle_path = finalize_bundle(
+                workspace_dir=self._workspace_dir,
+                run_id=target_run_id,
+                desc=self._run_descriptor,
+                trace=trace,
+                state=self.orchestrator.state,
+                corpus=self.corpus,
+                source_commit=self._run_descriptor.chain_id,
+            )
+
         return RunResult(
             run_id=target_run_id,
             chain_id=self.chain_id,
