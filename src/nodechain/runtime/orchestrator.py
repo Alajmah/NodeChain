@@ -426,6 +426,34 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
                         response.error or "unknown",
                         {"node_id": node_id, "step": self._step},
                     )
+
+                    # Emit SEARCH_RETRY_SCHEDULED at the actual retry-decision
+                    # boundary, BEFORE the retry attempt executes. This is the
+                    # truthful chronological position: failure observed →
+                    # runtime decides to retry → retry executes.
+                    # Correlate to the original NODE_FAILED event.
+                    node_failed_events = [
+                        ev for ev in self.trace.events
+                        if ev.node_id == node_id
+                        and "node_failed" in ev.event_type.value.lower()
+                    ]
+                    if node_failed_events:
+                        orig_failure = node_failed_events[-1]
+                        orig_meta = getattr(orig_failure, "metadata", {}) or {}
+                        self._emit(
+                            EventType.TOOL_RESULT_RECEIVED,
+                            node_id=node_id,
+                            actor=Actor.RUNTIME,
+                            decision="search_retry_scheduled",
+                            reason_codes=["SEARCH_RETRY_SCHEDULED"],
+                            metadata={
+                                "original_failure_event_id": orig_failure.event_id,
+                                "retry_attempt_number": 2,
+                                "retry_reason": response.error or str(failure_type),
+                                "operation_digest": orig_meta.get("operation_digest", ""),
+                            },
+                        )
+
                     result = await self.failure_manager.handle(
                         failure_type, node, envelope,
                         response.error or "", {"outputs": self.state.outputs},

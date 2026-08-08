@@ -279,17 +279,19 @@ class NodeEventEmitterMixin:
                     )
 
             # Detect prior fault failures for this node from the trace.
-            # When a node_failed or TOOL_RESULT_RECEIVED event with a
-            # recognized fault reason code exists for this node, emit
-            # retry lifecycle evidence (SCHEDULED before RECOVERED).
-            # These events reference the original failure event ID.
+            # SEARCH_RETRY_SCHEDULED is now emitted by the orchestrator at the
+            # actual retry-decision boundary (before retry execution).
+            # This emitter (running on the success path) only emits
+            # SEARCH_RETRY_RECOVERED — which is when recovery is actually known.
+            # Only emit recovery for faults that went through NODE_FAILED +
+            # orchestrator retry (not for adapter failures absorbed by the node).
             REASON_CODES_WITH_RECOVERY = {
-                "SEARCH_TIMEOUT_AFTER_DISPATCH",
                 "SEARCH_PROVENANCE_MALFORMED",
             }
             prior_fault_events = [
                 ev for ev in self.trace.events
                 if ev.node_id == node_id
+                and "node_failed" in ev.event_type.value.lower()
                 and ev.reason_codes
                 and any(
                     rc == known or rc.startswith(known + ":")
@@ -298,22 +300,7 @@ class NodeEventEmitterMixin:
                 )
             ]
             for orig in prior_fault_events:
-                # Emit SEARCH_RETRY_SCHEDULED at the retry-success boundary.
-                # While this is emitted on the success path (the emitter only
-                # runs on success), it faithfully records that a retry was
-                # scheduled after the original failure.
-                self._emit(
-                    EventType.TOOL_RESULT_RECEIVED,
-                    node_id=node_id,
-                    actor=Actor.NODE,
-                    decision="search_retry_scheduled",
-                    reason_codes=["SEARCH_RETRY_SCHEDULED"],
-                    metadata={
-                        "original_failure_event_id": orig.event_id,
-                        "retry_reason": orig.reason_codes[0] if orig.reason_codes else "",
-                    },
-                )
-                # Emit SEARCH_RETRY_RECOVERED.
+                # Emit SEARCH_RETRY_RECOVERED only (SCHEDULED is now in orchestrator).
                 self._emit(
                     EventType.TOOL_RESULT_RECEIVED,
                     node_id=node_id,
