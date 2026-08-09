@@ -201,7 +201,7 @@ class WorkspaceRunner:
         object is created with all paths from the descriptor, suitable for
         compose_for_resume + resume.
         """
-        return cls(
+        runner = cls(
             brief=ResearchBrief.from_question(desc.question),
             corpus_path=desc.corpus_path,
             workspace_dir=desc.workspace_dir,
@@ -209,6 +209,8 @@ class WorkspaceRunner:
             trace_dir=desc.trace_dir,
             chain_id=desc.chain_id,
         )
+        runner._run_descriptor = desc
+        return runner
 
     # ------------------------------------------------------------------ #
     # Composition
