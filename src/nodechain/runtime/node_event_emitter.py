@@ -259,16 +259,104 @@ class NodeEventEmitterMixin:
                     failure_type = failure.get("failure_type", "unknown")
                     retryable = failure.get("retryable", False)
                     attempts = failure.get("attempts", 1)
+                    reason_code = failure.get("reason_code", "")
+                    dispatch_attempted = reason_code != "LANE_ADMISSION_REJECTED"
                     self._emit(
                         EventType.TOOL_RESULT_RECEIVED,
                         node_id=node_id,
                         actor=Actor.NODE,
                         decision=f"adapter_{failure_type}",
+                        reason_codes=[reason_code] if reason_code else ([f"SEARCH_{failure_type.upper()}"] if failure_type != "unknown" else []),
                         metadata={
                             "adapter": adapter_name,
                             "error": failure.get("error", ""),
                             "retryable": retryable,
                             "attempts": attempts,
+                            "attempt_number": attempts,
+                            "dispatch_attempted": dispatch_attempted,
+                            "operation_digest": failure.get("request_hash", failure.get("query_hash", "")),
+                        },
+                    )
+
+            # Detect prior fault failures for this node from the trace.
+            # SEARCH_RETRY_SCHEDULED is now emitted by the orchestrator at the
+            # actual retry-decision boundary (before retry execution).
+            # This emitter (running on the success path) only emits
+            # SEARCH_RETRY_RECOVERED — which is when recovery is actually known.
+            # Only emit recovery for faults that went through NODE_FAILED +
+            # orchestrator retry (not for adapter failures absorbed by the node).
+            REASON_CODES_WITH_RECOVERY = {
+                "SEARCH_PROVENANCE_MALFORMED",
+            }
+            prior_fault_events = [
+                ev for ev in self.trace.events
+                if ev.node_id == node_id
+                and "node_failed" in ev.event_type.value.lower()
+                and ev.reason_codes
+                and any(
+                    rc == known or rc.startswith(known + ":")
+                    for rc in ev.reason_codes
+                    for known in REASON_CODES_WITH_RECOVERY
+                )
+            ]
+            for orig in prior_fault_events:
+                # Emit SEARCH_RETRY_RECOVERED only (SCHEDULED is now in orchestrator).
+                self._emit(
+                    EventType.TOOL_RESULT_RECEIVED,
+                    node_id=node_id,
+                    actor=Actor.NODE,
+                    decision="search_retry_recovered",
+                    reason_codes=["SEARCH_RETRY_RECOVERED"],
+                    metadata={
+                        "original_failure_event_id": orig.event_id,
+                        "recovery_attempt_number": 2,
+                        "recovery_outcome": "recovered",
+                        "final_node_outcome": "succeeded",
+                    },
+                )
+
+            # Extract operation_digest from prior side_effect_started events.
+            # The side_effect_started idempotency_key format is
+            # "search:<adapter>:<request_hash>" — the request_hash is the
+            # operation_digest.
+            se_digest = ""
+            for ev in self.trace.events:
+                if (ev.node_id == node_id
+                        and "side_effect_started" in ev.event_type.value.lower()):
+                    meta = getattr(ev, "metadata", {}) or {}
+                    ikey = meta.get("idempotency_key", "")
+                    if ":" in ikey:
+                        parts = ikey.split(":")
+                        if len(parts) >= 3:
+                            se_digest = parts[-1]
+                            break
+
+            # Detect partial result sets in the node output.
+            # The fixture adapter marks partial results with _partial metadata.
+            results = output.get("results", [])
+            if isinstance(results, list):
+                partial_results = [
+                    r for r in results
+                    if isinstance(r, dict)
+                    and isinstance(r.get("raw_data"), dict)
+                    and r["raw_data"].get("_partial") is True
+                ]
+                if partial_results:
+                    r = partial_results[0]["raw_data"]
+                    self._emit(
+                        EventType.TOOL_RESULT_RECEIVED,
+                        node_id=node_id,
+                        actor=Actor.NODE,
+                        decision="partial_result_set",
+                        reason_codes=["SEARCH_PARTIAL_RESULT_SET"],
+                        metadata={
+                            "returned_count": r.get("_returned_count", len(partial_results)),
+                            "total_available": r.get("_total_available", 0),
+                            "unavailable_source_ids": r.get("_unavailable_source_ids", []),
+                            "incompleteness_reason": r.get("_incompleteness_reason", ""),
+                            "attempt_number": 1,
+                            "dispatch_attempted": True,
+                            "operation_digest": se_digest,
                         },
                     )
 

@@ -1,0 +1,32 @@
+corpus_version: "1.0"
+scenario_id: "conflicting-evidence-test"
+scenario_kind: "conflicting_evidence"
+description: "Conflicting evidence scenario with genuinely contradictory sources"
+sources:
+  - source_id: src-conf-1
+    origin_api: fixture
+    query_used: "memory rust safety"
+    retrieved_at: "2026-01-01T00:00:00Z"
+    title: "Evidence Supports Hypothesis"
+    authors: ["D. Researcher"]
+    abstract: "Strong support for the hypothesis."
+    doi: ""
+    source_hash: "6183934ac296a039d545b8990602ad67821d49d3793a471fe86c1bd02d607e6b"
+  - source_id: src-conf-2
+    origin_api: fixture
+    query_used: "memory rust safety"
+    retrieved_at: "2026-01-01T00:00:00Z"
+    title: "Evidence Contradicts Hypothesis"
+    authors: ["E. Skeptic"]
+    abstract: "Contradictory evidence found."
+    doi: ""
+    source_hash: "557c4956a74deffc75ddabb3c8989cdf0d242a45ac90d87686d947c46d818b01"
+queries:
+  memory rust safety:
+    results:
+      - src-conf-1
+      - src-conf-2
+minimum_evidence:
+  min_sources: 1
+  min_evidence_per_claim: 1
+  min_confidence: 0.5

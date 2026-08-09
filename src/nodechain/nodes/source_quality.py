@@ -26,7 +26,7 @@ SOURCE_QUALITY_CONTRACT = NodeContract(
     exit=ExitContract(
         output_type=PortType.QUALIFIED_SOURCE_SET,
         schema_ref="nodechain://schemas/semantic_types/qualified_source_set",
-        guaranteed_fields=["qualified_sources", "quality_summary", "loop_required"],
+        guaranteed_fields=["qualified_sources", "quality_summary", "loop_required", "sources"],
         possible_fields=["loop_reason", "revised_queries"],
     ),
     requirements=Requirements(

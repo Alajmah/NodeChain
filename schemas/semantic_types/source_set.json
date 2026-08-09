@@ -13,9 +13,14 @@
         "required": ["source_id", "origin_api", "title", "provenance"],
         "properties": {
           "source_id": { "type": "string" },
+          "source_hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "SHA-256 of canonical source content. Required when origin_api is 'fixture'."
+          },
           "origin_api": {
             "type": "string",
-            "enum": ["semantic_scholar", "arxiv", "openalex", "crossref", "pubmed", "chroma_local"]
+            "enum": ["semantic_scholar", "arxiv", "openalex", "crossref", "pubmed", "chroma_local", "fixture"]
           },
           "title": { "type": "string" },
           "authors": { "type": "array", "items": { "type": "string" } },
@@ -109,7 +114,20 @@
               }
             ]
           }
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "type": "object",
+              "properties": { "origin_api": { "const": "fixture" } },
+              "required": ["origin_api"]
+            },
+            "then": {
+              "type": "object",
+              "required": ["source_id", "source_hash", "origin_api", "title", "provenance"]
+            }
+          }
+        ]
       }
     },
     "ingestion_stats": {

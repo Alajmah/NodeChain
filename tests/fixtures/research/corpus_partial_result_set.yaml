@@ -1,0 +1,28 @@
+corpus_version: '1.0'
+scenario_id: partial-result-set-test
+description: Tests partial_result_set structural contract
+sources:
+- source_id: src-prs-1
+  origin_api: fixture
+  query_used: query test
+  title: Available Source
+  doi: ''
+  source_hash: bb4e7473ebf4ba4e7792743c1b98643b1dd4e6942f664e7f01422dc0685f572b
+- source_id: src-prs-2
+  origin_api: fixture
+  query_used: query test
+  title: Unavailable Source
+  doi: ''
+  source_hash: 459697815d8ad8f62dec1e636270e9a09b5e64b2d0f3191b22d3abf0a2b9f4b6
+queries:
+  query test:
+    _fault: partial_result_set
+    results:
+    - src-prs-1
+    total_available: 2
+    unavailable_source_ids:
+    - src-prs-2
+    incompleteness_reason: timeout_on_1_source
+minimum_evidence:
+  min_sources: 1
+  min_evidence_per_claim: 1

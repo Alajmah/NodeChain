@@ -1,0 +1,16 @@
+corpus_version: '1.0'
+scenario_id: timeout-after-dispatch-test
+description: Tests timeout_after_dispatch fault
+sources:
+- source_id: src-tad-1
+  origin_api: fixture
+  query_used: query test
+  title: Test Source
+  doi: ''
+  source_hash: b9f2f4743f325d0b7d194152503b422363d0833d304b69910606411f67a56a53
+queries:
+  query test:
+    _fault: timeout_after_dispatch
+minimum_evidence:
+  min_sources: 1
+  min_evidence_per_claim: 1

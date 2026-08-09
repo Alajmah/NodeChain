@@ -35,6 +35,7 @@ class TestCLISurfaceFrozen:
             "review",
             "recover",
             "api",
+            "research",
     }
 
     EXPECTED_REGISTRY_SUB = {"list", "inspect", "lock", "verify", "publish", "certified-list", "certified-inspect", "certified-verify", "deprecate", "revoke", "install", "resolve", "install-remote", "serve", "remote-build", "resolve-deps", "transparency", "federation", "reputation"}

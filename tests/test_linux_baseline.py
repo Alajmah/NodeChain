@@ -151,7 +151,7 @@ class TestNoFrozenSurfaceChanges:
         expected = {"run", "inspect", "reconcile", "resume", "presets",
                     "report", "trace", "trust", "trust-store", "deploy-receipt", "assurance", "deploy", "registry", "node",
                     "audit-bundle", "attest", "release-history", "drift", "eval",
-                    "evidence", "trace-replay", "dashboard", "compose", "policy", "marketplace", "supply-chain", "retention", "checkpoint", "graph", "console", "review", "recover", "api"}
+                    "evidence", "trace-replay", "dashboard", "compose", "policy", "marketplace", "supply-chain", "retention", "checkpoint", "graph", "console", "review", "recover", "api", "research"}
         assert set(cli.commands.keys()) == expected
 
     def test_exit_codes_unchanged(self):

@@ -319,6 +319,13 @@ def _build_trusted_adapter_registry() -> dict[str, type]:
         registry["pubmed"] = PubMedAdapter
     except ImportError:
         pass
+    # Phase 5 fixture adapter: unconditional import. Unlike the five production
+    # adapters (which have optional external dependencies and may be absent),
+    # the fixture adapter is part of the installed Phase 5 package with no
+    # optional dependency. Its absence is a packaging/qualification defect
+    # that must fail loudly at startup, not silently omit the trust binding.
+    from nodechain.adapters.search.fixture import FixtureSearchAdapter
+    registry["fixture"] = FixtureSearchAdapter
     return registry
 
 

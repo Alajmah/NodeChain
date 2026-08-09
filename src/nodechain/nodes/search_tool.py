@@ -395,10 +395,13 @@ class SearchToolNode(BaseNode):
                     # must NOT be swallowed as adapter failures. They must
                     # propagate so the coordinator/classifier can handle them.
                     raise
-                except ProvenanceError:
+                except ProvenanceError as pe:
                     # FPV1: provenance-integrity violations must propagate,
-                    # not be swallowed as adapter failures.
-                    raise
+                    # not be swallowed as adapter failures. Re-raise as a
+                    # plain Exception whose str() is exactly the stable reason
+                    # code SEARCH_PROVENANCE_MALFORMED, so the orchestrator's
+                    # NODE_FAILED event carries the exact code in reason_codes.
+                    raise Exception("SEARCH_PROVENANCE_MALFORMED") from pe
                 except SearchAdapterError as e:
                     # Structured failure from the adapter layer (v2.57.0)
                     f = e.failure
@@ -410,6 +413,8 @@ class SearchToolNode(BaseNode):
                         "attempts": f.attempts,
                         "status_code": f.status_code,
                         "latency_ms": f.latency_ms,
+                        "reason_code": getattr(f, "reason_code", "") or "",
+                        "request_hash": request_hash,
                     })
                 except Exception as e:
                     adapters_failed.append({
