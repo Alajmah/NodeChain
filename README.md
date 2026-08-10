@@ -162,6 +162,14 @@ At the current development baseline:
 - **ordinary POSIX `local_untrusted` / `remote_untrusted` node invocation is deliberately fail-closed in `SubprocessRunner.run_isolated()` pending T3 supervised routing into the generic `NodeInvoker` path**;
 - Windows does not claim equivalence to Linux PID namespaces, seccomp, procfs isolation, or cgroup semantics.
 
+### Historical seccomp compatibility anchor
+
+**Seccomp Enforcement (v1.2.2+)** introduced seccomp syscall filtering into NodeChain's Linux sandbox lineage. Later releases added namespace, cgroup, native-runner, and supervised-execution mechanisms. Current execution-path claims are narrower than that historical milestone and are documented in `BASELINE.md` and `docs/linux-deployment.md`.
+
+The historical trust-invariant lineage includes `INV-006` and `INV-007`. These identifiers remain compatibility/documentation anchors; the current enforcement model contains additional invariants and profile-specific behavior.
+
+NodeChain **does NOT provide** universal hostile-code containment merely because seccomp syscall filtering or another individual primitive is available. Security claims require the actual execution path, host profile, and proving runtime evidence.
+
 See [docs/linux-deployment.md](docs/linux-deployment.md) and [BASELINE.md](BASELINE.md#6-untrusted-execution-baseline) before making deployment or containment claims.
 
 ---
