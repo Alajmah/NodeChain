@@ -298,7 +298,43 @@ A green summary without proof that the intended capability path actually execute
 
 ---
 
-## 13. Related documents
+## 13. Historical PID Namespace / procfs compatibility anchors
+
+Older v1.x sandbox documentation and characterization tests use a compact enforcement vocabulary that remains part of the historical compatibility record. The terms below describe those earlier qualified paths; they do not override the current T3 fail-closed boundary for generic POSIX untrusted Harness Nodes.
+
+### Historical enforcement hierarchy
+
+The earlier Linux sandbox model can be read as a layered defense-in-depth stack:
+
+```text
+Layer 1 — process isolation and bounded child lifecycle
+Layer 2 — Python-level import/filesystem/subprocess/network enforcement
+Layer 3 — resource limits and cgroup controls where requested/available
+Layer 4 — namespace isolation (network, mount, PID Namespace and procfs view)
+Layer 5 — seccomp syscall filtering on qualified Linux paths
+```
+
+These layers were cumulative evidence surfaces, not interchangeable guarantees. A later/current path must still prove which layers actually executed.
+
+### PID Namespace behavior
+
+In the historical v1.5 PID Namespace path, the namespace child was designed to become **PID 1** inside the newly created PID namespace. That role matters because PID 1 has namespace-init responsibilities and different signal/reaping behavior from an ordinary process.
+
+The later v3.5.1 supervised design made the topology more explicit: the namespace init owns descendant reaping while the bootstrap/workload has a distinct verified identity. Current supervised claims should therefore use the v3.5.1 topology/evidence rather than infer behavior from the older shorthand alone.
+
+### procfs remount / namespace view
+
+The historical procfs integration paired PID namespace creation with a **procfs remount** so `/proc` could reflect namespace-local process identity rather than the host process view. Evidence fields/documentation used names such as:
+
+```text
+procfs_namespace_view_enforced
+```
+
+Again, this is a compatibility/evidence anchor for the path that implemented it. A current deployment must prove the actual `/proc`/namespace topology of the runner being qualified.
+
+---
+
+## 14. Related documents
 
 - `BASELINE.md` — current implementation truth
 - `ARCHITECTURE.md` — current execution architecture
