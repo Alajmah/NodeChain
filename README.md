@@ -203,7 +203,7 @@ See [docs/linux-deployment.md](docs/linux-deployment.md) and [BASELINE.md](BASEL
 
 ## Honest Boundaries
 
-NodeChain **does NOT** claim universal hostile-code containment merely because one sandbox primitive is available. Security claims require the actual execution path, host profile, and proving runtime evidence.
+NodeChain does NOT provide universal hostile-code containment merely because one sandbox primitive is available. Security claims require the actual execution path, host profile, and proving runtime evidence.
 
 For adversarial or fully untrusted workloads, use an appropriately isolated **VM or container** as an outer security boundary in addition to the qualified NodeChain execution controls. A container/VM does not by itself prove the inner NodeChain path either; both layers need their own qualification.
 
