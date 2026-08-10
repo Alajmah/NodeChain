@@ -8,7 +8,7 @@ NodeChain is a local-first platform for building autonomous AI systems from comp
 
 ## Start with the right document
 
-NodeChain now separates strategy, current implementation truth, architecture, roadmap, and release history.
+NodeChain now separates strategy, current implementation truth, architecture, roadmap, release history, and compatibility surfaces.
 
 | Document | Purpose |
 |---|---|
@@ -16,7 +16,8 @@ NodeChain now separates strategy, current implementation truth, architecture, ro
 | **[VISION.md](VISION.md)** | Product thesis and strategic direction |
 | **[ARCHITECTURE.md](ARCHITECTURE.md)** | Current implementation architecture, including known alternate paths and boundaries |
 | **[ROADMAP.md](ROADMAP.md)** | Future work only — no shipped-release backlog |
-| **[CHANGELOG.md](CHANGELOG.md)** | Released and unreleased change history |
+| **[CHANGELOG.md](CHANGELOG.md)** | Released change history; development truth remains in `BASELINE.md` until release preparation |
+| **[docs/current-public-surfaces.md](docs/current-public-surfaces.md)** | Current compatibility/public-surface map |
 | **[docs/ci.md](docs/ci.md)** | Hosted CI and qualification contract |
 | **[docs/documentation-authority.md](docs/documentation-authority.md)** | Rules that keep normative, descriptive, strategic, historical, and evidence documents separate |
 
@@ -224,6 +225,6 @@ Native Linux containment evidence has additional host-capability requirements an
 
 ## Documentation status
 
-Older documents and release-specific files are intentionally preserved where they are historical evidence. A historical document is not automatically a current architecture description.
+Older documents and release-specific files are intentionally preserved where they are historical evidence. A historical document is not automatically a current architecture description. `docs/frozen-surfaces.md` remains a historical v1 compatibility contract; use [docs/current-public-surfaces.md](docs/current-public-surfaces.md) for the current surface map.
 
 For the exact current-state boundary, start with **[BASELINE.md](BASELINE.md)**.
