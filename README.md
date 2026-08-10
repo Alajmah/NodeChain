@@ -190,12 +190,12 @@ The CLI surface retains policy-preset selection, including the historical/operat
 
 ```bash
 nodechain run "query" \
-  --policy-preset hardened_untrusted \
+  --policy-preset production_untrusted \
   --strict \
   --trust-check
 ```
 
-The `hardened_untrusted` preset remains a named compatibility anchor for the historical production-deployment recipe. On the pinned POSIX implementation baseline, this preset does **not** bypass the T3 safety fence for a genuinely untrusted Harness Node. A required containment path that is not available must fail closed rather than silently downgrade.
+Both `production_untrusted` and `hardened_untrusted` are named compatibility anchors for historical production-deployment recipes. On the pinned POSIX implementation baseline, neither preset bypasses the T3 safety fence for a genuinely untrusted Harness Node. A required containment path that is not available must fail closed rather than silently downgrade.
 
 See [docs/linux-deployment.md](docs/linux-deployment.md) and [BASELINE.md](BASELINE.md#6-untrusted-execution-baseline) before making deployment or containment claims.
 
