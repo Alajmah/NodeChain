@@ -228,12 +228,36 @@ execution path
 
 For each run/profile, distinguish:
 
-- capability available;
+- `namespace_available` — capability is available on the host;
 - capability requested;
 - capability actually enforced;
+- `mount_namespace_enforced` — the qualified child observed mount namespace isolation in the tested path;
 - workload actually started;
 - terminal cleanup result;
 - fallback/fail-closed behavior.
+
+### Mount namespace prototype and root filesystem hardening
+
+Earlier qualification work included a **Mount Namespace Prototype** that demonstrated:
+
+- mount namespace creation via `CLONE_NEWNS` and isolation;
+- `pivot_root` or read-only rootfs as a root-filesystem hardening primitive;
+- verification that the workload could not escape the mount namespace;
+- `mount_namespace_enforced` evidence from the qualified child in that path.
+
+These prototypes remain documented evidence of what the supervised substrate is designed to enforce. They are not automatically active in the current generic POSIX untrusted-node path, which is fail-closed pending T3.
+
+### Namespace Behavior on Proxmox LXC
+
+Historical qualification on Proxmox LXC hosts recorded specific namespace behavior:
+
+- `mount_namespace_enforced` in the LXC qualification path;
+- `namespace_available` detection for mount/PID/network on LXC hosts;
+- `namespace_mode` reporting for each namespace type tested;
+- `already_nested` detection when the host environment was itself already inside a container or namespace;
+- observed differences between full-VM and LXC nesting behavior.
+
+Proxmox LXC evidence remains valid for the hosts it was collected on. New qualification hosts must re-establish enforcement evidence rather than inheriting the historical claim.
 
 ---
 
