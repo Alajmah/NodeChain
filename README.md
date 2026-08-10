@@ -151,9 +151,25 @@ The repository also contains narrower direct-execution utilities and historical/
 
 ---
 
-## Trust and untrusted execution
+## Trust Model
 
-NodeChain distinguishes trust identity from execution permission. Package signatures, registry trust, certification, and digest matches do not automatically authorize a node to execute privileged behavior.
+NodeChain distinguishes **trust identity**, **policy authorization**, and **execution availability**. A package signature, registry record, certification, or matching digest is never sufficient on its own to authorize privileged behavior.
+
+### Trust levels
+
+| Trust level | Normal architectural role |
+|---|---|
+| `built_in` | Code inside the NodeChain trust boundary |
+| `local_trusted` | Locally trusted package/node subject to applicable policy controls |
+| `local_untrusted` | Untrusted local package requiring the configured isolation/containment path |
+| `remote_untrusted` | Remotely acquired package that remains untrusted until separately governed |
+
+Historical trust-invariant identifiers remain public compatibility anchors. Examples include:
+
+- `INV-001` — untrusted execution requires the declared isolation boundary;
+- `INV-005` — locked execution requires lockfile verification.
+
+Later versions add further invariants for profiles, sandbox capabilities, cgroups, namespaces, and recovery semantics. Use the current invariant implementation and [docs/current-public-surfaces.md](docs/current-public-surfaces.md) for field-level/current meaning.
 
 At the pinned implementation baseline:
 
@@ -168,9 +184,30 @@ At the pinned implementation baseline:
 
 The historical trust-invariant lineage includes `INV-006` and `INV-007`. These identifiers remain compatibility/documentation anchors; the current enforcement model contains additional invariants and profile-specific behavior.
 
-NodeChain **does NOT provide** universal hostile-code containment merely because seccomp syscall filtering or another individual primitive is available. Security claims require the actual execution path, host profile, and proving runtime evidence.
+### Policy preset recipe
+
+The CLI surface retains policy-preset selection, including the historical/operator recipe:
+
+```bash
+nodechain run "query" \
+  --policy-preset production_untrusted \
+  --strict \
+  --trust-check
+```
+
+On the pinned POSIX implementation baseline, this recipe does **not** bypass the T3 safety fence for a genuinely untrusted Harness Node. A required containment path that is not available must fail closed rather than silently downgrade.
 
 See [docs/linux-deployment.md](docs/linux-deployment.md) and [BASELINE.md](BASELINE.md#6-untrusted-execution-baseline) before making deployment or containment claims.
+
+---
+
+## Honest Boundaries
+
+NodeChain **does NOT** claim universal hostile-code containment merely because one sandbox primitive is available. Security claims require the actual execution path, host profile, and proving runtime evidence.
+
+For adversarial or fully untrusted workloads, use an appropriately isolated **VM or container** as an outer security boundary in addition to the qualified NodeChain execution controls. A container/VM does not by itself prove the inner NodeChain path either; both layers need their own qualification.
+
+NodeChain also does NOT currently claim managed SaaS operation, distributed execution, multi-tenant isolation, visual builder productization, or that post-v3.6 Research Workspace work shipped in v3.6.0.
 
 ---
 
@@ -217,6 +254,21 @@ Do not assume `make ci` is bit-for-bit identical to hosted CI. The current Makef
 
 Native Linux containment evidence has additional host-capability requirements and is not proven merely because GitHub-hosted CI is green.
 
+### Structured exit codes
+
+| Code | Constant | Meaning |
+|---:|---|---|
+| 0 | `EXIT_OK` | Success |
+| 1 | `EXIT_RECONCILE_ERRORS` | Reconciliation errors / lockfile drift |
+| 2 | `EXIT_NOT_FOUND` | Requested run/file not found |
+| 3 | `EXIT_RECONCILE_RECOVERY` | Recovery required |
+| 10 | `EXIT_RUN_VALIDATION` | Validation/governance failure |
+| 11 | `EXIT_RUN_PAUSED` | Paused for review |
+| 12 | `EXIT_RUN_FAILED` | Chain execution failed |
+| 13 | `EXIT_RESUME_NOT_RESUMABLE` | Run cannot be resumed |
+| 14 | `EXIT_RESUME_FAILED` | Resume failed |
+| 15 | `EXIT_TRUST_VIOLATION` | Trust invariant violation |
+
 ---
 
 ## Core principles
@@ -228,6 +280,14 @@ Native Linux containment evidence has additional host-capability requirements an
 - **Side-effect identity** — external actions keep stable operation identity across attempt, completion, failure, unknown state, recovery, and retry lineage.
 - **Governed reuse** — reusable nodes retain policy, trust, side-effect, trace, and evaluation semantics across chains.
 - **Evidence over configuration** — execution, recovery, provenance, and containment claims require proving runtime evidence.
+
+---
+
+## Status
+
+**v3.6.0 — current released package version.**
+
+The pinned implementation baseline additionally contains post-v3.6 Research Workspace development merged through PR #12 and PR #13. See `BASELINE.md` for the exact distinction; see `CHANGELOG.md` and `docs/releases/` for immutable released history.
 
 ---
 
