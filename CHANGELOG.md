@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **H0.1 — Research Workspace CLI descriptor/finalization correction.**
+  `nodechain research review` reconstructed `WorkspaceRunner` manually on the
+  fresh-process resume path, leaving `runner._run_descriptor` unset. Terminal
+  `resume()` finalizes the bundle only when `_run_descriptor` is present, so
+  CLI review/resume silently skipped terminal C5 bundle finalization. The
+  command now reconstructs through `WorkspaceRunner.from_descriptor(desc)`.
+  CLI-level regression proof added in
+  `tests/research/test_cli_review_finalization.py` (approve, reject, revise,
+  injected finalization failure, identity stability). No change to WP 5.1/WP
+  5.2 bundle semantics, resume(), finalize_bundle(), or C5 terminal-status
+  classification.
+
 ## [3.6.0] — First Public-Era Release
 
 **Release type:** feature + governance (minor).
