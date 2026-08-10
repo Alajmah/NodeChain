@@ -2,13 +2,13 @@
 
 **Document class:** Descriptive architecture  
 **Baseline date:** 2026-08-10  
-**Baseline SHA:** `af1943c24a58d80ae048b9b9d50842cf0e0b27d1`  
+**Implementation code baseline:** `af1943c24a58d80ae048b9b9d50842cf0e0b27d1`  
 **Released version at baseline:** `v3.6.0`  
 **Current-state summary:** [BASELINE.md](BASELINE.md)
 
-This document describes the architecture that actually exists in the development baseline, including important alternate paths and known authority seams. It is not the normative System Specification and it does not hide compatibility or direct-execution paths that are narrower than the primary governed runtime.
+This document describes the architecture that actually exists in the pinned implementation baseline, including important alternate paths and known authority seams. Documentation-only commits may follow the implementation SHA without changing these code facts.
 
-The previous root architecture report described v0.1.0–v1.3.1 and was explicitly historical. That report remains available in git/release history; this root document now describes the current implementation.
+The previous root architecture report described v0.1.0–v1.3.1 and was explicitly historical. That report remains available through git/release history. The root architecture document now describes the current code.
 
 ---
 
@@ -18,7 +18,7 @@ NodeChain is built around one central idea:
 
 > Autonomous work should execute through reusable capability units whose contracts, permissions, external effects, evidence, recovery, and quality are part of the execution model.
 
-The primary architecture is therefore not simply a graph scheduler. It is a layered governed runtime:
+The primary architecture is a layered governed runtime:
 
 ```text
 User / Operator / Product Surface
@@ -44,42 +44,42 @@ state events · invocation ledger · side-effect ledger · decisions · trace ·
 
 ### InvocationEnvelope / EnvelopeResponse
 
-The universal node-call boundary. Runtime context, capability grants, run/chain/node/step identity, and payload travel through the envelope rather than through arbitrary shared state.
+The universal node-call boundary. Runtime context, capability grants, run/chain/node/step identity, and payload travel through the envelope instead of relying on arbitrary shared process state.
 
 ### NodeManifest and NodeContract
 
-Describe node identity, version, type, entry/exit requirements, typed ports, side effects, and capability requirements. Contract preflight occurs before normal chain execution.
+Describe node identity, version, type, entry/exit requirements, typed ports, side effects, and capability requirements. Contract preflight occurs before normal governed execution.
 
 ### Typed ports
 
-Connections are semantic, not merely positional. Port/schema compatibility is validated so a graph cannot be treated as valid solely because two functions happen to accept dictionaries.
+Connections are semantic, not merely positional. Port/schema compatibility is validated so a graph cannot be considered safe just because adjacent Python functions both accept dictionaries.
 
 ### ChainBlueprint
 
-Declarative graph definition including ordered nodes, connections, branches, joins, loops, gates, invariants, and configuration.
+Declarative graph definition including nodes, connections, branches, joins, loops, gates, invariants, and configuration.
 
 ### Harness Node
 
-The reusable capability unit. A node may be built-in or packaged; trust and packaging affect admission/execution policy but do not replace the node's contract.
+The reusable capability unit. A node may be built-in or packaged; trust and packaging affect admission/execution requirements but do not replace the node's contract.
 
 ---
 
 ## 3. Primary governed runtime
 
-The canonical runtime composition root is `src/nodechain/runtime/orchestrator.py`.
+The canonical execution composition root is `src/nodechain/runtime/orchestrator.py`.
 
 A simplified normal-run flow is:
 
 ```text
 run(query)
   ↓
-mark running / emit chain start
+chain start
   ↓
 contract preflight
   ↓
 blueprint + governance invariant checks
   ↓
-scheduler determines next node
+scheduler selects next node
   ↓
 allocate invocation identity / step
   ↓
@@ -106,16 +106,14 @@ branch / loop / review routing
 next node or terminalize
 ```
 
-The resume path reconstructs durable state and continues through corresponding scheduling, policy, invocation, validation, side-effect, review, and persistence behavior.
+The resume path reconstructs durable state and continues through corresponding scheduling, policy, invocation, validation, side-effect, review, recovery, and persistence behavior.
 
-### Extracted runtime controllers
+Important runtime responsibilities already have named boundaries/controllers, including:
 
-The orchestrator remains large but important responsibilities already have named boundaries, including:
-
-- contract preflight controller;
-- node output validation controller;
-- policy gate controller;
-- side-effect journal controller;
+- contract preflight;
+- node-output validation;
+- policy gating;
+- side-effect journaling;
 - scheduler / branch executor / loop enforcer;
 - failure manager;
 - review manager;
@@ -123,38 +121,31 @@ The orchestrator remains large but important responsibilities already have named
 - persistence coordinator / StateManager stores;
 - step allocator.
 
-The architectural goal is not decomposition for its own sake. Extraction is valuable when it creates one explicit authority or a testable behavioral seam.
+The architectural goal is not decomposition for its own sake. Extraction is useful when it produces one explicit authority or a testable behavioral seam.
 
 ---
 
 ## 4. Scheduling, branches, loops, and review
 
-The runtime supports ordered node execution plus non-linear control flow.
+The runtime supports ordered execution plus non-linear control flow.
 
 ### Branch/join behavior
 
-Supported wait conditions include:
-
-- `all`
-- `any`
-- `first`
-- `quorum`
-
-Result/cancellation policies include allow-all, ignore-late, cancel-on-first, first-success-only, and quorum-specific post-threshold behavior.
+Supported wait conditions include `all`, `any`, `first`, and `quorum`. Result/cancellation behavior includes allow-all, ignore-late, cancel-on-first, first-success-only, and quorum-specific post-threshold policies.
 
 ### Loops
 
-Loops are bounded by declared iteration limits and may include cost limits and declarative entry/exit conditions. The runtime must never rely on an unbounded natural-language loop instruction as its only safety bound.
+Loops are bounded by declared iteration limits and may include cost limits and declarative entry/exit conditions. Natural-language intent is not accepted as the only execution bound.
 
 ### Human review
 
-Risk/review routing can pause a run and later resume it from durable state. Review decisions and recovery actions are expected to be durable evidence, not ephemeral UI clicks.
+Risk/review routing can pause a run and later resume it from durable state. Review decisions and recovery actions are durable evidence, not merely UI state.
 
 ---
 
 ## 5. Policy and capability governance
 
-Policy is evaluated as part of execution, not as a post-run report.
+Policy is evaluated as part of execution rather than added only as a post-run report.
 
 Important policy surfaces include:
 
@@ -169,9 +160,9 @@ Important policy surfaces include:
 - trust level;
 - sensitivity/retention/audit.
 
-A node's manifest/contract describes requirements; the policy engine and runtime decide whether those requirements are admissible in the current execution context.
+A manifest/contract declares requirements. Policy and runtime context decide whether those requirements are admissible for a particular invocation.
 
-Package trust, signature validity, registry status, and certification are inputs to governance. None of them independently imply execution permission.
+Package trust, signature validity, registry status, and certification are governance inputs. None independently grants execution permission.
 
 ---
 
@@ -191,15 +182,15 @@ Important persistent concepts include:
 - trace persistence/evidence;
 - product-specific workspace records and bundles.
 
-### Current authority seam
+### Current state-authority seam
 
-The primary runtime still directly mutates some `ChainState` fields before or around persistence calls. This is not automatically incorrect—transactions need in-memory preparation—but it means the codebase does not yet have one explicit state-transition coordinator through which every authoritative transition passes.
+The primary runtime still directly mutates some `ChainState` fields before or around persistence calls. That is not automatically incorrect—transactions require provisional in-memory preparation—but the codebase does not yet express every authoritative transition through one named transition coordinator.
 
-The desired invariant is:
+The intended invariant is:
 
-> An in-memory calculation may be provisional; a transition is authoritative only after the declared durable boundary accepts it.
+> An in-memory calculation may be provisional; a transition becomes authoritative only when its declared durable boundary accepts it.
 
-This is tracked in `ROADMAP.md` Horizon 0 rather than hidden behind a claim that in-memory and durable state are literally identical at every instant.
+This is tracked in `ROADMAP.md` Horizon 0.
 
 ---
 
@@ -211,25 +202,19 @@ The trace truth rule is:
 
 > No event may claim execution or recovery that did not actually occur.
 
-Runtime facts must come from runtime boundaries. Fixture configuration, intended behavior, or later inspection cannot be used to fabricate an execution event after the fact.
+Runtime facts must come from runtime boundaries. Fixture configuration, expected behavior, or later inference cannot be used to fabricate a proving event.
 
-### TraceEmitter and reconciliation
+### Current trace-authority seam
 
-The primary architecture uses a trace emitter plus reconciliation/inspection surfaces. Durable evidence should bind to stable event identities so state/ledger/evidence projections can point back to proving events.
+The primary architecture uses a trace emitter plus reconciliation/inspection surfaces, but at the pinned implementation baseline at least one resume validation branch still calls `self.trace.add_event(...)` directly for a validation-failure event. The repository is therefore not yet at the literal end state where every authoritative event passes through one durability-aware emission API.
 
-### Current authority seam
-
-At the baseline SHA, at least one resume validation branch still calls `self.trace.add_event(...)` directly for a validation-failure event. Therefore the repository is not yet at the literal end state of “every authoritative event enters through one durability-aware emission API.”
-
-That remaining seam is tracked explicitly in Horizon 0.
+That remaining seam is tracked in Horizon 0.
 
 ---
 
 ## 8. Side-effect lifecycle and recovery
 
-External action truth is tracked independently from whether a node invocation as a whole succeeded.
-
-The core lifecycle is:
+External action truth is tracked separately from node success.
 
 ```text
 planned
@@ -239,9 +224,9 @@ started
 completed | failed | unknown
 ```
 
-`unknown` represents the crash/uncertainty window where NodeChain cannot safely infer whether an external effect happened.
+`unknown` represents the crash/uncertainty window where NodeChain cannot safely infer whether an external action occurred.
 
-Recovery evolved to preserve that uncertainty rather than erase it:
+Recovery preserves that uncertainty:
 
 ```text
 unknown original attempt
@@ -255,9 +240,7 @@ governed child retry attempt
 normal planned → started → terminal lifecycle
 ```
 
-The original unknown/retry-authorized history remains immutable. Recovery creates lineage rather than rewriting the past.
-
-Replay capsules, adapter attestation, fencing/claims, dispatch-attempt boundaries, and recovery execution actions support this governed retry model.
+The original history remains immutable. Replay capsules, adapter attestation, fencing/claims, dispatch-attempt boundaries, and recovery execution actions create explicit retry lineage rather than rewriting the past.
 
 ---
 
@@ -265,26 +248,20 @@ Replay capsules, adapter attestation, fencing/claims, dispatch-attempt boundarie
 
 `runtime/node_invoker.py` is the normal node-call boundary used by the orchestrator.
 
-For in-process paths it executes nodes with the applicable Python-level enforcement contexts. For isolated non-built-in nodes it delegates to `SubprocessRunner`.
+For in-process paths it executes nodes with applicable Python-level enforcement contexts. For isolated non-built-in nodes it delegates to `SubprocessRunner`.
 
-### Trust levels
-
-The codebase distinguishes at least:
+Trust levels include:
 
 - `built_in`
 - `local_trusted`
 - `local_untrusted`
 - `remote_untrusted`
 
-Trust level affects execution/isolation requirements but does not supersede policy.
+Trust identity affects required execution controls but does not supersede policy.
 
-### Python-level enforcement
+The Python-level trust runtime includes import, filesystem, subprocess, and network enforcement hooks for applicable paths.
 
-The trust runtime includes import, filesystem, subprocess, and network enforcement hooks for applicable non-built-in execution.
-
-### Windows isolation path
-
-Windows uses process/subprocess containment mechanisms appropriate to that platform, including bounded process execution and Job Object support in relevant paths. Windows is not claimed to provide Linux namespace/seccomp/cgroup equivalence.
+Windows uses platform-appropriate process controls, including bounded subprocess handling and Job Objects in relevant execution paths. Windows is not claimed to provide Linux namespace/seccomp/cgroup equivalence.
 
 ---
 
@@ -302,20 +279,20 @@ Relevant modules include:
 - `runtime/pid_namespace_topology.py`
 - supporting streaming/containment helpers.
 
-Important design properties include:
+Important properties include:
 
 - external launcher / namespace-init / bootstrap topology;
 - PID namespace identity proof;
 - exact `PTRACE_EVENT_EXEC` as workload-start authority;
 - event-loop-owned protocol transport;
-- bounded stdout/stderr/config/payload ownership;
+- bounded config/stdout/stderr/payload ownership;
 - deterministic terminal cleanup;
 - namespace-init reaping;
 - independent host process-group containment.
 
-### The current integration boundary
+### Current generic integration boundary
 
-The generic path is:
+The ordinary isolated-node route is:
 
 ```text
 Orchestrator
@@ -341,7 +318,7 @@ Documentation and deployment profiles must preserve this distinction.
 
 ## 11. Registry, package, and trust architecture
 
-NodeChain includes a broad reusable-node supply-chain layer:
+NodeChain includes a reusable-node supply-chain layer:
 
 ```text
 node/package source
@@ -361,7 +338,7 @@ install / consumption policy
 runtime trust + capability admission
 ```
 
-Remote-registry rules deliberately separate concepts that are often conflated:
+Remote-registry rules intentionally separate concepts that are often conflated:
 
 - remote install does not imply execution permission;
 - publisher signature does not imply safety;
@@ -370,7 +347,7 @@ Remote-registry rules deliberately separate concepts that are often conflated:
 - certification does not bypass sandboxing;
 - `remote_untrusted` does not self-upgrade to `local_trusted`.
 
-This is a substantial platform capability, but the current implementation is still primarily a developer/operator substrate rather than a polished enterprise registry service.
+The substrate is substantial, but the current product is still primarily developer/operator oriented rather than a managed enterprise registry service.
 
 ---
 
@@ -395,11 +372,11 @@ goal_interpreter
 → trace_collector
 ```
 
-It is designed around live/general research adapters and normal runtime memory/trace semantics.
+It is designed around the normal runtime and general/live academic search adapters.
 
 ### 12.2 Governed Research Workspace
 
-The post-v3.6 Workspace runner constructs a separate linear product-proof blueprint:
+The post-v3.6 product-proof runner constructs a separate linear path:
 
 ```text
 goal_interpreter
@@ -415,22 +392,22 @@ goal_interpreter
 → response_generator
 ```
 
-The sealed corpus is loaded and canonically digested. The fixture adapter is wrapped by the ordinary dispatch guard. Fault injection is divided between lane admission (pre-dispatch) and adapter behavior (post-dispatch), allowing runtime evidence to distinguish:
+The sealed corpus is canonically digested. The fixture adapter is wrapped by the ordinary dispatch guard. Runtime evidence distinguishes the accepted stable fault codes:
 
 - `LANE_ADMISSION_REJECTED`
 - `SEARCH_TIMEOUT_AFTER_DISPATCH`
 - `SEARCH_PROVENANCE_MALFORMED`
 - `SEARCH_PARTIAL_RESULT_SET`
 
-Fault records are projected from recognized trace events rather than from fixture declarations.
+Fault records are projections of recognized trace evidence rather than fixture declarations.
 
-`QualifiedSourceLinker` binds qualified source decisions to actual ingested source identity/hash evidence before synthesis consumes them.
+`QualifiedSourceLinker` binds qualification decisions to actual ingested source identity/hash evidence before synthesis consumes the set.
 
-Terminal output is finalized into `ResearchWorkspaceBundleV1`, whose member documents and manifest are integrity checked by the corresponding bundle reader.
+Terminal output is finalized into `ResearchWorkspaceBundleV1`, whose members and manifest are integrity-checked by the bundle reader.
 
 ### Current CLI seam
 
-The library provides `WorkspaceRunner.from_descriptor()` for fresh reconstruction and restores the descriptor used by terminal finalization. The current `nodechain research review` CLI manually constructs a runner rather than using that classmethod, so the descriptor-dependent terminal finalization branch is not guaranteed on that specific CLI reconstruction path. This is a bounded Horizon 0 integration correction.
+`WorkspaceRunner.from_descriptor()` restores the descriptor used by terminal finalization. `nodechain research review` currently reconstructs a runner manually instead of using that descriptor-aware classmethod, so terminal bundle finalization is not guaranteed on that specific CLI reconstruction path. This is the bounded H0.1 correction in `ROADMAP.md`.
 
 ---
 
@@ -440,19 +417,15 @@ NodeChain evaluation has multiple evidence classes.
 
 ### Structural/generic evaluation
 
-The generic evaluation system can validate suite/case structure, expected properties, thresholds, signatures, certification lifecycle, and custom runner results.
-
-The default runner is structural; default metric values are not evidence that the full governed runtime executed.
+The generic evaluation system supports suite/case structure, expected properties, thresholds, signatures, certification lifecycle, and custom runners. Its default runner is structural; default metric values are not proof that the full governed runtime executed.
 
 ### Research quality evaluation
 
-`runtime/research_eval_runner.py` directly executes the synthesis → claim validation → risk → response segment under `MockModelAdapter` for deterministic quality measurement.
-
-It explicitly does not execute the complete orchestrator.
+`runtime/research_eval_runner.py` directly executes the synthesis → claim validation → risk → response segment under `MockModelAdapter` for deterministic quality measurement. It explicitly does not execute the complete orchestrator.
 
 ### Desired consolidation
 
-When an evaluation claim depends on policy, trace, side effects, review, recovery, persistence, or containment, the evaluator should consume evidence from the complete governed runtime. Direct-node evaluation remains useful for local node quality and deterministic regression.
+When an evaluation claim depends on policy, trace, side effects, review, recovery, persistence, or containment, the evaluator should consume evidence from complete governed execution. Direct-node evaluation remains useful for node-quality regression.
 
 ---
 
@@ -469,52 +442,96 @@ The repository exposes several operator/developer interfaces:
 - Research Workspace commands;
 - FastAPI local read-only operator API with bearer-token protection.
 
-The CLI `--help` output is the authoritative current command inventory. Documentation should avoid volatile command-count claims unless generated from the executable surface.
+The executable CLI `--help` tree is the authoritative current command inventory. Hand-maintained global command counts are intentionally avoided.
 
 ---
 
 ## 15. Known alternate or narrower execution paths
 
-The repository contains utilities that must not be confused with the primary governed runtime.
-
 ### `runtime/chain_orchestrator.py`
 
-A multi-chain composition utility includes `execute_sub_chain()`, which builds an envelope and directly calls `node.execute()` with a comment that full chain execution should use the Orchestrator.
+A multi-chain composition utility includes `execute_sub_chain()`, which constructs an envelope and directly calls `node.execute()`, while its own documentation says full chain execution should use the Orchestrator.
 
-This is a real parallel execution seam. It should either delegate governed execution or remain explicitly classified as a narrow/non-production utility.
+This is a real parallel execution seam. It should delegate governed execution or remain explicitly classified as a narrow/non-production utility.
 
 ### `runtime/research_eval_runner.py`
 
-Directly invokes selected research nodes for deterministic evaluation. Useful, but not full runtime execution.
+Directly invokes selected research nodes for deterministic evaluation. Useful, but not full-runtime execution.
 
 ### Sandbox/native command runners
 
-Some sandbox/native command-runner paths have their own qualification evidence. A green result for one runner/profile is not automatically evidence for the generic Harness Node invocation path.
+Some native/sandbox command-runner paths have their own qualification evidence. A green result for one runner/profile is not automatically evidence for the generic Harness Node invocation path.
 
 ---
 
 ## 16. Deployment profiles
 
-Architecture claims must name the execution profile.
-
 | Profile | Intended role | Baseline claim |
 |---|---|---|
 | Local trusted development | SDK/CLI/runtime development and trusted-node execution | Supported |
-| GitHub-hosted CI | Cross-platform regression, packaging, publication-tree, non-privileged behavior | Supported; not privileged Linux containment proof |
+| GitHub-hosted CI | Cross-platform regression, packaging, Publication Tree, non-privileged behavior | Supported; not privileged Linux containment proof |
 | Privileged Linux verification | Native/supervised containment qualification on a capability-qualified host | Supported as a qualification profile |
 | Generic POSIX untrusted Harness Node execution | Ordinary `NodeInvoker` untrusted path | Fail-closed pending T3 routing |
-| Windows control-plane/development | CLI/SDK/general runtime behavior without Linux-equivalent containment claims | Supported within platform-specific limits |
+| Windows control-plane/development | CLI/SDK/general runtime behavior without Linux-equivalent containment claims | Supported within platform limits |
 | Managed multi-tenant service | Enterprise hosted execution | Not implemented |
 
-See `docs/linux-deployment.md` for operational details.
+See `docs/linux-deployment.md` for operational detail.
 
 ---
 
-## 17. Architectural debt that matters
+## 17. Historical trust/sandbox compatibility lineage
 
-The important remaining architecture work is authority-related, not aesthetic:
+The current architecture supersedes the historical root report as a current-state document, but some historical security terms remain compatibility/test anchors. They are recorded here explicitly without turning them into claims about every current execution path.
 
-1. join generic POSIX untrusted node invocation to the supervised backend;
+### Historical enforcement ordering
+
+The v1 sandbox lineage documented child bootstrap ordering approximately as:
+
+```text
+Phase 1:  import trusted SDK/bootstrap dependencies
+Phase 1b: Apply seccomp filter where the historical profile required it
+Phase 1c: activate Python-level import/filesystem/subprocess/network enforcement
+Phase 2:  import the untrusted node implementation under enforcement
+Phase 3:  execute the node
+Phase 4:  report/deactivate
+```
+
+Later native/supervised designs changed important process and containment boundaries; the current T3 status is documented above.
+
+### Historical layer labels
+
+Compatibility documentation used the following layer labels:
+
+- **Layer 6 — Seccomp syscall filtering** on qualified Linux paths;
+- **Layer 7 — Process isolation**;
+- **Layer 8 — Trust invariants**;
+- **Layer 9 — CI/trust gates**.
+
+The broader sandbox lineage also includes **Resource limits**, **Namespaces**, **Cgroups**, Python-level API enforcement, and historical discussion of **AppArmor** as an unimplemented/planned outer control. These terms describe the evolution of the sandbox architecture; present-tense support claims must still name the actual execution path/profile.
+
+### Historical invariant identifiers
+
+The v1 trust-surface contract includes at least:
+
+```text
+INV-001
+INV-002
+INV-003
+INV-004
+INV-005
+INV-006
+INV-007
+```
+
+Later releases added more invariant identifiers. Exact current meanings live in the corresponding invariant/trust implementation and compatibility documents.
+
+---
+
+## 18. Architectural debt that matters
+
+The important remaining architecture work is authority-related rather than aesthetic:
+
+1. join generic POSIX untrusted-node invocation to the supervised backend;
 2. remove/classify direct node execution outside the primary orchestrator;
 3. route all authoritative trace events through one durable emission boundary;
 4. make the state-transition durability boundary explicit and singular;
@@ -525,7 +542,7 @@ Large files may be refactored when that work creates a stable authority or testa
 
 ---
 
-## 18. Historical architecture
+## 19. Historical architecture
 
 Older architecture reports remain valuable historical evidence for the system's evolution. They should be read against their release/tag, not used to infer current implementation status.
 
