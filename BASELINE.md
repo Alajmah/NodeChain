@@ -4,25 +4,25 @@
 **Status:** Active development truth  
 **Baseline date:** 2026-08-10  
 **Released version:** `v3.6.0`  
-**Development baseline:** `master@af1943c24a58d80ae048b9b9d50842cf0e0b27d1`  
+**Implementation code baseline:** `af1943c24a58d80ae048b9b9d50842cf0e0b27d1` (the `master` code state traced before this documentation-only rebaseline)  
 **Supersedes for current-state claims:** implementation/status sections in older README, VISION, ROADMAP, and architecture snapshots
 
-This document answers one question: **what does the NodeChain codebase actually contain and support at the baseline SHA?**
+This document answers one question: **what does the NodeChain codebase actually contain and support at the pinned implementation baseline?** Documentation-only commits may follow this SHA without changing the implementation facts recorded here.
 
-It is descriptive, not normative. The NodeChain System Specification defines intended platform semantics; `VISION.md` defines strategic direction; `CHANGELOG.md` and `docs/releases/` record released history. When a descriptive claim conflicts with code at the pinned SHA, the code is authoritative and this file must be corrected.
+It is descriptive, not normative. The NodeChain System Specification defines intended platform semantics; `VISION.md` defines strategic direction; `CHANGELOG.md` and `docs/releases/` record released history. When a descriptive claim conflicts with code at the pinned implementation SHA, the code is authoritative and this file must be corrected.
 
 ---
 
-## 1. Release baseline vs development baseline
+## 1. Release baseline vs implementation baseline
 
-NodeChain has two legitimate current anchors and they must not be conflated.
+NodeChain has two legitimate anchors and they must not be conflated.
 
 | Anchor | Value | Meaning |
 |---|---|---|
 | Released product baseline | `v3.6.0` | Latest packaged/released version represented by `pyproject.toml` and `nodechain.__version__` |
-| Development baseline | `af1943c24a58d80ae048b9b9d50842cf0e0b27d1` | Current `master`; includes post-v3.6 work merged in PR #12 and PR #13 |
+| Implementation code baseline | `af1943c24a58d80ae048b9b9d50842cf0e0b27d1` | `master` code state traced for this rebaseline; includes post-v3.6 work merged in PR #12 and PR #13 |
 
-The development baseline includes the `ResearchWorkspaceBundleV1` contract and the governed Research Workspace runner. Those capabilities are **post-v3.6 development state**, not retroactively part of the v3.6.0 release.
+The implementation baseline includes the `ResearchWorkspaceBundleV1` contract and the governed Research Workspace runner. Those capabilities are **post-v3.6 development state**, not retroactively part of the v3.6.0 release.
 
 ---
 
@@ -71,7 +71,7 @@ It is designed for the normal runtime and the five academic search adapters: Sem
 
 ### 3.2 Governed Research Workspace
 
-The development-baseline Research Workspace is a separate product-proof path built around a sealed fixture corpus:
+The implementation-baseline Research Workspace is a separate product-proof path built around a sealed fixture corpus:
 
 ```text
 goal_interpreter
@@ -208,7 +208,7 @@ For exact verification semantics, see `docs/ci.md`.
 
 The System Specification remains the normative architecture target. The implementation should be mapped to it rather than rewriting the specification to match every temporary code seam.
 
-| System Specification phase | Development-baseline assessment |
+| System Specification phase | Implementation-baseline assessment |
 |---|---|
 | 1. Formal Foundation | Mature / substantially implemented |
 | 2. NodeChain Kernel | Mature operational core; singular-authority cleanup remains |
@@ -246,13 +246,13 @@ NodeChain does not currently claim:
 
 | Document | Class | Answers |
 |---|---|---|
-| `BASELINE.md` | Descriptive | What is true in the current development code? |
+| `BASELINE.md` | Descriptive | What is true in the pinned current implementation code? |
 | `VISION.md` | Strategic | Why does NodeChain exist and what is it becoming? |
 | NodeChain System Specification | Normative | What must the complete platform mean? |
 | Reference Implementation | Historical normative reference | What did the original Research & Decision Assistant design require? |
 | `ARCHITECTURE.md` | Descriptive architecture | How is the current code arranged, including known alternate paths? |
 | `ROADMAP.md` | Future work | What remains after this baseline? |
-| `CHANGELOG.md` | Release history | What changed in each released/unreleased line? |
+| `CHANGELOG.md` | Release history | What changed in released lines and future release-preparation records? |
 | `docs/ci.md` | Operational contract | What evidence do CI and release gates provide? |
 | `docs/releases/*` | Release record | What was true for a specific immutable release? |
 
