@@ -12,7 +12,7 @@ NodeChain now separates strategy, current implementation truth, architecture, ro
 
 | Document | Purpose |
 |---|---|
-| **[BASELINE.md](BASELINE.md)** | Canonical description of what the current development code actually supports |
+| **[BASELINE.md](BASELINE.md)** | Canonical description of what the pinned implementation code actually supports |
 | **[VISION.md](VISION.md)** | Product thesis and strategic direction |
 | **[ARCHITECTURE.md](ARCHITECTURE.md)** | Current implementation architecture, including known alternate paths and boundaries |
 | **[ROADMAP.md](ROADMAP.md)** | Future work only — no shipped-release backlog |
@@ -21,12 +21,12 @@ NodeChain now separates strategy, current implementation truth, architecture, ro
 | **[docs/ci.md](docs/ci.md)** | Hosted CI and qualification contract |
 | **[docs/documentation-authority.md](docs/documentation-authority.md)** | Rules that keep normative, descriptive, strategic, historical, and evidence documents separate |
 
-### Release vs development baseline
+### Release vs implementation baseline
 
 - **Released version:** `v3.6.0`
-- **Current development baseline:** `master@af1943c24a58d80ae048b9b9d50842cf0e0b27d1`
+- **Implementation code baseline traced for this rebaseline:** `af1943c24a58d80ae048b9b9d50842cf0e0b27d1`
 
-The development baseline includes the post-v3.6 `ResearchWorkspaceBundleV1` contract and governed Research Workspace merged in PR #12 and PR #13. Those features are not retroactively part of the v3.6.0 release.
+That SHA is the `master` code state examined before this documentation-only wave. The implementation baseline includes the post-v3.6 `ResearchWorkspaceBundleV1` contract and governed Research Workspace merged in PR #12 and PR #13. Those features are not retroactively part of the v3.6.0 release. Documentation-only commits may follow the pinned implementation SHA without changing the implementation facts.
 
 ---
 
@@ -108,7 +108,7 @@ Its search tool is designed around five academic adapters:
 
 The chain includes source-quality looping, risk/review routing, governed memory decisions, and complete runtime state/trace surfaces.
 
-### 2. Governed Research Workspace — development baseline
+### 2. Governed Research Workspace — post-v3.6 implementation baseline
 
 The post-v3.6 Research Workspace is a deterministic product-proof surface using a sealed fixture corpus and a terminal integrity-checked evidence bundle. It adds an explicit `qualified_source_linker` between source qualification and synthesis.
 
@@ -121,7 +121,7 @@ nodechain research run tests/fixtures/research/brief_basic.yaml \
 
 The workspace proves a different set of properties from the live academic-search chain: sealed source identity, zero-network fixture execution, guarded dispatch, trace-derived fault truth, qualified-source hash continuity, durable review/resume evidence, and terminal `ResearchWorkspaceBundleV1` finalization.
 
-**Current development-boundary note:** the `nodechain research review` CLI reconstructs the runner differently from the descriptor-aware library path. The terminal bundle-finalization branch depends on the descriptor being restored, so the CLI review/resume wiring requires a bounded correction before that command is claimed as authoritative end-to-end bundle production. See [BASELINE.md](BASELINE.md#4-known-research-workspace-integration-gap).
+**Current implementation-boundary note:** the `nodechain research review` CLI reconstructs the runner differently from the descriptor-aware library path. The terminal bundle-finalization branch depends on the descriptor being restored, so the CLI review/resume wiring requires a bounded correction before that command is claimed as authoritative end-to-end bundle production. See [BASELINE.md](BASELINE.md#4-known-research-workspace-integration-gap).
 
 ---
 
@@ -155,7 +155,7 @@ The repository also contains narrower direct-execution utilities and historical/
 
 NodeChain distinguishes trust identity from execution permission. Package signatures, registry trust, certification, and digest matches do not automatically authorize a node to execute privileged behavior.
 
-At the current development baseline:
+At the pinned implementation baseline:
 
 - built-in and trusted paths can execute through the ordinary runtime according to policy;
 - the hardened supervised Linux execution substrate exists;
@@ -235,4 +235,4 @@ Native Linux containment evidence has additional host-capability requirements an
 
 Older documents and release-specific files are intentionally preserved where they are historical evidence. A historical document is not automatically a current architecture description. `docs/frozen-surfaces.md` remains a historical v1 compatibility contract; use [docs/current-public-surfaces.md](docs/current-public-surfaces.md) for the current surface map.
 
-For the exact current-state boundary, start with **[BASELINE.md](BASELINE.md)**.
+For the exact implementation-state boundary, start with **[BASELINE.md](BASELINE.md)**.
