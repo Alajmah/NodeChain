@@ -160,16 +160,38 @@ NodeInvoker → SubprocessRunner generic Harness Node path
 
 The T3 fence exists precisely because those integration boundaries must be proven rather than inferred.
 
-### Historical seccomp evidence-field anchors
+### Historical capability-field anchors
 
-Earlier qualified sandbox reports recorded fields such as:
+Earlier Linux sandbox qualification reports used fields such as:
+
+| Field | Historical evidence meaning |
+|---|---|
+| `resource_limits_enforced` | RLIMIT/resource controls were applied in the path being reported |
+| `syscall_filtering_enforced` | syscall filtering was actually active in the qualified child/workload path |
+| `seccomp_enforced` | the named seccomp profile was applied in that path |
+| `network_namespace_enforced` | the qualified child observed the requested network namespace |
+| `pid_namespace_enforced` | the qualified child executed in the requested PID namespace path |
+| `procfs_namespace_view_enforced` | the qualified path established the intended namespace-local procfs view |
+
+Earlier qualified reports included values such as:
 
 ```text
 seccomp_enforced: True
 syscall_filtering_enforced: True
 ```
 
-Those names remain useful evidence/compatibility anchors. Their presence in a historical report does **not** mean every current execution path emits `True`; current claims must bind them to the actual runner/profile that produced the evidence.
+These names remain useful evidence/compatibility anchors. Their presence in a historical report does **not** mean every current execution path emits `True`; current claims must bind them to the actual runner/profile that produced the evidence.
+
+### Seccomp tooling for historical/qualification profiles
+
+Some historical Linux qualification paths used the system development package plus Python seccomp bindings:
+
+```bash
+sudo apt-get install -y libseccomp-dev
+pip install seccomp
+```
+
+A successful import/install is only a prerequisite. It is not proof that a particular workload crossed the seccomp-enforced execution boundary.
 
 ---
 
@@ -236,11 +258,44 @@ Do not relabel this example as a generic untrusted-workload production profile w
 
 ---
 
-## 10. Production service guidance at this baseline
+## 10. Proxmox, full VM, and LXC qualification guidance
+
+NodeChain has historical qualification evidence from Proxmox environments, including LXC-based verification hosts. That history is useful evidence for those exact hosts, but virtualization type changes containment semantics and must be recorded with each new qualification.
+
+For a clean Linux containment qualification profile, a **full VM** is generally easier to reason about than nested **LXC**, because a VM owns a complete guest-kernel environment while LXC shares the host kernel and can introduce namespace, cgroup-delegation, seccomp, and capability constraints.
+
+A reasonable fresh qualification host is an Ubuntu 24.04 LTS VM or another explicitly supported Linux distribution with the required kernel capabilities. An LXC host can still be used when its nesting/privilege configuration is deliberate and the evidence records those facts.
+
+Do not infer “full VM stronger than LXC” as a proof of a particular NodeChain control: the NodeChain path must still emit/retain its own enforcement evidence.
+
+---
+
+## 11. Production service guidance at this baseline
 
 ### Trusted/internal workload service
 
 A controlled Linux service account may run NodeChain for built-in/trusted workflows, subject to normal OS hardening, secrets management, filesystem permissions, network policy, and the NodeChain policy/trust model.
+
+A minimal **systemd** example for a trusted/internal service profile might look like:
+
+```ini
+[Unit]
+Description=NodeChain trusted internal service
+After=network.target
+
+[Service]
+Type=simple
+User=nodechain
+WorkingDirectory=/opt/nodechain
+Environment=NODECHAIN_PROVIDER=mock
+ExecStart=/opt/nodechain/.venv/bin/nodechain api serve --host 127.0.0.1 --port 8765
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+This service example is an outer process-management recipe. It does not enable the generic POSIX untrusted Harness Node path or prove containment.
 
 ### Untrusted Harness Node service
 
@@ -264,7 +319,7 @@ Until T3 closes and the integrated path is qualified, the generic untrusted-node
 
 ---
 
-## 11. Windows relationship
+## 12. Windows relationship
 
 Windows is a separate platform profile for NodeChain development, CLI, package validation, and applicable runtime behavior.
 
@@ -279,7 +334,7 @@ Windows process/Job Object controls should be documented and qualified as Window
 
 ---
 
-## 12. Evidence to retain for a qualified Linux deployment
+## 13. Evidence to retain for a qualified Linux deployment
 
 For a deployment that makes containment claims, retain at least:
 
@@ -298,7 +353,7 @@ A green summary without proof that the intended capability path actually execute
 
 ---
 
-## 13. Historical PID Namespace / procfs compatibility anchors
+## 14. Historical PID Namespace / procfs compatibility anchors
 
 Older v1.x sandbox documentation and characterization tests use a compact enforcement vocabulary that remains part of the historical compatibility record. The terms below describe those earlier qualified paths; they do not override the current T3 fail-closed boundary for generic POSIX untrusted Harness Nodes.
 
@@ -334,7 +389,29 @@ Again, this is a compatibility/evidence anchor for the path that implemented it.
 
 ---
 
-## 14. Related documents
+## 15. Hardened Sandbox Profile — historical compatibility table
+
+The `hardened_untrusted` profile and its invariant names remain part of NodeChain's compatibility/documentation lineage. This table records the historical intent of the profile; it does **not** override the current T3 fence for generic POSIX `local_untrusted` / `remote_untrusted` Harness Nodes.
+
+| Layer / invariant | Historical requirement | Required in hardened profile? |
+|---|---|---|
+| `INV-001` | Untrusted execution requires process/subprocess isolation | Required |
+| `INV-002` | Untrusted execution requires child policy enforcement | Required |
+| `INV-003` | Isolated subprocess execution requires filtered environment | Required |
+| `INV-004` | Isolated subprocess execution requires temp/CWD isolation | Required |
+| `INV-005` | Locked execution requires lockfile verification | Required when locked |
+| `INV-006` | Required sandbox profile must be the profile actually used | Required |
+| `INV-007` | Required sandbox capability, historically including seccomp in Linux `os_profile`, must be enforced | Required |
+| `INV-009` | Requested cgroup limits must be enforced | Required |
+| `INV-011` | Required network namespace must be enforced | Required |
+| `INV-012` | Required mount confinement must be enforced | Required |
+| `INV-013` | Required PID namespace must be enforced | Required |
+
+The current implementation and host evidence remain authoritative for whether each capability is actually reachable and enforced in a given execution path.
+
+---
+
+## 16. Related documents
 
 - `BASELINE.md` — current implementation truth
 - `ARCHITECTURE.md` — current execution architecture
