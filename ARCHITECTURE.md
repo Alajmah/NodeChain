@@ -4,11 +4,14 @@
 **Baseline date:** 2026-08-10  
 **Implementation code baseline:** `af1943c24a58d80ae048b9b9d50842cf0e0b27d1`  
 **Released version at baseline:** `v3.6.0`  
-**Current-state summary:** [BASELINE.md](BASELINE.md)
+**Current-state summary:** [BASELINE.md](BASELINE.md)  
+**Strategic source:** [VISION.md](VISION.md)
+
+The current version is v3.6.0. The pinned implementation baseline also contains post-release development work, which is described separately in `BASELINE.md` rather than back-projected into the v3.6.0 release record.
 
 This document describes the architecture that actually exists in the pinned implementation baseline, including important alternate paths and known authority seams. Documentation-only commits may follow the implementation SHA without changing these code facts.
 
-The previous root architecture report described v0.1.0–v1.3.1 and was explicitly historical. That report remains available through git/release history. The root architecture document now describes the current code.
+The previous root architecture report described v0.1.0–v1.3.1 and was explicitly historical. That report remains available through git/release history. The root architecture document now describes the current code. For product thesis and long-term direction, use `VISION.md`.
 
 ---
 
@@ -244,7 +247,7 @@ The original history remains immutable. Replay capsules, adapter attestation, fe
 
 ---
 
-## 9. Node invocation and execution isolation
+## 9. Trust Model and node invocation
 
 `runtime/node_invoker.py` is the normal node-call boundary used by the orchestrator.
 
@@ -527,7 +530,17 @@ Later releases added more invariant identifiers. Exact current meanings live in 
 
 ---
 
-## 18. Architectural debt that matters
+## 18. Honest Boundaries
+
+NodeChain **does NOT** claim that every execution helper is equivalent to the primary governed Orchestrator, that every evaluation runs through the full runtime, or that a green hosted CI run proves privileged Linux containment.
+
+It also does NOT claim universal hostile-code security, Windows equivalence to Linux namespace/seccomp/cgroup semantics, generic POSIX untrusted Harness Node execution before T3 routing closes, managed multi-tenant service operation, or visual-builder productization.
+
+These boundaries are deliberate current-state claims, not permanent architectural limits.
+
+---
+
+## 19. Architectural debt that matters
 
 The important remaining architecture work is authority-related rather than aesthetic:
 
@@ -542,8 +555,8 @@ Large files may be refactored when that work creates a stable authority or testa
 
 ---
 
-## 19. Historical architecture
+## 20. Historical architecture
 
 Older architecture reports remain valuable historical evidence for the system's evolution. They should be read against their release/tag, not used to infer current implementation status.
 
-For current truth use this document plus `BASELINE.md`. For intended platform semantics use the NodeChain System Specification.
+For current truth use this document plus `BASELINE.md`. For strategic direction use `VISION.md`. For intended platform semantics use the NodeChain System Specification.
