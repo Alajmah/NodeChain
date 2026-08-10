@@ -2,8 +2,10 @@
 
 **Document class:** Operational / descriptive  
 **Baseline date:** 2026-08-10  
-**Baseline SHA:** `af1943c24a58d80ae048b9b9d50842cf0e0b27d1`  
+**Implementation code baseline:** `af1943c24a58d80ae048b9b9d50842cf0e0b27d1`  
 **Authoritative configuration:** `.github/workflows/ci.yml`, `.github/workflows/publication-tree.yml`, and branch protection
+
+The version is currently `3.6.0`. Post-v3.6 development state is described separately in `BASELINE.md`; this version statement tracks the installed/released package version used by the release-truth guards.
 
 This document explains what the public hosted CI proves and, equally important, what it does **not** prove.
 
