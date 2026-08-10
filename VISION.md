@@ -4,10 +4,13 @@
 
 **Document class:** Strategic  
 **Status:** Canonical product thesis  
+**Released package version at this documentation baseline:** `v3.6.0`  
 **Implementation status:** See [BASELINE.md](BASELINE.md)  
 **Future execution plan:** See [ROADMAP.md](ROADMAP.md)
 
 This document answers **why NodeChain exists, what product category it is trying to establish, and what long-term product system should emerge from the platform**. It intentionally does not carry volatile test counts, file counts, current commit status, or release-by-release implementation bookkeeping.
+
+The original root architecture report was a historical implementation snapshot; the current `ARCHITECTURE.md` now describes the pinned implementation architecture. Historical design and current descriptive truth remain separate documentation classes.
 
 ---
 
@@ -29,11 +32,11 @@ A useful autonomous system eventually has to answer questions that a simple agen
 
 NodeChain's thesis is that these are **runtime properties**, not post-hoc documentation features.
 
-The platform mechanism is the **Harness Node**: a reusable capability unit whose contract includes not only input/output behavior but also permissions, side effects, trust, validation, trace behavior, and measurable quality.
+The platform mechanism is the **Harness Node**: a reusable, composable capability unit whose contract includes not only input/output behavior but also permissions, side effects, trust, validation, trace behavior, and measurable quality.
 
 In short:
 
-> **NodeChain builds autonomous AI systems from reusable governed nodes so useful AI work can be composed, controlled, audited, recovered, evaluated, and reused.**
+> **NodeChain builds autonomous AI systems from composable governed nodes so useful AI work can be composed, controlled, audited, recovered, evaluated, and reused.**
 
 ---
 
@@ -97,7 +100,7 @@ The product promise is:
 
 > A team should be able to build a capability once, validate and package it once, then reuse it in many autonomous systems while preserving its declared contract, permissions, side-effect semantics, trust requirements, trace behavior, and measurable quality.
 
-That is the foundation of the NodeChain ecosystem thesis.
+That is the foundation of the composable NodeChain ecosystem thesis.
 
 ---
 
@@ -429,6 +432,6 @@ Use:
 - **[BASELINE.md](BASELINE.md)** for current implementation truth;
 - **[ROADMAP.md](ROADMAP.md)** for unfinished outcomes;
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** for the current code-level architecture;
-- **[CHANGELOG.md](CHANGELOG.md)** for released/unreleased history;
+- **[CHANGELOG.md](CHANGELOG.md)** for released history;
 - the **NodeChain System Specification** for normative platform semantics;
 - the original **Reference Implementation** as the historical normative reference for the first Research & Decision Assistant design.
