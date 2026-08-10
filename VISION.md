@@ -2,543 +2,436 @@
 
 > **Build a node once. Govern it forever. Reuse it everywhere.**
 
-**Status:** Canonical strategic document
-**Current version:** v3.6.0
-**Last updated:** 2026-08-04
+**Document class:** Strategic  
+**Status:** Canonical product thesis  
+**Released package version at this documentation baseline:** `v3.6.0`  
+**Implementation status:** See [BASELINE.md](BASELINE.md)  
+**Future execution plan:** See [ROADMAP.md](ROADMAP.md)
 
-This document is the single source of truth for what NodeChain is, why it
-exists, what it has built, and where it is going. It exists because the
-codebase has grown to a scale where individual files and changelogs no
-longer convey the full picture.
+This document answers **why NodeChain exists, what product category it is trying to establish, and what long-term product system should emerge from the platform**. It intentionally does not carry volatile test counts, file counts, current commit status, or release-by-release implementation bookkeeping.
 
-For the historical architecture report (v0.1.0–v1.3.1), see
-[ARCHITECTURE.md](ARCHITECTURE.md). For current implementation details, see
-[README.md](README.md), [CHANGELOG.md](CHANGELOG.md), and the source map
-in this document.
+The original root architecture report was a historical implementation snapshot; the current `ARCHITECTURE.md` now describes the pinned implementation architecture. Historical design and current descriptive truth remain separate documentation classes.
 
 ---
 
-## 1. Executive Thesis
+## 1. Executive thesis
 
-NodeChain exists to produce **auditable autonomous systems**, not just
-automations.
+NodeChain exists to produce **auditable autonomous systems**, not merely agent demos or workflow automations.
 
-A NodeChain system does not merely call an AI agent and return an answer.
-It runs a governed lifecycle:
+A useful autonomous system eventually has to answer questions that a simple agent loop does not resolve:
 
-```
-goal interpretation → planning → context control → tool selection →
-memory access → validation → review gates → policy-controlled execution →
-trace recording → evaluation → improvement
-```
+- What was the system allowed to see?
+- Which model, tool, adapter, memory, and external capability did it use?
+- What policy authorized that use?
+- Which external actions were planned, attempted, completed, failed, or left uncertain?
+- Which evidence supported the result?
+- Which human decisions changed the execution?
+- Can the system resume or recover without lying about what happened before the interruption?
+- Can the same capability be reused in another chain without losing its governance contract?
+- Can an operator or reviewer reproduce the evidence behind the final result?
 
-The platform mechanism that makes this possible is the Harness Node model:
-autonomous capabilities are built as reusable, contract-bound nodes with
-typed ports, declared permissions, declared side effects, trust identity,
-trace behavior, and measurable quality.
+NodeChain's thesis is that these are **runtime properties**, not post-hoc documentation features.
+
+The platform mechanism is the **Harness Node**: a reusable, composable capability unit whose contract includes not only input/output behavior but also permissions, side effects, trust, validation, trace behavior, and measurable quality.
 
 In short:
 
-**NodeChain builds autonomous AI systems from reusable governed nodes, so
-useful AI work can be composed, audited, recovered, evaluated, and reused.**
+> **NodeChain builds autonomous AI systems from composable governed nodes so useful AI work can be composed, controlled, audited, recovered, evaluated, and reused.**
 
 ---
 
-## 2. The Product Thesis
+## 2. The product thesis
 
-The output is not:
+The product output is not simply:
 
-```
-AI agent completes task
-```
-
-The output is:
-
-```
-AI system interprets goal
-plans work
-selects tools
-controls context
-uses memory safely
-validates claims and actions
-routes through review when needed
-executes under policy
-records trace
-supports evaluation
-improves over time
+```text
+agent completed task
 ```
 
-That is the defensible difference. NodeChain's competitors help you build
-agents that *do things*. NodeChain helps you build autonomous systems you can
-*prove did things safely, for the right reasons, within approved boundaries,
-with a complete audit trail*.
+The intended product experience is:
+
+```text
+user creates a governed objective
+        ↓
+system interprets and plans work
+        ↓
+context / tools / memory / models are exposed under policy
+        ↓
+nodes execute through declared contracts
+        ↓
+external effects are journaled and recoverable
+        ↓
+evidence and provenance remain attached to conclusions
+        ↓
+risk or uncertainty can trigger human review
+        ↓
+trace + state + decisions + evidence remain inspectable
+        ↓
+result becomes a reusable, verifiable work artifact
+```
+
+The distinction is not “more orchestration.” The distinction is **governed execution with evidence**.
 
 ---
 
-## 3. Who NodeChain Is For
+## 3. The Harness Node promise
 
-| Audience | Why they need NodeChain |
-|----------|------------------------|
-| **Compliance-sensitive teams** (healthcare, finance, government, aviation) | Must prove what the system was allowed to see, why it acted, what it changed, what was blocked, and how recovery was handled |
-| **Platform engineers** building internal AI tooling | Need reusable governed components with admission, enforcement, and quality measurement — not copy-pasted logic |
-| **Researchers** who need validated, cited outputs | Want outputs that document their own confidence, flag uncertainties, and prove citations are real |
-| **Operators** who must intervene when autonomous systems fail | Need recovery consoles, per-action authorization, and durable audit trails |
+A Harness Node is not just a Python function, prompt, tool wrapper, or graph step.
 
----
+Conceptually:
 
-## 4. What NodeChain Can Become
-
-Five core products, layered from foundation to ecosystem:
-
-### A. NodeChain Runtime
-A durable runtime for autonomous AI systems. Produces executable chains,
-invocation envelopes, durable state, trace records, and runtime policy
-enforcement. This is the foundation — without it, NodeChain is only a
-design language.
-
-### B. Harness Node SDK
-A developer kit for building reusable capability blocks. Produces node
-templates, manifest generators, contract validators, local runners, and
-package builders. Preserves the composable-node promise: build blocks
-once, validate, package, and reuse across chains.
-
-### C. Private Node Registry
-A controlled catalog of reusable Harness Nodes. Produces internal node
-libraries, versioned dependencies, trust metadata, certification workflows,
-and blueprint sharing. This is one of the clearest enterprise products
-because companies want reusable AI capabilities without every team
-inventing unsafe agents.
-
-### D. Chain Blueprint Studio
-A developer/operator interface for designing autonomous chains. Produces
-blueprint editors, contract graph viewers, risk/budget/memory overlays,
-and validation reports. Can start as CLI/YAML/dashboard before becoming
-visual — the runtime and contracts remain the execution authority.
-
-### E. Trace and Evaluation Console
-An observability and quality layer for autonomous systems. Produces chain
-traces, node traces, policy traces, cost/latency reports, regression
-evaluations, and failure analysis. Commercially strong because most
-companies deploying agents eventually ask: "What happened, why did it
-happen, who approved it, what did it cost, and can we reproduce it?"
-
----
-
-## 5. The Composable Node Promise
-
-This is the central architectural thesis.
-
-A Harness Node is not just a function or a step in a pipeline. It is:
-
-```
+```text
 Harness Node =
     reusable capability
-    + manifest (identity, version, type)
-    + contract (entry/exit schema, required fields, side effects)
-    + typed ports (semantic input/output types)
-    + declared requirements (model, tools, adapters, memory, trust)
-    + declared side effects (idempotent, retryable, governed)
-    + policy surface (what this node may do at runtime)
-    + trust identity (signed, verified, trust-rated)
-    + validation (input/output schema enforcement)
-    + trace behavior (pre/post/output events recorded)
-    + evaluation hooks (quality measured per execution)
-    + packaging lifecycle (create → package → publish → install → reuse)
+    + identity and version
+    + entry/exit contract
+    + typed semantic ports
+    + declared requirements
+    + declared side effects
+    + policy surface
+    + trust identity
+    + validation behavior
+    + trace behavior
+    + evaluation hooks
+    + packaging lifecycle
 ```
 
-The promise:
+The product promise is:
 
-> A team builds a node once — for example, a Claim Validator that checks
-> evidence consistency. They package it, sign it, and register it. Then any
-> autonomous chain that needs claim validation can install that node,
-> compatibility-check it against its blueprint, execute it under the chain's
-> governance profile, trace its behavior, and evaluate its quality — all
-> without touching the node's implementation.
+> A team should be able to build a capability once, validate and package it once, then reuse it in many autonomous systems while preserving its declared contract, permissions, side-effect semantics, trust requirements, trace behavior, and measurable quality.
+
+That is the foundation of the composable NodeChain ecosystem thesis.
 
 ---
 
-## 6. Reference Autonomous Chains
+## 4. The product stack
 
-The reference implementation already defines the first serious chain: a
-**Research and Decision Assistant** using twelve nodes. That pattern can
-become a family of production chains:
+NodeChain should develop as a layered product system rather than as one monolithic “agent framework.”
 
-| Chain | What it proves | Why governance matters | Status |
-|-------|---------------|----------------------|--------|
-| **Research & Decision Assistant** | Planning, search, synthesis, validation, risk, memory, trace | Cited recommendations need source quality, claim validation, and confidence disclosure | Reference chain (12 nodes); Stage 1 proven end-to-end on GLM-4.6 (v2.68, 9 validated claims, 0 fabricated); baseline comparison passed 7/7 gates (v2.70) |
-| **Email Triage Assistant** | Controlled external action | Email sending is a high-risk side effect — approval gates and permission model are critical | Conceptual |
-| **Code Review Assistant** | Developer value | Linting, security, architecture review as separate governed nodes | Conceptual |
-| **Customer Support Assistant** | Enterprise workflow value | Memory governance matters — support systems can leak or store sensitive information | Conceptual |
-| **Procurement Assistant** | Approval-gated autonomy | External actions, vendor contact, purchase recommendations all benefit from policy-gated execution | Conceptual |
-| **Incident Response Assistant** | Bounded tool access and side-effect control | Requires strict tool access, side-effect discipline, and trace completeness for post-incident review | Conceptual |
+### A. NodeChain Runtime
 
----
+The execution kernel for governed autonomous systems.
 
-## 7. Node Library Vision
+It is responsible for:
 
-NodeChain can produce reusable building-block libraries across four families:
+- graph execution;
+- invocation identity;
+- scheduling, branches, loops, and review gates;
+- policy enforcement;
+- state and checkpoints;
+- side-effect lifecycle;
+- failure classification and recovery;
+- trace truth;
+- adapter/execution boundaries.
 
-**Core reasoning nodes:** Goal Interpreter, Task Planner, Router, Evidence
-Synthesizer, Response Generator, Risk Classifier.
+Without this layer, NodeChain is only a design language.
 
-**Tool and adapter nodes:** Web Search, Document Search, Email Draft,
-Calendar Draft, Ticketing Adapter (Jira/Linear/Zendesk), Database Query,
-Code Execution (sandboxed).
+### B. Harness Node SDK
 
-**Validation nodes:** Schema Validator, Source Validator, Claim Validator,
-Permission Validator, Side-Effect Validator, Memory Validator, Final
-Response Validator.
+The developer surface for reusable capability blocks.
 
-**Governance nodes:** Policy Evaluator, Human Review, Budget Controller,
-Context Exposure Controller, Tool Exposure Controller, Memory Exposure
-Controller.
+It should make it natural to:
 
-These libraries are where NodeChain transitions from "a platform with one
-chain" to "an ecosystem of reusable governed components." The v2.61–v2.66
-proof chain (shared nodes, registry resolution, quality scorecards) was the
-first mechanical proof that this ecosystem model works.
+- create a node;
+- declare its contract and requirements;
+- define side effects;
+- test it;
+- package it;
+- sign/attest it;
+- compatibility-check it;
+- publish/install it;
+- evaluate it independently and in chains.
 
----
+### C. Governed Workspace
 
-## 8. Industry Product Directions
+The primary human product shell around the runtime.
 
-These are product directions, not committed products. They show where the
-reference chain pattern can go vertically.
+A Workspace should turn durable runtime artifacts into an understandable work environment:
 
-| Industry | Possible products | Why NodeChain fits |
-|----------|------------------|-------------------|
-| **Legal** | Legal Research Chain, Contract Review, Discovery Triage, Compliance Monitor | Traceability, citation discipline, review gates, controlled memory |
-| **Finance & Investment** | Market Research, Credit Memos, Due Diligence, Portfolio Risk Monitor | Policy enforcement, source validation, disclaimers, human review |
-| **Healthcare Operations** | Clinical Admin, Literature Review, Patient Triage, Compliance Docs | Governance useful but requires strict privacy, validation, and regulatory controls |
-| **Enterprise Knowledge** | Knowledge Assistant, Meeting-to-Action, Policy Assistant, Project Synthesizer | Benefits from memory, retrieval, validation, and trace without dangerous external actions — best early market |
-| **Software Engineering** | Code Review, Migration, Debugging, Architecture Review, Documentation | Engineering teams naturally understand contracts, traces, and reusable nodes |
-
----
-
-## 9. Current Implementation State
-
-*Snapshot — v2.67.3. 476 Python files (171 src, 275 tests), ~6,000 test
-functions, 16 blueprints, 8 node packages, 13+2 typed ports, self-hosted
-CI on Proxmox CT 801.*
-
-### Proof chain (v2.63–v2.66)
-
-| Release | What was proven |
-|---------|----------------|
-| v2.63.2–v2.63.3 | Master green and CI live on self-hosted CT 801 runner |
-| v2.64.0–v2.64.1 | Shared nodes are registry-resolved governed packages with lockfile enforcement |
-| v2.65.0–v2.65.1 | Those packages have measurable node-level quality (reproducibility, correctness, branch coverage) |
-| v2.66.0–v2.66.1 | Both proofs are operator-visible in the dashboard (reuse + scorecards sections) |
-
-### What exists
-
-| Area | What exists | Count |
-|------|------------|-------|
-| Blueprints | Research & Decision Assistant, Incident Response, Security Audit, Cross-Domain Composition, Quick Fact Check, reuse-proof chains, demos | 16 |
-| Harness Nodes | 12-node reference chain + branch variants + shared reusable nodes + domain adapters | 22+ |
-| Typed Ports | RAW_QUERY through CHAIN_TRACE_OUTPUT + RISK_CONTEXT + TRACE_INPUT | 13+2 |
-| Node Packages | echo_node, shared_risk_classifier, shared_trace_collector, incident_response, security_audit, text_transforms | 8 |
-| Node Package SDK | Packaging, trust, compatibility, lockfile, registry, supply-chain attestation, federation, discovery | 43 modules |
-| Runtime | Orchestrator, scheduler, policy gate, node invoker, subprocess runner, recovery, evaluation, scorecards | 26+ modules |
-| Registry | Publish, install, inspect, lock, verify, resolve, certified lifecycle, federation | — |
-| Evaluation | 7 eval suites, research eval harness (6 metrics), node quality scorecards (6 metrics) | — |
-| Search Adapters | Semantic Scholar, arXiv, OpenAlex, CrossRef, PubMed with circuit breaker + retry | 5 |
-| Operator CLI | ~181 commands across 20+ groups including dashboard, recovery, registry, eval, evidence | 31 modules |
-| Local API | FastAPI read-only operator API with auth, OpenAPI, dry-run preview | 10 modules |
-| CI | Self-hosted on CT 801 (Proxmox LXC, Ubuntu 24.04), 8 blocking Linux jobs + 1 Windows | 10 jobs |
-
----
-
-## 10. Platform Architecture
-
-### Layer map
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        Operator Experience                          │
-│  CLI workbench · Dashboard · Recovery Console · Local API           │
-├─────────────────────────────────────────────────────────────────────┤
-│                    Trace & Evaluation Layer                          │
-│  Trace truth · Evidence · Scorecards · Eval suites · Health rules   │
-├─────────────────────────────────────────────────────────────────────┤
-│                  Registry & Trust Layer                              │
-│  Admission · Packages · Lockfile · Trust levels · Supply chain      │
-├─────────────────────────────────────────────────────────────────────┤
-│                    Runtime Governance Layer                          │
-│  Policy gate · Invariants · Budget · Review · Side effects · Sandbox│
-├─────────────────────────────────────────────────────────────────────┤
-│                    Execution Kernel                                  │
-│  Orchestrator · Scheduler · Node invoker · State · Recovery         │
-├─────────────────────────────────────────────────────────────────────┤
-│                    Composition Primitives                            │
-│  Contracts · Typed ports · Envelopes · Blueprints · Manifests       │
-└─────────────────────────────────────────────────────────────────────┘
+```text
+Workspace
+├── objective / brief
+├── plan
+├── active runs
+├── sources and retrieved artifacts
+├── evidence
+├── claims / conclusions
+├── uncertainty and failures
+├── review queue
+├── recovery actions
+├── trace / audit trail
+└── completed verified outputs
 ```
 
-### Core primitives
+The Workspace is where governance becomes visible user value rather than infrastructure vocabulary.
 
-- **InvocationEnvelope / EnvelopeResponse** — the universal execution boundary. No node sees raw input; no node returns raw output.
-- **NodeContract** — entry/exit specification validated at load time, not invocation time.
-- **Typed Ports** — semantic types constraining which nodes can connect.
-- **ChainBlueprint** — declarative YAML chain definition (nodes, connections, loops, branches, gates, invariants).
-- **StateManager** — SQLite-backed durable state with atomic commit boundaries.
-- **Trace** — 80+ event types forming the authoritative execution record.
+### D. Private Node Registry
 
-### Runtime governance
+A controlled catalog of reusable organizational capabilities.
 
-- **PolicyGate** — 20 policy types (tool, model, memory, side-effect, cost, rate limit), evaluated before invocation.
-- **InvariantEngine** — structural invariants checked at load and runtime.
-- **NodeInvoker** — clean invocation boundary; subprocess isolation for untrusted nodes with optional seccomp, cgroups, namespace confinement.
-- **Recovery** — per-action authorization for budget increases, route fallbacks, retries, and human review.
+It should provide:
 
----
+- versioned node/package identity;
+- trust and publisher metadata;
+- certification/evaluation state;
+- dependency and lockfile resolution;
+- deprecation/revocation;
+- controlled organizational distribution;
+- blueprint/node reuse across teams.
 
-## 11. Competitive Position
+### E. Blueprint Studio
 
-NodeChain does not compete by being a faster agent framework, a broader
-integration marketplace, or a better observability dashboard. It competes
-by making autonomous capabilities **reusable, governed, auditable, and
-portable across chains**.
+A developer/operator environment for composing governed systems.
 
-| Category | Market strength | NodeChain distinction |
-|----------|----------------|----------------------|
-| Agent frameworks (LangGraph, OpenAI Agents SDK, AutoGen) | Fast construction, tool calling, handoffs, sessions, tracing | Governed reusable nodes with contracts, typed ports, and policy built into the block — not bolted on |
-| Workflow automation (n8n) | Visual workflows, integrations | Autonomous-node governance, trace truth, side-effect discipline |
-| Durable execution (Temporal) | Industrial resumability, event history | AI-native policy, memory governance, evidence provenance, node contracts |
-| Observability (LangSmith, Phoenix) | Traces, evals, datasets | Governance and reuse are part of execution, not monitoring after the fact |
+The useful builder is not merely a box-and-arrow editor. It should expose:
 
-**NodeChain's distinct claim:** reusable **governed autonomous-system
-nodes** — where governance, trust, trace, evaluation, and recovery are
-native properties of the node itself, not external tooling applied around it.
+- typed-port compatibility;
+- node contracts;
+- policy requirements;
+- side-effect boundaries;
+- trust posture;
+- budget/risk overlays;
+- branch/loop semantics;
+- simulation and preflight validation;
+- expected evidence surfaces.
 
----
+### F. Trace, Evaluation & Assurance Console
 
-## 12. Engineering Maintainability Boundary
+The system-of-record view for autonomous-system quality and governance.
 
-NodeChain has reached a level of runtime maturity where several core files
-have grown large enough to create maintainability risk:
+It should answer:
 
-| File | Size | Risk level | Why |
-|------|------|-----------|-----|
-| `orchestrator.py` | 143KB | Actively concerning | Combines run, resume, failure, side-effect journaling, state transitions |
-| `state.py` | 81KB | Hidden danger | 40+ methods accumulating unrelated persistence responsibilities |
-| `trace_reconciler.py` | 92KB | High but contained | Post-execution diagnostic, not execution-path-critical |
-| `cli/main.py` | 263KB | Ugly but safe | CLI command splitting is mechanical and low behavioral risk |
-| `dashboard_health.py` | 92KB | Large but modular | 39 rule classes naturally extractable |
+- What happened?
+- Why did it happen?
+- Which evidence proves it?
+- Which policy authorized it?
+- Which external effect occurred?
+- Which recovery changed the path?
+- What did it cost and how long did it take?
+- Can the run be replayed or reconciled?
+- Is this node/chain getting better or worse over time?
 
-This is not currently treated as a product blocker because the test suite
-is green and the next priority is proving a real end-to-end product run.
-However, large-file decomposition is a Stage 1/Stage 2 engineering
-readiness task.
+### G. Managed / Enterprise Control Plane
 
-**The rule:**
-- Prove the product path first
-- Record which large files are touched during real execution debugging
-- Extract only stable seams after the real run
-- Preserve behavior through characterization tests before structural refactors
+A later product layer for organizations that need hosted operation, multi-tenancy, identity, policy distribution, secrets, connector governance, retention, fleet execution, and enterprise assurance.
+
+This layer should be built on the same runtime truths, not introduce a second weaker execution model.
 
 ---
 
-## 13. What NodeChain Is Not Yet
+## 5. The Workspace wedge
 
-Honest readiness boundaries — distinguishing what exists, what is partial,
-and what is conceptual:
+The most important product transition is from **runtime proof** to **governed work product**.
 
-| Surface | Status today | Possible stage | Current claim | Not claiming yet |
-|---------|-------------|----------------|---------------|-----------------|
-| Hosted SaaS | Not available | Stage 3 | Local runtime + API server | Managed cloud platform |
-| Visual Builder | Not available | Stage 3 | Blueprint-driven composition | Drag-and-drop product |
-| Private Registry | Partially implemented | Stage 2/3 | Local registry mechanics exist | Enterprise registry product |
-| Certified Node Program | Early infrastructure | Stage 3 | Trust/eval/attestation primitives | Public certification marketplace |
-| Industry Products | Conceptual | Stage 2/3 | Reference-chain patterns exist | Production vertical solutions |
-| Real chain execution | Stage 1 proven (v2.68) + baseline (v2.70) | Stage 2 | 12-node research chain proven on GLM-4.6; 7/7 baseline gates vs flat agent; value proposition = verifiable governance, not better prose | Proven across multiple model families |
-| Second domain | Stage 2 proven (v2.71) | Stage 2 | Code Review chain (5 nodes): file-access governance, artifact provenance, read-only enforcement | Third domain chain |
-| Patch proposal governance | Stage 2 proven (v2.72) | Stage 2 | Patch proposals as typed-port artifacts, validated in temp workspace, risk-classified; repo never modified | — |
-| Governed test execution | Stage 2 proven (v2.73) | Stage 2 | Patches tested in isolated temp workspaces (tracked-file export, bounded pytest); code_execution as declared side effect | Container/OS isolation; arbitrary command profiles |
-| External validation | None | Stage 1/2 | Internally tested only | Independently reviewed |
+A researcher, engineer, analyst, or operator should not have to inspect SQLite tables and raw trace JSON to benefit from NodeChain. Those artifacts remain authoritative evidence, but the product should assemble them into an understandable workspace.
 
-These are boundaries, not permanent limitations. They define what the
-project is ready for today and what requires further maturation.
+A strong first Workspace product is research/decision work because it naturally requires:
+
+- a brief and explicit scope;
+- source acquisition;
+- provenance;
+- evidence extraction;
+- source qualification;
+- claims and uncertainty;
+- review;
+- citations;
+- reproducible final artifacts.
+
+This is a useful proving ground for NodeChain's general thesis: **the work product carries its own governance evidence**.
+
+The same product pattern can later support software engineering, compliance, procurement, incident response, and enterprise knowledge workflows.
 
 ---
 
-## 14. Roadmap
+## 6. Reference product families
 
-### Product Staging
+NodeChain should prove itself through concrete autonomous-system products rather than accumulate platform primitives indefinitely.
 
-**Stage 1 — Product Proof** ✅
+### Research and decision work
 
-Prove the Research & Decision Assistant works end-to-end with real model
-and search adapters. Produce a real cited research artifact with complete
-governance evidence. Compare against a simpler baseline. This is the gate
-between platform and product.
+Examples:
 
-Completed in v2.68–v2.70:
-- v2.68: 12-node chain ran end-to-end (9 claims, 0 fabricated, model requirements traced)
-- v2.69: Citation surface + adapter reliability (8 citations, arXiv+OpenAlex both contributing)
-- v2.70: Baseline comparison — 7/7 gates passed, value = verifiable governance not better prose
+- governed research workspace;
+- policy research;
+- due diligence;
+- evidence-backed decision memo;
+- technical literature review;
+- regulated-domain research assistance.
 
-**Stage 2 — Repeatable Use Cases** ✅
+Governance value: provenance, evidence qualification, uncertainty, citations, review, reproducibility.
 
-After the reference chain is proven, build additional chains. Each proves a
-different governance property. Extend to patch proposal and governed execution.
+### Software engineering
 
-Completed in v2.71–v2.73:
-- v2.71: Code Review chain (5 nodes) — file-access governance, artifact provenance, read-only enforcement
-- v2.72: Patch proposal path (4 nodes) — patches as typed-port artifacts, temp-workspace validation, risk classification
-- v2.73: Governed test execution (2 nodes) — bounded pytest in isolated temp workspaces, code_execution as declared side effect
+Examples:
 
-Stage 2 proved the governed-node model generalizes across two domains (research
-+ code review) and three governance surfaces (citation/search, file/tool access,
-code execution). The Code Review chain is 10 nodes total and demonstrates the
-full arc: review → propose → validate → test → classify → report.
+- code review;
+- architecture review;
+- patch proposal;
+- migration planning;
+- governed test execution;
+- incident/debugging assistance.
 
-**Stage 3 — Commercial Platform**
+Governance value: file/tool boundaries, artifact provenance, code-execution containment, patch review, test evidence.
 
-Private Node Registry, Blueprint Marketplace, Visual Builder, Compliance
-Console, Certified Node Program, Managed NodeChain Cloud.
+### Enterprise knowledge
 
-### Next Release Targets
+Examples:
 
+- policy assistant;
+- project synthesis;
+- meeting-to-action workspace;
+- controlled document research;
+- organizational knowledge assistant.
+
+Governance value: context exposure, access control, memory governance, source freshness, traceable conclusions.
+
+### Approval-gated operations
+
+Examples:
+
+- procurement;
+- support escalation;
+- incident response;
+- deployment/change management;
+- high-risk communications.
+
+Governance value: side-effect identity, operator authority, recovery, approval receipts, durable audit.
+
+These are product directions, not claims that every product is implemented today. Current proof status lives only in `BASELINE.md`.
+
+---
+
+## 7. Why reuse matters
+
+The long-term advantage is not a large collection of one-off chains. It is a library of governed capabilities that can be composed repeatedly.
+
+Examples:
+
+- Claim Validator
+- Source Quality Evaluator
+- Risk Classifier
+- Context Exposure Controller
+- Code Test Runner
+- Human Review Gate
+- Budget Controller
+- Tool Router
+- Memory Decision Node
+- Citation Formatter
+
+If each capability carries its own contract, permissions, side effects, trace requirements, trust identity, and evaluation hooks, then organizations can reuse autonomous-system building blocks without re-solving governance for every new application.
+
+This moves NodeChain from a framework to an **organizational capability substrate**.
+
+---
+
+## 8. Product principles
+
+### Governance must be executable
+
+A policy that exists only in documentation is not a NodeChain control. Important governance should be enforced at a runtime boundary and produce durable evidence.
+
+### Trace must tell the truth
+
+The trace should distinguish intended, attempted, executed, skipped, blocked, partial, failed, unknown, retried, recovered, and completed behavior. Configuration is not execution evidence.
+
+### External effects require operation identity
+
+An external call or write is not just “the node ran.” It needs stable operation identity and lifecycle semantics so interruption and retry do not erase uncertainty.
+
+### Durability matters before autonomy scales
+
+Resume, retry, review, and recovery are trustworthy only if authoritative state survives process failure and can be reconstructed without inventing history.
+
+### Reuse should preserve governance
+
+Packaging a node should not strip away its policy, side-effect, trust, validation, trace, and evaluation expectations.
+
+### Stronger controls should not silently degrade
+
+When a required containment or trust primitive is unavailable, the system should fail closed or explicitly move to another qualified execution profile.
+
+### Evidence should be product-visible
+
+The user should be able to see not only the answer, but the sources, decisions, uncertainty, review history, failures, and assurance state that make the answer usable.
+
+---
+
+## 9. Strategic differentiation
+
+NodeChain should not optimize primarily for being the fastest way to wire a model to tools. That market will remain crowded and increasingly commoditized.
+
+The durable differentiation is the integration of:
+
+```text
+composition
++ governance
++ durable execution
++ side-effect truth
++ recovery
++ evidence/provenance
++ reusable node trust
++ evaluation
++ operator assurance
 ```
-v2.68  Real Research & Decision Assistant run ✅
-v2.69  Citation surface + source acquisition reliability ✅
-v2.70  Baseline comparison harness (governance vs flat agent) ✅
-v2.71  Code Review Assistant: read-only governed review ✅
-v2.72  Code Review Assistant: governed patch proposal path ✅
-v2.73  Code Review Assistant: governed temp-workspace test execution ✅
-v2.74  Orchestrator decomposition: NodeEventEmitter extraction ✅
-v2.75  Orchestrator decomposition: side-effect journaling extraction ✅
-v2.76  Native OS-sandboxed test runner execution (close the routing gap) ✅
-v2.77  Privileged Linux native sandbox verification harness ✅
-v2.78  Child-applied seccomp for native command runner ✅
-v2.79  Operator surface cleanup: CLI characterization + Click relocation wave 1 ✅
-v2.80  CLI relocation wave 2 (eval, graph, console) ✅
-v2.81  StateManager characterization harness ✅
-v2.82  StateManager store extraction phase 1 (EventLogStore, InvocationLedgerStore) ✅
-v2.83  StateManager store extraction phase 2 (SideEffectLedgerStore, DecisionLogStore) ✅
-v2.84  Verification ergonomics: Windows suite sharding + release gate clarity ✅
-v2.85  Five-minute local proof quickstart ✅
-v2.86  CLI relocation wave 3 (inspect, report, trace, trace-replay, compose) ✅
-v2.87  External verification pack (reviewer-facing docs + claims/evidence + smoke) ✅
-v2.88  External verification runner + evidence bundle ✅
-v2.89  Optional sandbox verification evidence profile ✅
-v2.90  Release evidence index + verification dashboard ✅
-v2.91  Orchestrator characterization harness ✅
-v2.92  Orchestrator extraction phase 1: contract preflight controller ✅
-v2.93  Orchestrator extraction phase 2: node output validation controller ✅
-v2.94  Orchestrator validation failure characterization ✅
-v2.95  Orchestrator policy gate characterization ✅
-v2.96  Orchestrator extraction phase 3: policy gate controller ✅
-v2.97  Orchestrator side-effect journaling characterization ✅
-v2.98  Orchestrator extraction phase 4: side-effect journal controller ✅
-v2.99  Side-effect completion design study ✅
-v3.0   Observed side-effect completion path (if design converges), branch/loop/review characterization, or Docker
-v3.1   Side-effect completion (observed-completion model) ✅
-v3.2   Side-effect recovery decisions ✅
-v3.3   Safe-to-retry recovery state ✅
-v3.4   Retry-authorized execution design study + characterization ✅
-v3.5   Governed retry-authorized side-effect execution ✅
-```
 
-### Shipped history
+into one execution model.
 
-```
-v2.60  Vision alignment + documentation truth — shipped
-v2.61  Reusable Node Proof Pack — direct shared-node proof — shipped
-v2.62  End-to-end reuse execution proof — shipped
-v2.63  Full reuse runtime proof + CI migration (CT 801) — shipped
-v2.64  Registry-resolved reuse proof — shipped
-v2.65  Deterministic node quality scorecards — shipped
-v2.66  Operator evidence/reuse dashboard — shipped
-```
+The strongest version of the NodeChain claim is therefore:
 
-### Roadmap principles
-
-1. Every feature must serve node reuse, trace truth, recovery, or policy.
-2. No more broad platform features until one real use case works end-to-end.
-3. Evaluation must measure reusable node quality across chains.
-4. Visual tooling should start with trace/reuse inspection, not workflow building.
+> **Autonomous capabilities become reusable organizational building blocks only when their execution, permissions, effects, evidence, recovery, and quality are governed as part of the capability itself.**
 
 ---
 
-## 15. External Reviewer Guide
+## 10. What NodeChain should not become
 
-If you are reviewing NodeChain, inspect these areas **in this order**:
+NodeChain should avoid becoming:
 
-1. **Run a real chain** — `nodechain run "your research question"` with real adapters. Judge the output as a product artifact.
-2. **Read the trace** — `nodechain trace <run_id>`. Verify every decision is auditable.
-3. **Check the dashboard** — `nodechain dashboard`. See governance health at a glance.
-4. **Inspect the proof chain** — `nodechain dashboard reuse` and `nodechain dashboard scorecards`. Verify registry-resolved packages with quality evidence.
-5. **Read VISION.md** (this document) — the full product thesis and current state.
-6. **Browse blueprints/** — multiple chains exist; NodeChain is not one-chain-only.
-7. **Browse nodes/** — independently packaged node sets; reuse has started.
-8. **Read src/nodechain/core/** — contracts, typed ports, manifests, state, trace.
-9. **Read src/nodechain/runtime/** — orchestrator, policy gate, recovery, evaluation.
-10. **Check tests/** — ~6,000 tests across 275 files, invariant tests, adversarial tests.
+- a collection of disconnected governance utilities;
+- a workflow UI sitting on top of an ungoverned executor;
+- an observability product that records policy only after execution;
+- a registry that treats signatures as execution permission;
+- a sandbox product whose metadata overstates actual containment;
+- a proliferation of parallel runtimes for each product surface;
+- a roadmap driven by release-number accumulation rather than closed user outcomes;
+- a platform with deep infrastructure but no coherent user workspace.
 
----
-
-## 16. Maturity, Risks, and Open Gaps
-
-### What is mature
-
-- Runtime execution kernel with governance, state, and trace
-- Contract/typed-port composition model
-- Policy gates (tools, memory, side effects, trust, cost, code execution)
-- Recovery system with per-action authorization
-- Persistence with atomic commit boundaries
-- Test discipline (~6,131 tests across 90+ files, invariant tests, self-hosted CI)
-- Research evaluation harness with quality metrics
-- Node quality scorecards with reproducibility and branch coverage
-- Source acquisition with retry, circuit breaker, and failure taxonomy
-- CLI operator workbench with dashboard, recovery, and local API
-- Two proven domain chains: Research & Decision Assistant (12 nodes) + Code Review Assistant (10 nodes)
-- Baseline comparison proof: governance > flat agent on verifiable auditability
-- Patch proposal governance: typed-port artifacts, temp-workspace validation, risk classification
-- Governed code execution: bounded pytest in isolated temp workspaces, code_execution as declared side effect
-
-### What needs strengthening
-
-- **Real end-to-end chain execution — Stage 1 proven (v2.68).** A real Research
-  and Decision Assistant chain completed end-to-end with 12/12 nodes, validated
-  claims, trace-visible source-quality policy decisions, and zero fabricated
-  citations. Stage 1 proven with capable structured-output model: GLM-4.6. The
-  original Gemma 4 12B failure was not re-instrumented before tag. The
-  context-overflow hypothesis was falsified by code inspection and replay, and
-  the successful GLM-4.6 run is sufficient to prove the architecture under a
-  capable structured-output model, not yet to prove model-agnostic robustness.
-- **Baseline comparison** — compare NodeChain output against a simpler agent approach to validate the governance overhead is justified (v2.69)
-- **External validation** — independent installation and review beyond internal tests
-- **Code maintainability** — several core files need decomposition (see §12)
-- **Quickstart / setup flow** — no "get running in 5 minutes" path exists yet
-- **Performance and cost data** — no data on real chain latency or cost
-
-### Risks
-
-- **Scope pressure** — the project covers many subsystems; focus must stay on proving the product
-- **Platform vs product** — the governance infrastructure is deep; it must translate to user-visible value
-- **Competitive narrowing** — agent frameworks are maturing rapidly; governance depth must be felt, not just claimed
+The runtime, Workspace, Registry, Studio, and Assurance surfaces should all expose the **same underlying execution truth**.
 
 ---
 
-## 17. Glossary
+## 11. Long-term enterprise shape
 
-| Term | Definition |
-|------|-----------|
-| **Harness Node** | A reusable autonomous-system capability unit with manifest, contract, typed ports, declared requirements, side effects, policy surface, trust identity, trace behavior, and packaging lifecycle |
-| **Auditable Autonomous System** | An AI system whose full governed lifecycle — goal, plan, tools, memory, validation, review, policy, trace, evaluation — is recorded and reproducible |
-| **Node Contract** | Formal entry/exit specification: input/output port types, schema references, required fields, guaranteed fields, declared requirements, declared side effects |
-| **Typed Port** | A semantic port type (e.g., EVIDENCE_BASE, RISK_ASSESSMENT) that constrains which nodes can connect to which |
-| **Blueprint** | A chain definition file specifying ordered nodes, connections, branch policies, loop controls, and review gates |
-| **Chain** | A running instance of a blueprint — an autonomous system assembled from governed nodes |
-| **Node Package** | A distributable unit containing a node's manifest, contract, implementation, tests, and metadata |
-| **Registry** | A system for publishing, installing, verifying, locking, and revoking node packages with trust and policy enforcement |
-| **Lockfile** | A pinned record of exact package versions, content digests, and policy states for a given chain |
-| **Trust Status** | The trust level assigned to a node package, determining whether the runtime will execute it |
-| **Policy Gate** | The runtime checkpoint that verifies tool, adapter, memory, side-effect, trust, and cost permissions before node invocation |
-| **Side Effect** | A declared external action a node performs (e.g., API call, memory write, file write) — governed, idempotent, retryable |
-| **Trace Truth** | The principle that the execution trace is the authoritative record — executed, skipped, simulated, and partial steps are distinguished |
-| **Content Digest** | Full-length deterministic SHA-256 over package files, used for fail-closed lockfile enforcement |
-| **Recovery Action** | A governed operator action (resume, retry, approve, cancel, etc.) performed on a paused or failed chain |
-| **Composable Governed Node** | The core product primitive: an autonomous capability that can be built once, packaged, trusted, and composed into any governed chain |
+The end state is an enterprise platform where teams can:
+
+```text
+connect organizational systems and knowledge
+        ↓
+compose governed reusable capabilities
+        ↓
+execute autonomous work under policy
+        ↓
+route uncertainty and risk to people
+        ↓
+preserve evidence, state, provenance, and side-effect truth
+        ↓
+evaluate quality and compliance continuously
+        ↓
+reuse trusted nodes and blueprints across the organization
+```
+
+In that form, NodeChain is more than an agent framework or workflow runner. It becomes the governed execution layer between organizational intent and autonomous action.
+
+---
+
+## 12. How to read implementation progress
+
+This vision is deliberately stable. It should not be edited every time a release ships.
+
+Use:
+
+- **[BASELINE.md](BASELINE.md)** for current implementation truth;
+- **[ROADMAP.md](ROADMAP.md)** for unfinished outcomes;
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** for the current code-level architecture;
+- **[CHANGELOG.md](CHANGELOG.md)** for released history;
+- the **NodeChain System Specification** for normative platform semantics;
+- the original **Reference Implementation** as the historical normative reference for the first Research & Decision Assistant design.

@@ -1,125 +1,83 @@
-# NodeChain CI Contract (v3.6.0)
+# NodeChain CI and Qualification Contract
 
-This document defines how NodeChain is verified in CI and how to reproduce
-CI runs locally.
+**Document class:** Operational / descriptive  
+**Baseline date:** 2026-08-10  
+**Implementation code baseline:** `af1943c24a58d80ae048b9b9d50842cf0e0b27d1`  
+**Authoritative configuration:** `.github/workflows/ci.yml`, `.github/workflows/publication-tree.yml`, and branch protection
 
-## Verification tiers (v3.6.0)
+The version is currently `3.6.0`. Post-v3.6 development state is described separately in `BASELINE.md`; this version statement tracks the installed/released package version used by the release-truth guards.
 
-Three tiers of verification are used, each with a distinct evidentiary value:
+This document explains what the public hosted CI proves and, equally important, what it does **not** prove.
+
+---
+
+## 1. Public CI is GitHub-hosted
+
+The public repository uses GitHub-hosted runners rather than the historical self-hosted CT 801 runner for ordinary protected-branch qualification.
+
+Current runner families:
+
+- Linux: `ubuntu-24.04`
+- Windows: `windows-2022`
+- Python used by the workflows: 3.12
+- pinned official actions: `actions/checkout` v7.0.1 commit and `actions/setup-python` v7.0.0 commit
+
+Every hosted run starts from a fresh runner image and installs the repository dependencies for that job.
+
+Historical CT 801 / privileged Linux evidence remains useful for the execution paths it actually exercised, but it is not the current public CI execution environment.
+
+---
+
+## 2. CI workflow job set
+
+`.github/workflows/ci.yml` currently defines these jobs:
+
+| Job | Runner | Timeout | Purpose | Workflow behavior |
+|---|---|---:|---|---|
+| `lint` | Ubuntu | 10 min | `py_compile` + Ruff syntax/undefined-name blocking scan | Blocking in workflow |
+| `unit-fast` | Ubuntu | 30 min | Broad fast unit/governance suite excluding named slow/capability files | Blocking |
+| `orchestrator-recovery` | Ubuntu | 20 min | Orchestrator, recovery, review, budget, operator action coverage | Blocking |
+| `trust-collector` | Ubuntu | 20 min | Trust, registry, collector and dashboard semantics | Blocking |
+| `slow-shard-1` | Ubuntu | 25 min | Checkpoint, loop, evidence and branch-race integration | Blocking |
+| `slow-shard-2` | Ubuntu | 25 min | Sandbox, namespace and security tests | **Job-level tolerant** (`continue-on-error: true`) |
+| `slow-shard-3` | Ubuntu | 25 min | Proxmox adapter, network and recovery integration | Blocking |
+| `windows-tests` | Windows | 90 min | Cross-platform test surface excluding Linux-native files | Blocking |
+| `cli-smoke` | Ubuntu | 15 min | Installed CLI command smoke surface | Blocking |
+| `package-build` | Ubuntu | 15 min | Build wheel | Blocking |
+
+The workflow triggers on pushes to `master` and pull requests targeting `master`.
+
+---
+
+## 3. Publication Tree
+
+`.github/workflows/publication-tree.yml` runs a two-OS matrix:
 
 ```text
-1. Full-suite green (strongest)
-   All tests collected and run in a single pytest invocation.
-   .28 Linux: ~5.5 min — the authoritative release gate.
-   Windows: ~10 min — may exceed local tool ceilings; use sharded path if needed.
-
-2. Sharded full-suite green (strong)
-   All test files run in N shards via scripts/run_full_suite_sharded.py.
-   Per-shard results aggregated into a combined summary.
-   Sharded totals may differ slightly from single-run due to pytest collection-
-   order effects (some tests are collected only in cross-file fixture context).
-   Use when the single-run path hits a time/tool ceiling.
-
-3. Targeted affected-area green (weakest, but useful for iteration)
-   A curated set of test files covering the specific code changed.
-   Not a release gate alone — must be combined with tier 1 or 2 before tagging.
+publication tree (ubuntu-24.04)
+publication tree (windows-2022)
 ```
 
-## Windows sharded suite (v3.6.0)
+The workflow verifies, among other things:
 
-When the Windows full suite exceeds available time/tool ceilings, use:
+- clean/publication tree guard;
+- publication-guard tests;
+- wheel and sdist build;
+- exactly one wheel and one sdist;
+- installation of the wheel into an empty virtual environment;
+- version/CLI smoke;
+- source ↔ wheel ↔ sdist runtime schema-set parity;
+- installed-wheel schema loading outside the checkout.
 
-```bash
-python scripts/run_full_suite_sharded.py --shards 6
-```
+This is the authoritative packaging/publication portability gate, not merely a unit-test shard.
 
-This runs 264 test files in 6 sequential shards (~10 min total wall time),
-aggregates the results, and exits non-zero on any failure. Each shard is
-small enough to complete within a single tool invocation if needed.
+---
 
-**Reconciliation note:** sharded totals (sum of per-shard results) may be
-~100-120 tests fewer than a single-run collection due to pytest collection-
-order effects. This is expected — the shards verify every test file runs
-green; the count difference is a collection artifact, not a missing-test bug.
+## 4. Required branch checks
 
-## GitHub-hosted runners
+At this baseline, branch protection expects the ten CI job contexts plus the two Publication Tree matrix contexts.
 
-All CI jobs run on **GitHub-hosted runners**. Linux jobs use `ubuntu-24.04`;
-Windows jobs use `windows-2022`. Each job receives a fresh VM with no shared
-state. This model is portable, free for public repositories, and avoids the
-security risks of attaching self-hosted runners to a public repository.
-
-Pinned official actions run on the **Node 24** runtime:
-`actions/checkout@v7.0.1` and `actions/setup-python@v7.0.0`.
-
-## GitHub Actions workflow
-
-Location: `.github/workflows/ci.yml`
-
-Triggers: `push` to `master`, all `pull_request`.
-
-### Jobs
-
-| Job | Runner | Timeout | Purpose | Blocking |
-|-----|--------|---------|---------|----------|
-| `lint` | `ubuntu-24.04` | 10 min | py_compile all source + Ruff (E9,F63,F7,F82) | ✅ |
-| `unit-fast` | `ubuntu-24.04` | 30 min | Fast unit + governance tests (excludes slow files) | ✅ |
-| `orchestrator-recovery` | `ubuntu-24.04` | 20 min | Orchestrator + recovery console + budget tests | ✅ |
-| `trust-collector` | `ubuntu-24.04` | 20 min | Trust + registry + dashboard + collector semantics | ✅ |
-| `slow-shard-1` | `ubuntu-24.04` | 25 min | Checkpoint + loop + evidence | ✅ |
-| `slow-shard-2` | `ubuntu-24.04` | 25 min | Sandbox + namespace + security | Required check; job-level tolerant |
-| `slow-shard-3` | `ubuntu-24.04` | 25 min | Proxmox adapter + network + integration | ✅ |
-| `windows-tests` | `windows-2022` | 90 min | Cross-platform fast tests | ✅ |
-| `cli-smoke` | `ubuntu-24.04` | 15 min | CLI command surface (includes `recover`) | ✅ |
-| `package-build` | `ubuntu-24.04` | 15 min | `python -m build --wheel` | ✅ |
-
-### slow-shard-2 tolerance
-
-slow-shard-2 is registered as a required status check, but the workflow
-job retains job-level `continue-on-error: true` for hosted-runner capability
-constraints. Branch protection requires the check to report, while GitHub
-Actions tolerates a job-level test failure. Capability-sensitive tests may
-also produce explicit reasoned skips.
-
-## Local verification (Makefile)
-
-The `Makefile` mirrors the CI jobs so "verified locally" = "verified in CI":
-
-```bash
-make install          # pip install -e ".[dev]"
-make ci-core          # ci-fast + ci-recovery + ci-trust in sequence
-make ci-blocking      # all blocking CI jobs (lint + fast + recovery + trust + shards + smoke + package)
-make ci               # alias for ci-blocking (full blocking CI surface)
-make ci-fast          # fast unit + governance tests (excludes slow files)
-make ci-recovery      # orchestrator + recovery + budget tests
-make ci-trust         # trust + registry + dashboard tests
-```
-
-## Slow-test policy
-
-The following test files are excluded from `unit-fast` and run in dedicated
-shards or with `continue-on-error`:
-
-**Sandbox/security (need kernel privileges):**
-```
-test_seccomp_*, test_cgroup_*, test_pid_namespace*, test_mount_confinement*,
-test_namespace_*, test_subprocess_*, test_sandbox_demo, test_cwd_temp_isolation,
-test_hostile_network_cert, test_adversarial_remote, test_network_hardening,
-test_preset_e2e, test_preset_wiring
-```
-
-**Slow integration (exceed timeout in fast job):**
-```
-test_checkpoint_*, test_dashboard_health, test_dashboard_live_data,
-test_memory_dashboard, test_graph_cli_parity, test_chain_orchestrator,
-test_evaluation_suite_lifecycle, test_workflow_recovery_integration
-```
-
-## Required checks (branch protection)
-
-Branch protection is technically enforced on `master` with strict status checks
-and `enforce_admins: true`. The repository is public; required approvals are
-`0` for the solo maintainer. The following **12** checks are required:
+The exact current required set is:
 
 ```text
 lint
@@ -136,34 +94,193 @@ publication tree (ubuntu-24.04)
 publication tree (windows-2022)
 ```
 
-## Version snapshot tests
+Do not encode “10/10 + 2/2” as the governance contract in multiple documents. Job counts are descriptive and may change. The contract is: **all branch-protection-required hosted checks for the candidate SHA must satisfy branch protection before normal merge/release progression.**
 
-NodeChain has ~30 test files that assert `nodechain.__version__ == "X.Y.Z"`.
-When bumping the version (in `__init__.py` + `pyproject.toml`), update these
-snapshots or CI will fail. The version is currently `3.6.0`.
+`docs/governance/release-checklist.md` and the public-development policy refer back to this document/workflow rather than maintaining an independent count.
 
-## Branch protection status
+---
 
-This repository is public. Classic branch protection is technically
-enforced on master with strict required status checks and
-enforce_admins: true.
+## 5. `slow-shard-2` evidence semantics
 
-**Operating state (v3.6.0):**
+`slow-shard-2` is special.
 
-- Strict required checks: enabled (the 12 checks listed above).
-- Required approvals: `0` (solo maintainer).
-- `enforce_admins`: true.
-- `windows-tests`: required (90-minute timeout), blocking.
-- Publication Tree (Ubuntu and Windows): required, blocking.
-- Ruff: blocking (`E9,F63,F7,F82`), no `--exit-zero`.
-- GitHub Actions runtime: Node 24 for the pinned official actions
-  (`checkout@v7.0.1`, `setup-python@v7.0.0`).
+It includes capability-sensitive sandbox/security tests but the job itself has:
 
-**Project policy** (still applies alongside technical enforcement):
+```yaml
+continue-on-error: true
+```
 
-- Pull requests and master pushes must have green blocking CI before release.
-- No direct master commits except emergency recovery.
-- Every feature/change should go through a PR where possible.
-- Release tags must only be created from a green master commit.
-- `slow-shard-2` is a required check but retains job-level
-  `continue-on-error: true` for hosted-runner capability constraints.
+Therefore a required `slow-shard-2` check does **not** mean the hosted runner proved all privileged native-containment behavior. The workflow intentionally tolerates capability-related job failure on hosts that cannot provide the required kernel/privilege environment.
+
+Consequences:
+
+- branch protection requires the check context to complete as configured;
+- hosted CI remains useful for portable security regressions and explicit skips;
+- privileged namespace/seccomp/cgroup/supervised-execution qualification requires a separately named capable Linux profile and evidence run;
+- no release document should translate a green hosted `slow-shard-2` context into “privileged Linux containment proven.”
+
+---
+
+## 6. Verification evidence classes
+
+NodeChain uses several different evidence strengths. They should not be collapsed into one “tests passed” statement.
+
+### A. Hosted protected-branch qualification
+
+The full required GitHub check set for the exact candidate SHA.
+
+Use for:
+
+- ordinary merge/release governance;
+- cross-platform regression;
+- package/publication proof;
+- public reproducibility.
+
+### B. Full local suite
+
+A single local pytest invocation that collects/runs the repository test tree in that environment.
+
+Useful for broad regression confidence, but its evidentiary value depends on the host and enabled capabilities.
+
+### C. Sharded local suite
+
+All intended test files executed through multiple invocations. Useful when host/time constraints make a single invocation impractical.
+
+Sharded pass totals may not equal one-shot collection totals if collection behavior depends on cross-file context. Record file coverage and shard results rather than asserting numerical identity.
+
+### D. Targeted affected-area suite
+
+A bounded set of tests for the changed behavior. Appropriate for iteration and acceptance of a narrow change, but not by itself equivalent to full release qualification.
+
+### E. Capability-qualified native/security suite
+
+Runs on an explicitly qualified Linux host/profile with the privileges/kernel features needed by the path under test.
+
+Use for claims about:
+
+- PID namespaces;
+- seccomp;
+- procfs namespace views;
+- cgroup containment;
+- ptrace/supervised execution;
+- privileged mount/network isolation.
+
+The evidence must name the exact code SHA and host profile.
+
+---
+
+## 7. Local Makefile: useful, not exact hosted parity
+
+Older documentation claimed the `Makefile` mirrored CI exactly. That is not true at this baseline.
+
+Two concrete differences are visible in the current files:
+
+### Ruff behavior differs
+
+Hosted CI runs:
+
+```bash
+ruff check src/nodechain/ --select E9,F63,F7,F82 --no-cache
+```
+
+and treats failure as blocking.
+
+The current `Makefile` `ci-lint` target still includes:
+
+```bash
+--exit-zero
+```
+
+so `make ci-lint` does not reproduce the hosted lint gate.
+
+### `make ci-blocking` is not the full protected check set
+
+The current target runs local lint/fast/recovery/trust/shard-1/shard-3/smoke/package targets. It does not itself reproduce:
+
+- `slow-shard-2` as configured by hosted CI;
+- `windows-tests`;
+- Ubuntu + Windows Publication Tree.
+
+Therefore:
+
+> **Use Make targets for local iteration. Use the hosted required checks as the authoritative public merge/release qualification surface.**
+
+A future tooling correction may restore closer parity; until then the documentation must not claim parity that the commands do not provide.
+
+---
+
+## 8. Useful local commands
+
+```bash
+python -m pip install -e ".[dev]"
+
+make ci-fast
+make ci-recovery
+make ci-trust
+make ci-shard-1
+make ci-shard-3
+
+# Direct blocking-equivalent Ruff invocation
+python -m py_compile $(find src/nodechain -name '*.py')
+ruff check src/nodechain/ --select E9,F63,F7,F82 --no-cache
+
+# Broad local suite
+python -m pytest tests/ -q --tb=short
+```
+
+On Windows, use the platform-appropriate shell/commands rather than the POSIX `find` example.
+
+---
+
+## 9. Version/package qualification
+
+The released version at this baseline is `3.6.0`, and both `pyproject.toml` and `nodechain.__version__` report that version.
+
+Publication Tree additionally hard-checks the installed package version and schema availability.
+
+The development branch may contain post-release features while the package version remains the last released version. This is expected and is why `BASELINE.md` distinguishes released and development state.
+
+Do not label a post-v3.6 development feature “shipped in v3.6.0” merely because it exists on `master` while the version metadata remains `3.6.0`.
+
+---
+
+## 10. Release qualification rule
+
+For an ordinary public release:
+
+1. release candidate PR is scoped and reviewed;
+2. every branch-protection-required hosted check for the exact head SHA satisfies protection;
+3. the PR is squash-merged according to governance policy;
+4. push-triggered checks on the resulting `master` release commit complete as required;
+5. package artifacts are rebuilt/verified from the accepted release commit;
+6. wheel/sdist installation, version and schema/package proofs pass;
+7. checksums and release provenance are retained;
+8. tag/release points to the verified release commit.
+
+If the release makes a native-containment claim beyond hosted capabilities, the applicable capability-qualified evidence must also be attached to that exact release candidate/release commit according to its qualification plan.
+
+---
+
+## 11. What hosted CI does not prove
+
+A fully green protected check set does not by itself prove:
+
+- generic POSIX untrusted Harness Node routing through the supervised backend (T3 remains a code integration boundary at the baseline);
+- privileged Linux namespace/seccomp/cgroup/ptrace behavior on every deployment host;
+- production service SLOs or scale;
+- multi-tenant isolation;
+- real-model quality;
+- live-network source reliability;
+- security against kernel/container escape or arbitrary hostile code.
+
+Those require separate execution/product evidence.
+
+---
+
+## 12. Documentation update rule
+
+When `.github/workflows/ci.yml`, Publication Tree, or branch-protection requirements change:
+
+- update this document from the actual workflow/configuration;
+- update governance docs to reference the authoritative set rather than duplicating counts;
+- update `BASELINE.md` only if the change materially alters the project's verification/readiness claim.

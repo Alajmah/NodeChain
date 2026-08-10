@@ -1,291 +1,390 @@
-# NodeChain Development Roadmap
+# NodeChain Roadmap — Post-Rebaseline
 
-This roadmap tracks version-by-version development from v2.22.0 onward.
-It is maintained collaboratively with strategic review as strategic reviewer.
-Each version closes one runtime promise end-to-end: runtime behavior,
-durable record, trace, reconciler, dashboard, and tests.
+**Document class:** Future work  
+**Baseline date:** 2026-08-10  
+**Baseline SHA:** `af1943c24a58d80ae048b9b9d50842cf0e0b27d1`  
+**Current released version:** `v3.6.0`  
+**Current implementation truth:** [BASELINE.md](BASELINE.md)
 
-**Current HEAD:** See `git log --oneline -1`
-**strategic review conversation:** `6a36016a-695c-83eb-b2f9-d657652e135b`
+This roadmap contains **unfinished outcomes only**. Shipped release history belongs in `CHANGELOG.md`; current-state claims belong in `BASELINE.md`; normative platform semantics belong in the System Specification.
 
----
-
-## Canonical Vertical Labels
-
-Each vertical closes one governance surface end-to-end:
-
-1. **Review Governance** ✅
-2. **Memory Write Governance** ✅
-3. **Side-Effect Enforcement** ✅
-4. **Memory Read Governance** (v2.40.0–v2.41.0)
-5. **Tool / Adapter Governance** (v2.42.0–v2.43.0)
-6. **Package Trust / Registry Governance** (v2.44.0–v2.45.0)
-7. **Operator Control Plane** (v2.46.0–v2.47.0)
-8. **Evaluation / Assurance** (v2.48.0–v2.49.0)
-9. **Productization** (v2.50.0–v2.52.0)
+The roadmap is organized by outcomes rather than pre-assigned release numbers. A release may close one or more outcomes, but version numbering is not itself progress.
 
 ---
 
-## Completed Verticals
+## Roadmap rules
 
-### Review Governance (v2.22.0–v2.26.0, cleanup through v2.31.2) ✅
-
-Governed DecisionReceipt materialization, digest-committed receipts,
-ReviewVerifier 9-check pipeline, durable review_decision_attempts log,
-audit triangle in TraceReconciler (trace ↔ receipt ↔ attempt log),
-fail-closed on both request_review and resolve_resume_review paths.
-
-### Memory Write Governance + Policy Type Split (v2.27.0–v2.31.2) ✅
-
-Declarative PolicyEngine as runtime authority, durable memory_decisions
-table, canonical candidate_digest, MEM-001..005 dashboard health rules,
-MEMORY_WRITE/MEMORY_READ policy type split.
-
-Memory-write governance is complete. MEMORY_READ exists as a policy type,
-but runtime read gating, durable read decisions, reconciler checks, and
-dashboard exposure audit are still forward work (v2.40.0–v2.41.0).
-
-### Side-Effect Enforcement (v2.33.0–v2.39.0) ✅
-
-Full side-effect governance vertical:
-- Lifecycle trace/ledger (started/completed/failed/unknown)
-- Runtime policy gate (PolicyType.SIDE_EFFECT)
-- Blocked attempt durable log
-- Declared-vs-observed enforcement (canonical taxonomy, CONTRACT_VIOLATION)
-- Reconciler strong binding (composite identity fields)
-- Governance dashboard (SE-001..006 health rules)
-- Idempotency/dedup hardening (collision detection, terminal dedup)
-- Recovery decision log + transition guard
-
-**Closing invariant:** A side effect must have one stable identity across
-planning, execution, completion, recovery, trace, ledger, reconciler, and dashboard.
-
-| Version | Feature | HEAD |
-|---|---|---|
-| v2.33.0–v2.33.1 | Trace/Ledger Lifecycle | `84cd1963` |
-| v2.34.0–v2.34.1 | Runtime Gate + Blocked Attempt Log | `5ca67d2c` |
-| v2.35.0–v2.35.4 | Declared-vs-Observed Enforcement | `c5662d21` |
-| v2.36.0 | Reconciler Strong Binding | `a1675ba6` |
-| v2.37.0 | Governance Dashboard (SE-001..006) | `65cc5271` |
-| v2.38.0–v2.38.1 | Idempotency/Dedup Hardening | `1fa42036` |
-| v2.39.0 | Recovery Decision Log + Transition Guard | `96bb5ff4` |
+1. **Every item must close a concrete product, authority, qualification, or usability gap.**
+2. **Already-proven behavior is not reopened merely because a stronger implementation is imaginable.**
+3. **Trace, state, side-effect, trust, and containment claims must be backed by runtime evidence, not configuration alone.**
+4. **A stronger control may fail closed; it must not silently degrade to a weaker path.**
+5. **Product work should consume the existing runtime before inventing a new execution substrate.**
+6. **Documentation that describes current behavior must be pinned to a code baseline and updated when the baseline materially changes.**
+7. **New roadmap gates require a demonstrated defect, unmet product outcome, or explicit strategic decision.**
 
 ---
 
-## Forward Roadmap
+# Horizon 0 — Baseline and authority closure
 
-### Phase 2 — Close Memory Read Governance
+**Objective:** remove the remaining contradictions that prevent NodeChain from making a literal “one governed execution truth” claim across the important production and product-proof paths.
 
-#### v2.40.0 — Memory Read Policy Runtime Gate
+These are bounded corrections identified by the current code/document rebaseline. They are not a new platform expansion phase.
 
-**Goal:** make memory reads governed like memory writes.
+## H0.1 — Research Workspace CLI descriptor/finalization correction
 
-No durable memory, retrieved context, or memory-derived summary may be
-exposed to a node unless a MEMORY_READ policy decision explicitly allows
-it before retrieval or exposure.
+**Observed gap**
 
-Core work:
-1. Add runtime gate before memory/context retrieval and before envelope/context exposure
-2. Evaluate MEMORY_READ policy with node_id, purpose, query type, sensitivity, budget
-3. Emit MEMORY_READ_REQUESTED / ALLOWED / DENIED events
-4. Record durable memory_read_decisions
-5. Block context exposure when denied — denied memory must not appear in
-   invocation envelope, node context, trace-visible node input, or
-   downstream synthesized context
-6. Add reconciler check: memory read trace ↔ durable decision
+`WorkspaceRunner.from_descriptor()` restores `_run_descriptor`, and terminal `resume()` finalizes the Research Workspace bundle only when `_run_descriptor` exists. The user-facing `nodechain research review` command reconstructs `WorkspaceRunner(...)` manually instead of using the descriptor-aware constructor.
 
-Acceptance criteria:
-- No node receives durable memory/context unless a MEMORY_READ policy decision allowed it
-- A denied memory read must not appear in the invocation envelope, node context, trace-visible node input, or downstream synthesized context
-- Denied memory reads produce durable decision + trace
-- Reconciler detects memory read without decision
+**Required outcome**
 
-#### v2.41.0 — Memory Read Dashboard + Exposure Audit
+The CLI fresh-process review path must reconstruct from the persisted descriptor so terminal approve/reject/revise behavior retains the same bundle-finalization truth as the accepted backend/library path.
 
-**Goal:** expose memory-read governance health.
+**Exit evidence**
 
-Dashboard fields:
-- memory_read_requested_count
-- memory_read_allowed_count
-- memory_read_denied_count
-- memory_read_without_decision_count
-- memory_read_policy_mismatch_count
-- nodes_with_memory_exposure
+- CLI review reconstruction uses the descriptor-aware path or an equivalent proven binding;
+- terminal review/resume produces or fails the terminal bundle through the same C5 boundary;
+- fresh-process approve/reject/revise regression proof covers the CLI wiring;
+- no change to accepted WP 5.1/WP 5.2 bundle semantics.
 
-Completes the memory governance vertical:
-write policy → write decision log → write reconciler → write dashboard →
-read policy → read decision log → read reconciler → read dashboard
+## H0.2 — T3 generic POSIX untrusted-node routing
 
----
+**Observed gap**
 
-### Phase 3 — Tool and Adapter Governance
+The hardened supervised Linux execution substrate exists, but `SubprocessRunner.run_isolated()` explicitly rejects POSIX `local_untrusted` / `remote_untrusted` node execution with `supervised_backend_required` until T3 routing/result mapping is complete.
 
-#### v2.42.0 — Tool Access Runtime Gate Generalization
+**Required outcome**
 
-**Goal:** replace hardcoded tool assumptions with manifest/contract-driven tool grants.
+Either:
 
-Core work:
-1. Tool access determined from node contract / manifest
-2. Runtime checks requested tool against declared tool grants
-3. Durable tool access decision log
-4. Trace events for TOOL_ACCESS_ALLOWED / TOOL_ACCESS_DENIED
-5. Reconciler detects tool call without grant
+- route the ordinary `NodeInvoker → SubprocessRunner` untrusted POSIX path into the supervised backend with truthful result mapping; or
+- retain the explicit fail-closed fence until that routing is fully qualified.
 
-Acceptance criteria:
-- A node cannot call a tool merely because of its node_id
-- A node must have an explicit contract/manifest grant
+No legacy weaker POSIX fallback is acceptable.
 
-#### v2.43.0 — Adapter Grant Enforcement
+**Exit evidence**
 
-**Goal:** enforce protocol/model/API adapter permissions as runtime gates.
+- one governed backend owns ordinary POSIX untrusted node execution;
+- `NodeInvoker` sees truthful start/exit/timeout/output/containment results;
+- no double-spawn or parallel containment authority;
+- qualified Linux host evidence covers the integrated production path.
 
-Core work:
-1. Model adapter grants
-2. Search/API adapter grants
-3. Memory adapter grants
-4. External service grants
-5. Adapter-level policy checks
-6. Reconciler verifies adapter call against granted adapter
+## H0.3 — Singular execution authority
 
----
+**Observed gap**
 
-### Phase 4 — Package Trust and Supply-Chain Boundary
+`runtime/chain_orchestrator.py` contains a lightweight composition executor that directly invokes `node.execute()` and explicitly bypasses the full `Orchestrator`.
 
-#### v2.44.0 — Node Package Trust Runtime Enforcement
+**Required outcome**
 
-**Goal:** prevent untrusted or unsigned nodes from executing privileged capabilities.
+Multi-chain/composition utilities must either delegate actual governed execution to the primary orchestrator or be explicitly classified as non-production/test-only utilities that cannot be confused with governed chain execution.
 
-Core work:
-1. Package identity
-2. Package digest
-3. Trust level
-4. Signature or local trust marker
-5. Runtime enforcement before invocation
-6. Trace + durable trust decision
+**Exit evidence**
 
-Acceptance criteria:
-- Untrusted package cannot request privileged tool/memory/side-effect capability
-- Trust decision is visible in trace and reconciler
+No production-facing composition path can execute arbitrary Harness Nodes outside the accepted policy, persistence, side-effect, trace, and recovery authorities.
 
-#### v2.45.0 — Registry Admission Policy
+## H0.4 — Singular durable trace-emission authority
 
-**Goal:** make the node registry a governance boundary.
+**Observed gap**
 
-Core work:
-1. Validate node manifests at registration
-2. Reject invalid side-effect/tool/memory declarations
-3. Record registry admission decisions
-4. Add registry health dashboard
+The main runtime has a TraceEmitter/controller architecture, but at least one resume validation path still directly calls `self.trace.add_event(...)`.
 
----
+**Required outcome**
 
-### Phase 5 — Human/Operator Control Plane
+Every accepted authoritative runtime event is emitted through one durability-aware boundary and the live trace is projected from the same logical record.
 
-#### v2.46.0 — Operator Recovery Console
+**Exit evidence**
 
-**Goal:** make review, unknown side effects, blocked side effects, and failed policy gates visible and actionable.
+- no production direct append bypass for authoritative events;
+- event identity is stable across durable/live views;
+- resume, failure, review, recovery, side-effect, and validation paths use the same emission authority.
 
-Core work:
-1. List paused/recovery-required runs
-2. Show unknown side effects
-3. Show blocked side-effect attempts
-4. Show review receipts
-5. Show memory/tool policy denials
-6. Allow operator decision records
+## H0.5 — Authoritative state-transition boundary
 
-#### v2.47.0 — Operator Recovery Actions
+**Observed gap**
 
-**Goal:** use the durable recovery decision model from v2.39.0 to let
-operators safely resolve, retry, abandon, or verify uncertain side-effect
-states from the control plane.
+The orchestrator still performs direct `ChainState` mutation around persistence operations.
 
-Core work:
-1. Mark unknown side effect as externally verified completed
-2. Mark unknown side effect as safe to retry
-3. Mark run as unrecoverable
-4. Emit durable recovery decision receipt (uses v2.39.0 model)
-5. Reconciler verifies recovery receipt
+**Required outcome**
 
-Split across versions:
-- v2.39.0 = durable recovery model + legality (done)
-- v2.46.0 = recovery visibility console
-- v2.47.0 = operator action execution using that model
+Make the durability-before-authoritative-acknowledgement rule explicit through one transition boundary. Ephemeral in-memory preparation is allowed; treating an uncommitted mutation as authoritative is not.
+
+**Exit evidence**
+
+- named transition API/coordinator owns accepted chain-state transitions;
+- interruption reconstructs the last accepted state deterministically;
+- run and resume share the same transition semantics.
+
+## H0.6 — Deployment profile truth
+
+**Required outcome**
+
+Documentation and qualification distinguish at least:
+
+- trusted local development;
+- GitHub-hosted cross-platform CI;
+- privileged Linux containment verification;
+- generic POSIX untrusted-node execution;
+- Windows control-plane/development behavior;
+- future production delegated/managed execution.
+
+No document may use evidence from one profile to imply qualification of another.
 
 ---
 
-### Phase 6 — Evaluation and Assurance
+# Horizon 1 — Governed Research Workspace productization
 
-#### v2.48.0 — Chain Evaluation Harness
+**Objective:** turn the accepted research product-proof backend into a coherent user product without weakening the runtime/evidence contract.
 
-**Goal:** evaluate complete autonomous chains, not only unit behavior.
+## H1.1 — Workspace object model
 
-Core work:
-1. Golden chain scenarios
-2. Expected trace invariants
-3. Expected policy decisions
-4. Expected memory decisions
-5. Expected side-effect ledger states
-6. Regression reports
+Provide a stable user-facing concept of a Workspace containing:
 
-Becomes the quality gate for NodeChain itself.
+```text
+brief / objective
+plan
+runs
+sources
+qualified sources
+evidence
+claims
+citations
+uncertainties
+faults and recovery
+review decisions
+trace
+terminal verified bundles
+```
 
-#### v2.49.0 — Runtime Invariant Engine Hardening
+The Workspace should be a projection over authoritative runtime/evidence records, not an independent truth store.
 
-**Goal:** make invariants first-class runtime/reconciler checks.
+## H1.2 — Research operator experience
 
-Core work:
-1. Promote important reconciler checks into named invariants
-2. Severity levels: info/warning/error/fatal
-3. Versioned invariant sets
-4. Invariant result dashboard
-5. CI integration
+Build a coherent CLI/API/UI flow for:
+
+- create/open workspace;
+- launch research run;
+- inspect progress;
+- review pending decisions;
+- inspect sources/evidence/claims;
+- understand faults/degraded completion;
+- resume/recover;
+- verify/download final bundle;
+- compare runs.
+
+The current `research run` / `research review` commands are the starting substrate, not the final UX.
+
+## H1.3 — Live source acquisition profile
+
+Add a product profile that applies the Research Workspace evidence/bundle semantics to live source acquisition rather than the sealed fixture corpus.
+
+Required properties:
+
+- live adapters preserve the same provenance/version contract;
+- qualified-source identity is bound to actual ingested artifacts;
+- fault records remain projections of actual runtime evidence;
+- network/source variability is explicit in reproducibility claims;
+- sealed fixture mode remains available for deterministic qualification.
+
+## H1.4 — Human-readable final research artifact
+
+The terminal bundle should support a first-class user-facing report/memo view that is derived from the same claims, evidence, citations, risk, review, failure, and trace records.
+
+The product should make governance evidence understandable without requiring raw JSON inspection.
+
+## H1.5 — Product proof with users
+
+Run structured product proof against real research tasks and evaluate:
+
+- time to useful result;
+- source/evidence inspectability;
+- reviewer comprehension;
+- trust in citations and uncertainty;
+- usefulness of fault/recovery visibility;
+- repeatability across runs;
+- perceived governance overhead vs value.
+
+This is product proof, not a new runtime gate.
 
 ---
 
-### Phase 7 — Productization Layer
+# Horizon 2 — Governed evaluation as a runtime-level quality system
 
-#### v2.50.0 — Developer SDK Stabilization
+**Objective:** connect evaluation to the same execution truth used by production runs.
 
-**Goal:** make NodeChain usable by external builders.
+## H2.1 — Full-runtime evaluation runner
 
-Core work:
-1. Stable node authoring API
-2. Manifest authoring helpers
-3. Contract validation CLI
-4. Local chain runner
-5. Example node packages
-6. Documentation for reusable blocks
+Provide an evaluation runner that executes the complete governed chain/runtime when a metric depends on:
 
-#### v2.51.0 — Chain Builder Primitives
+- policy decisions;
+- side effects;
+- recovery/retry;
+- review;
+- persistence;
+- trace completeness;
+- trust/containment;
+- runtime cost/latency.
 
-**Goal:** expose the Lego promise.
+Direct-node deterministic evaluators may remain for node-quality tests, but their evidence class must remain explicit.
 
-Core work:
-1. Reusable node library
-2. Chain blueprint templates
-3. Typed-port compatibility checks
-4. Visual or CLI chain inspection
-5. Registry search
+## H2.2 — Evaluation evidence binding
 
-#### v2.52.0 — Product Shell / Managed Runtime
+An evaluation result should identify:
 
-**Goal:** package NodeChain as a usable platform.
+- target package/blueprint/version/digest;
+- execution profile;
+- run IDs and trace IDs;
+- evidence/bundle references;
+- metric inputs;
+- evaluator version;
+- policy/invariant set;
+- pass/fail thresholds.
 
-Core work:
-1. Run dashboard
-2. Trace browser
-3. Governance dashboard
-4. Node registry UI
-5. Chain execution UI
-6. Operator review/recovery UI
+## H2.3 — Regression and release gates
+
+Promote stable runtime-level evaluations into regression gates only after their evidence contract and reproducibility are characterized.
+
+Avoid turning every useful metric into a blocking release check.
 
 ---
 
-## Standing Conventions
+# Horizon 3 — Enterprise foundation
 
-- Each version: plan → review sign-off → implement → test → verify → commit → push → report → code-review re-review
-- Full test suite must pass (5352+ passed, 2 pre-existing DB-leak failures acceptable)
-- Version-guard tests (~32 files) batch-updated on each version bump
-- CHANGELOG.md entry per version
-- strategic reviews actual code on GitHub, not just reports
-- Side-effect transitions follow the legal transition graph (see state.py LEGAL_TRANSITIONS)
+**Objective:** make the local governed runtime suitable as the execution core of an organizational platform.
+
+## H3.1 — Organization and identity model
+
+- organizations/workspaces/projects;
+- users/service identities;
+- roles and scoped authority;
+- reviewer identity and delegation;
+- audit identity continuity.
+
+## H3.2 — Multi-tenant isolation
+
+Define and prove isolation for:
+
+- state databases;
+- traces/evidence;
+- package registries;
+- secrets/credentials;
+- memory/vector stores;
+- connector access;
+- policy configuration;
+- execution workers.
+
+## H3.3 — Secrets and connector governance
+
+Connect external systems through explicit credential scopes, capability grants, audit events, rotation, and revocation. Connector trust must remain separate from node/package trust.
+
+## H3.4 — Retention and compliance controls
+
+- evidence retention policies;
+- legal hold / deletion authority;
+- export/audit bundles;
+- data classification;
+- policy/version history;
+- tenant-level compliance evidence.
+
+## H3.5 — Scale and service qualification
+
+Measure and qualify:
+
+- concurrent runs;
+- queueing/backpressure;
+- state contention;
+- trace volume;
+- recovery under worker loss;
+- latency/cost envelopes;
+- SLOs and operator failure modes.
+
+Do not infer service scalability from unit-test volume.
+
+---
+
+# Horizon 4 — Node ecosystem and Blueprint Studio
+
+**Objective:** make governed reuse a daily developer/operator workflow rather than an internal capability.
+
+## H4.1 — Private Registry product surface
+
+Productize the existing registry/trust substrate into a coherent organizational catalog:
+
+- search/discovery;
+- package/version detail;
+- trust/certification status;
+- dependency graph;
+- compatibility;
+- deprecation/revocation;
+- installation/admission policy;
+- usage/evaluation history.
+
+## H4.2 — Node authoring experience
+
+Provide a low-friction path from:
+
+```text
+create → implement → validate → test → evaluate → package → sign → publish → reuse
+```
+
+with generated contracts/manifests only where the generated result remains explicit and reviewable.
+
+## H4.3 — Blueprint Studio
+
+Expose composition with governance context:
+
+- contract/typed-port graph;
+- requirements and adapter grants;
+- trust posture;
+- side-effect map;
+- review gates;
+- loops/branches;
+- cost/risk overlays;
+- validation/preflight;
+- execution simulation;
+- evidence expectations.
+
+The Studio must compile to the same blueprint/runtime authority rather than become a second workflow engine.
+
+---
+
+# Horizon 5 — Visual builder, managed execution, and ecosystem
+
+**Objective:** expand distribution and usability after the execution/evidence model is stable enough to survive broader use.
+
+Potential outcomes:
+
+- graphical typed-port composition;
+- managed NodeChain execution service;
+- governed remote worker pools;
+- organization-wide policy distribution;
+- certified node program;
+- controlled blueprint sharing/marketplace;
+- third-party node ecosystem;
+- enterprise assurance dashboards;
+- cross-workspace reusable evidence and evaluation assets.
+
+These are strategic directions, not committed near-term release promises.
+
+---
+
+# What is deliberately not on this roadmap
+
+The following do not justify roadmap entries by themselves:
+
+- file-size reduction;
+- arbitrary refactoring quotas;
+- release-number milestones with no user/runtime outcome;
+- adding another execution backend because an existing module is large;
+- broad feature expansion that bypasses unresolved execution truth;
+- reopening accepted WP 5.1/WP 5.2 semantics without new evidence that they are incorrect or materially unusable.
+
+Maintainability work belongs on the roadmap only when it closes a named authority, testability, security, or product-delivery gap.
+
+---
+
+# Roadmap closure discipline
+
+A roadmap item is complete when its stated outcome and evidence are satisfied. Completion should be recorded in `CHANGELOG.md` and, where it changes the current descriptive truth, in `BASELINE.md` and `ARCHITECTURE.md`.
+
+Completed items should then be removed from this future-only roadmap rather than accumulating forever as checked boxes.
