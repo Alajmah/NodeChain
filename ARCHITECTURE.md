@@ -1,546 +1,532 @@
-# NodeChain Architecture Report — v1.3.1
+# NodeChain Current Architecture
 
-> **HISTORICAL DOCUMENT** — This report covers NodeChain v0.1.0 through v1.3.1.
-> The current version is v3.6.0. For the full product vision, see
-> **[VISION.md](VISION.md)**. For current capabilities, see README.md,
-> CHANGELOG.md, and docs/ci.md. This document is retained for historical
-> reference but does not reflect the current architecture.
+**Document class:** Descriptive architecture  
+**Baseline date:** 2026-08-10  
+**Baseline SHA:** `af1943c24a58d80ae048b9b9d50842cf0e0b27d1`  
+**Released version at baseline:** `v3.6.0`  
+**Current-state summary:** [BASELINE.md](BASELINE.md)
 
-**Date**: 13 June 2026, 11:52 PM GMT+3
-**Tag**: `v0.1.0-milestone-1` through `v1.3.1-cgroup-runtime-integration`
-**Tests**: 1429/1429 Windows (11 skipped), 1427/1427 Linux (13 skipped)
+This document describes the architecture that actually exists in the development baseline, including important alternate paths and known authority seams. It is not the normative System Specification and it does not hide compatibility or direct-execution paths that are narrower than the primary governed runtime.
 
----
-
-## System Description
-
-NodeChain is a contract-validated, crash-consistent, governed graph runtime
-with allocator-backed invocation identity, canonical operation-level side-effect
-journaling, durable cost accounting, complete all/any/first/quorum branch
-scheduling, enforced branch cancellation/result policies, enforced loop
-entry/exit/budget controls, real human-review pause/resume and interactive
-review, merge semantics, ledger-backed trace reconciliation, and a script-safe
-developer CLI.
+The previous root architecture report described v0.1.0–v1.3.1 and was explicitly historical. That report remains available in git/release history; this root document now describes the current implementation.
 
 ---
 
-## Source Map
+## 1. Architectural thesis
 
-```
-Category              Files    Lines
-─────────────────────────────────────
-Runtime (15)             15    5,600
-Nodes (19)               19    3,362
-Core (9)                  9    2,030
-Validation (4)            4    1,134
-Adapters (8)              8    1,085
-Memory (3)                3      505
-CLI (7)                   7      650
-─────────────────────────────────────
-Source                  115   15,036
-Tests                   45   11,200
-Schemas (JSON)          20      —
-Blueprints (YAML)        3      —
-─────────────────────────────────────
-Total                   183   26,236
-```
+NodeChain is built around one central idea:
 
----
+> Autonomous work should execute through reusable capability units whose contracts, permissions, external effects, evidence, recovery, and quality are part of the execution model.
 
-## Runtime Component Map
-
-Runtime consists of 15 modules: the orchestrator and 13 focused control-plane
-components plus `__init__.py` and `loop_enforcer.py`.
-
-```
-Component               Lines  Tests  Responsibility
-──────────────────────────────────────────────────────────────
-Orchestrator            1,800      —  Coordination, state lifecycle, cost hierarchy
-StepAllocator              93     11  Async-locked step identity
-GraphScheduler            389     31  Execution order, loop routing, review transitions
-BranchExecutor            850     35  Parallel branches + merge + quorum + cancel
-LoopEnforcer              185     45  Declarative loop condition evaluation
-NodeInvoker               127      —  Node execution boundary
-PolicyGate                191     17  Authorization
-PersistenceCoordinator    207     18  Transaction / recovery
-ReviewManager             208     17  Human review lifecycle
-TraceReconciler           321     20  Audit integrity (hard errors)
-TraceEmitter              277     26  Structured trace creation
-ValidationPipeline        218      —  Schema + semantic + calibration
-InvariantEngine           530     56  Structural / governance legality + quorum validation
-FailureManager            282     13  Failure classification
-```
-
----
-
-## Branch Scheduling Matrix
-
-### wait_for Modes
-
-```
-Mode        Threshold           On Failure              Merge Scope
-──────────────────────────────────────────────────────────────────────
-all         All must succeed    Any fail -> block       All completed
-any         >= 1 must succeed   All fail -> block       All completed
-first       First success       All fail -> block       First only
-quorum      count or ratio      < threshold -> block    Quorum winners only
-```
-
-### cancellation_policy (General)
-
-```
-Policy                Mechanism              After Success
-──────────────────────────────────────────────────────────────────
-allow_all             asyncio.gather         All branches merge
-ignore_late           asyncio.gather         Late outputs excluded
-cancel_on_first       task.cancel()          Pending cancelled
-first_success_only    task.cancel()          Pending cancelled + merge isolation
-```
-
-### cancellation_after_quorum (Quorum-specific)
-
-```
-Policy          Mechanism                         After Quorum
-──────────────────────────────────────────────────────────────────
-cancel          task.cancel() on pending          Pending cancelled
-ignore_late     Let finish, mark ignored          Late excluded from merge
-allow_all       Let finish normally               All merge
-```
-
-### Quorum Configuration
-
-```yaml
-joins:
-  - join_id: j1
-    to_node: joiner
-    from_branches: [bio, tech, med]
-    wait_for: quorum
-    quorum_count: 2                   # absolute: need 2 successes
-    # OR
-    quorum_ratio: 0.6                 # ratio: ceil(3 * 0.6) = 2
-    cancellation_after_quorum: cancel  # cancel | ignore_late | allow_all
-```
-
-### Quorum Validation
-
-```
-Violation                Severity     Condition
-─────────────────────────────────────────────────────────
-quorum_config_required   warning*     wait_for=quorum without count or ratio
-quorum_ratio_range       error        quorum_ratio not in (0, 1]
-quorum_count_minimum     error        quorum_count < 1
-
-* = error in strict mode (NODECHAIN_GOVERNANCE_STRICT=1)
-```
-
-### Trace Events
-
-```
-Event                 Metadata
-──────────────────────────────────────────────────────────────────
-quorum_reached        quorum_required, quorum_reached, winning_branches,
-                      failed_branches, pending_branches, cancellation_policy
-
-quorum_impossible     quorum_required, successes_so_far, remaining_possible,
-                      failed_branches
-```
-
----
-
-## Loop Enforcement Matrix
-
-```
-Enforcement Point    Source                    Strict Mode
-──────────────────────────────────────────────────────────────────
-entry_condition      LoopEnforcer (regex)      Parseable required
-exit_condition       LoopEnforcer (regex)      Parseable required
-max_iterations       Blueprint field            Always enforced
-max_cost_usd        invocation_ledger primary  Always enforced
-                     trace_events fallback
-```
-
-### Cost Source Hierarchy
-
-```
-Priority:
-  1. invocation_ledger (durable, per-invocation cost_usd)
-     — used when ledger has invocation rows for loop nodes
-     — even when total is 0.0 (real zero-cost runs)
-  2. trace_events (fallback, audit surface)
-     — used when no ledger rows exist yet
-
-Metadata in LOOP_BLOCKED / LOOP_EXITED:
-  cost_source: "invocation_ledger" | "trace_events"
-```
-
-### Condition Syntax
-
-```
-Format: variable operator value
-  variable: [a-zA-Z_][a-zA-Z0-9_]*
-  operator: ==, !=, <, >, <=, >=
-  value:    numeric or quoted string
-
-Examples:
-  source_count >= 3
-  confidence > 0.7
-  quality_score >= 0.5
-
-Prose conditions: advisory in non-strict, hard error in strict.
-```
-
----
-
-## Merge Strategies
-
-```
-Strategy    List Fields              Scalar Fields          Conflicts
-─────────────────────────────────────────────────────────────────────
-append      Concat + _provenance     Last-writer-wins       None
-merge       Concat                   First-writer-wins      scalar_key_conflict
-latest      Take latest branch       Same                   None
-concat      Concat lists/strings     Concat strings         incompatible_types
-```
-
----
-
-## Review Transitions
-
-```
-Decision          Scheduler Action     Runtime Behavior
-──────────────────────────────────────────────────────────
-approve           REVIEW_APPROVE       Continue from next node
-reject            REVIEW_REJECT        Terminal failed state
-request_revision  REVIEW_REVISION      Route to revision target
-timeout           REVIEW_TIMEOUT       Terminal failed state
-```
-
-### Review Modes
-
-```
-Mode            Behavior
-──────────────────────────────────────────────────────────
-interactive     HumanAdapter prompts via CLI stdin
-auto-approve    Silently approve all reviews
-auto-reject     Silently reject all reviews
-auto-revision   Silently request revision
-disabled        Skip review gate entirely
-pause           Raise ReviewPausedException, exit code 11
-```
-
----
-
-## Enforcement Surface
-
-```
-Semantic                        Prevention              Detection
-──────────────────────────────────────────────────────────────────
-Step identity under concurrency  StepAllocator           TraceReconciler
-Durable state consistency       Atomic transaction       State <-> ledger check
-Durable cost accounting         invocation_ledger       cost_source metadata
-Parallel branch execution       BranchExecutor           BranchExecutionReport
-Quorum threshold enforcement    BranchExecutor           quorum_reached/impossible events
-Branch cancellation             task.cancel()            cancel_phase events
-Merge strategy execution        BranchExecutor           InvariantEngine
-Join fan-in/fan-out types       PortCompatibility        Orchestrator validation
-Required field coverage         PortCompatibility        Orchestrator validation
-Schema ref match                PortCompatibility        Orchestrator (strict)
-Port type compatibility         PortCompatibility        Orchestrator validation
-Policy authorization            PolicyGate               Policy trace events
-Governance coverage             InvariantEngine          Strict mode blocking
-Side-effect gating              Ledger + Capabilities    Side-effect ledger
-Side-effect identity            Operation-level keys     Pre/post-call closure
-Confidence integrity            ConfidenceCalibrator     Calibration metadata
-Source attribution              Source aliases           SourceRef validator
-Human review gate               ReviewManager            Scheduler transitions
-Interactive review              HumanAdapter             decision_provider
-Review resume                   GraphScheduler           Trace continuity
-Loop bounds                     LoopEnforcer             LoopState tracking
-Loop budget                     invocation_ledger        cost_source metadata
-Strict loop conditions          LoopEnforcer             ConditionEvaluationError
-Trace completeness              TraceEmitter             TraceReconciler
-```
-
----
-
-## Persistence Surfaces
-
-```
-Table                Purpose                       Key
-────────────────────────────────────────────────────────────
-chain_states         Materialized state snapshot     run_id
-state_events         Append-only event log           (run_id, seq)
-invocation_ledger    Idempotency + cost tracking     (run_id, step_id)
-                                                   + cost_usd column
-side_effect_ledger   External action lifecycle        (run_id, idempotency_key)
-```
-
----
-
-## Blueprint Catalog
-
-```
-Blueprint                       Nodes  Branches  Joins  Loops
-─────────────────────────────────────────────────────────────
-research_decision_v1.yaml         12         0      0     1
-quick_fact_check_v1.yaml           5         0      0     0
-domain_routed_evidence_v1.yaml     9         1      1     0
-```
-
----
-
-## Event Taxonomy
-
-```
-30+ trace event types:
-  CHAIN_STARTED / COMPLETED / FAILED
-  NODE_INVOKED / SUCCEEDED / FAILED / SKIPPED
-  BRANCH_STARTED / COMPLETED / FAILED / CANCELLED / IGNORED
-  BRANCH_FIRST_SELECTED
-  JOIN_READY / BLOCKED / PARTIAL / COMPLETED
-  POLICY_EVALUATED
-  CONTRACT_VALIDATED
-  VALIDATION_PASSED / FAILED
-  MODEL_CALLED
-  SIDE_EFFECT_STARTED / COMPLETED / FAILED
-  REVIEW_REQUESTED / RESOLVED
-  ROUTING_DECISION
-  LOOP_BLOCKED
-  quorum_reached / quorum_impossible
-  cancellation_policy_not_enforced
-  ignore_late_enforced
-  branch_cancelled
-  first_success_only_enforced
-```
-
----
-
-## Environment Configuration
-
-```
-Variable                       Purpose
-──────────────────────────────────────────────────────────────
-NODECHAIN_PROVIDER             Model adapter: lim, mock, custom
-NODECHAIN_MODEL                Model name passed to adapter
-NODECHAIN_REVIEW_MODE          interactive, auto-approve, auto-reject, auto-revision,
-                               disabled, pause
-NODECHAIN_REVIEW_DECISION      Inject decision for testing/automation
-NODECHAIN_REVIEW_TIMEOUT_MIN   HumanAdapter timeout (default 30)
-NODECHAIN_GOVERNANCE_STRICT    1 = warnings become errors, unparseable loops fail
-NODECHAIN_STRICT_SCHEMA        1 = strict schema validation
-NODECHAIN_MOCK_RISK_LEVEL      Override mock risk_classifier output
-CHROMA_HOST                    ChromaDB host (default localhost)
-CHROMA_PORT                    ChromaDB port (default 8000)
-PYTHONIOENCODING               utf-8 required on Windows for Rich CLI output
-```
-
----
-
-## CLI Surface
-
-```
-Command                  Description
-────────────────────────────────────────────────────────────────────────
-nodechain run QUERY      Execute the Research & Decision Assistant chain
-  --strict                Enable strict governance (warnings -> errors)
-  --review-mode MODE      Set review gate: interactive|auto-approve|...
-  --provider PROVIDER     Model provider: lim|mock|custom
-  -b, --blueprint PATH    Path to chain blueprint YAML
-  -m, --model MODEL       Model name for LLM calls
-  --json                  Output results as JSON
-
-nodechain inspect RUN_ID Show detailed state for a saved run
-  --db PATH               Path to chain state database
-
-nodechain reconcile RUN_ID
-                        Cross-check trace against persistent state
-  --db PATH               Path to chain state database
-  -t, --trace-dir DIR     Directory for trace files
-
-nodechain resume RUN_ID  Resume a paused or failed chain run
-  --db PATH               Path to chain state database
-  -b, --blueprint PATH    Blueprint for orchestrator reconstruction
-  -t, --trace-dir DIR     Directory for trace output
-  --review-mode MODE      Override review mode for resumed run
-
-nodechain report RUN_ID  Generate comprehensive run report
-  --db PATH               Path to chain state database
-  -t, --trace-dir DIR     Directory for trace files
-  -o, --output FILE       Save report as JSON
-
-nodechain trace FILE     View a chain trace in readable format
-```
-
-### Exit Codes
-
-```
-Code  Meaning
-─────────────────────────────────────
-  0   Success
-  1   Reconciliation errors found
-  2   Run not found
-  3   Recovery required
- 10   Validation error
- 11   Paused (waiting for review)
- 12   Chain execution failed
- 13   Run not resumable
- 14   Resume failed
-```
-
----
-
-## Trust Model
-
-### Enforcement Layers
+The primary architecture is therefore not simply a graph scheduler. It is a layered governed runtime:
 
 ```text
-Python-level (all platforms):
-  Layer 1: Package Policy        (load boundary)
-  Layer 2: Import Enforcement     (import hooks + preloaded denylist)
-  Layer 3: Filesystem Policy      (open, pathlib, os.open/stat/listdir/mutation)
-  Layer 4: Subprocess Policy      (Popen, run, call, async, os.system/popen)
-  Layer 5: Network Policy         (socket, DNS, SSL, urllib, http.client)
-
-OS-level (Linux):
-  Layer 6: Seccomp Syscall Filter (20 dangerous syscalls denied in child)
-          Applied BEFORE untrusted module import.
-
-Isolation:
-  Layer 7: Process Isolation      (subprocess execution for untrusted)
-
-Governance:
-  Layer 8: Trust Invariants       (7 structured compliance codes, INV-001..007)
-  Layer 9: CI Gates               (--trust-check, exit code 15)
-```
-
-### Enforcement Bootstrap Order (Child Subprocess)
-
-```text
-Phase 1:  Import trusted SDK + create event loop
-Phase 1b: Apply seccomp filter (Linux only, if available)
-Phase 1c: Activate ALL Python enforcement (import + fs + subprocess + network)
-Phase 2:  Import untrusted node module (UNDER seccomp + Python enforcement)
-Phase 3:  Execute node
-Phase 4:  Report + deactivate enforcement
-```
-
-The untrusted node module is NOT imported until ALL enforcement layers
-are active. Import enforcement uses `allow_preloaded=True` so trusted
-framework dependencies (pydantic, yaml) already in `sys.modules` are
-allowed, but sensitive modules (ctypes, runpy, multiprocessing) are
-always blocked by the preloaded denylist.
-
-### Trust Invariant Codes
-
-```text
-INV-001  untrusted        → requires isolation_mode=subprocess
-INV-002  untrusted        → requires child_policy_enforced=true
-INV-003  subprocess       → requires env_filtered=true
-INV-004  subprocess       → requires temp_dir_isolated=true
-INV-005  locked mode      → requires lockfile_verified=true
-INV-006  required profile → must be used (no downgrade)
-INV-007  os_profile+Linux → requires syscall_filtering_enforced=true
-INV-008  os_profile       → requires at least one OS enforcement capability
-```
-
-See [docs/frozen-surfaces.md](docs/frozen-surfaces.md) for the complete table.
-
-### Sandbox Capability Layers (Distinguished)
-
-```text
-Resource limits (RLIMIT):
-  Linux:   enforced — CPU, memory, file size, processes
-  Windows: Job Objects — CPU, memory
-  macOS:   detection only
-
-Seccomp syscall filtering:
-  Linux:   enforced when os_profile + seccomp available
-           20 dangerous syscalls denied (fork, clone, ptrace, mount, etc.)
-  Windows: not available
-  macOS:   not available
-
-Cgroups v2 (validated v1.3.1):
-  Linux:   per-invocation child cgroup with accounting
-           memory.peak, cpu.stat, pids.peak read after execution
-           optional limits: memory.max, pids.max, cpu.max
-  Windows: not available
-  macOS:   not available
-
-Namespaces (planned):
-  Linux:   not yet implemented
-
-AppArmor (planned):
-  Linux:   not yet implemented
-```
-
-### Honest Boundaries
-
-NodeChain operates at multiple enforcement levels:
-
-**What NodeChain provides:**
-- seccomp-based syscall filtering on Linux (proven by blocked-syscall tests)
-- RLIMIT resource limits on Linux
-- cgroup v2 per-invocation resource accounting on Linux (v1.3.1)
-- Job Objects resource limits on Windows
-- Python API interception on all platforms
-- Process isolation for untrusted nodes
-
-**What NodeChain does NOT provide:**
-- Namespace-based filesystem isolation (planned)
-- AppArmor security profiles (planned)
-- Native extension / ctypes isolation (ctypes is in preloaded denylist)
-- Protection against threads that bypass contextvars
-- Protection against already-captured module references
-
-For adversarial or completely untrusted code, use OS-level isolation
-(containers, VMs) in addition to NodeChain's trust runtime.
-
----
-
-*Updated for v1.2.5 — 13 June 2026*
-
-```
-File                                          Tests
-──────────────────────────────────────────────────────
-test_runtime.py                                 44
-test_branch_executor.py                         22
-test_branch_join.py                             33
-test_invariant_engine.py                        56
-test_scheduler.py                               31
-test_durable_state.py                           45
-test_durable_cost.py                            11
-test_persistence.py                             18
-test_step_allocator.py                          11
-test_branch_step_race.py                        11
-test_merge_strategy.py                          13
-test_trace_reconciler.py                        15
-test_trace_emitter.py                           26
-test_review_resume.py                            9
-test_interactive_review.py                      10
-test_wait_for_first.py                          17
-test_ignore_late.py                             17
-test_cancel_on_first.py                         17
-test_first_success_only.py                      17
-test_quorum.py                                  19
-test_loop_enforcement.py                        34
-test_loop_consolidation.py                      11
-test_strict_loop_conditions.py                  19
-test_port_compatibility.py                      18
-test_human_review.py                             6
-test_review_manager.py                          17
-test_policy_gate.py                             17
-test_side_effect_journal.py                      7
-test_side_effect_lifecycle.py                   10
-test_composability.py                            6
-test_contracts.py                                9
-test_loop_trigger.py                             5
-test_nodes/test_nodes.py                        17
-test_adapters/*                                 15
-test_infra/*                                    14
-──────────────────────────────────────────────────────
-TOTAL                                          674
+User / Operator / Product Surface
+                ↓
+CLI · Local API · Workspace · SDK
+                ↓
+Composition and Admission
+blueprints · manifests · contracts · typed ports · trust/package identity
+                ↓
+Governed Runtime
+Orchestrator · scheduler · policy · validation · state · trace · side effects · recovery
+                ↓
+Invocation / Execution Boundaries
+NodeInvoker · model/search/human/memory adapters · subprocess/sandbox/supervised execution
+                ↓
+Durable Evidence
+state events · invocation ledger · side-effect ledger · decisions · trace · bundles · eval reports
 ```
 
 ---
 
-*Updated for v1.0.0 — 13 June 2026*
+## 2. Core composition primitives
+
+### InvocationEnvelope / EnvelopeResponse
+
+The universal node-call boundary. Runtime context, capability grants, run/chain/node/step identity, and payload travel through the envelope rather than through arbitrary shared state.
+
+### NodeManifest and NodeContract
+
+Describe node identity, version, type, entry/exit requirements, typed ports, side effects, and capability requirements. Contract preflight occurs before normal chain execution.
+
+### Typed ports
+
+Connections are semantic, not merely positional. Port/schema compatibility is validated so a graph cannot be treated as valid solely because two functions happen to accept dictionaries.
+
+### ChainBlueprint
+
+Declarative graph definition including ordered nodes, connections, branches, joins, loops, gates, invariants, and configuration.
+
+### Harness Node
+
+The reusable capability unit. A node may be built-in or packaged; trust and packaging affect admission/execution policy but do not replace the node's contract.
+
+---
+
+## 3. Primary governed runtime
+
+The canonical runtime composition root is `src/nodechain/runtime/orchestrator.py`.
+
+A simplified normal-run flow is:
+
+```text
+run(query)
+  ↓
+mark running / emit chain start
+  ↓
+contract preflight
+  ↓
+blueprint + governance invariant checks
+  ↓
+scheduler determines next node
+  ↓
+allocate invocation identity / step
+  ↓
+policy gate
+  ↓
+compile InvocationEnvelope
+  ↓
+pre-call side-effect journaling
+  ↓
+invoke node
+  ↓
+classify failure / recover if needed
+  ↓
+validate output
+  ↓
+persist invocation/state evidence
+  ↓
+emit node/detail events
+  ↓
+complete observed side effects
+  ↓
+branch / loop / review routing
+  ↓
+next node or terminalize
+```
+
+The resume path reconstructs durable state and continues through corresponding scheduling, policy, invocation, validation, side-effect, review, and persistence behavior.
+
+### Extracted runtime controllers
+
+The orchestrator remains large but important responsibilities already have named boundaries, including:
+
+- contract preflight controller;
+- node output validation controller;
+- policy gate controller;
+- side-effect journal controller;
+- scheduler / branch executor / loop enforcer;
+- failure manager;
+- review manager;
+- trace emitter and reconciler;
+- persistence coordinator / StateManager stores;
+- step allocator.
+
+The architectural goal is not decomposition for its own sake. Extraction is valuable when it creates one explicit authority or a testable behavioral seam.
+
+---
+
+## 4. Scheduling, branches, loops, and review
+
+The runtime supports ordered node execution plus non-linear control flow.
+
+### Branch/join behavior
+
+Supported wait conditions include:
+
+- `all`
+- `any`
+- `first`
+- `quorum`
+
+Result/cancellation policies include allow-all, ignore-late, cancel-on-first, first-success-only, and quorum-specific post-threshold behavior.
+
+### Loops
+
+Loops are bounded by declared iteration limits and may include cost limits and declarative entry/exit conditions. The runtime must never rely on an unbounded natural-language loop instruction as its only safety bound.
+
+### Human review
+
+Risk/review routing can pause a run and later resume it from durable state. Review decisions and recovery actions are expected to be durable evidence, not ephemeral UI clicks.
+
+---
+
+## 5. Policy and capability governance
+
+Policy is evaluated as part of execution, not as a post-run report.
+
+Important policy surfaces include:
+
+- input/output validation;
+- tool access;
+- adapter access;
+- model access;
+- memory read/write;
+- side effects;
+- cost/rate/timeout;
+- retry/fallback;
+- trust level;
+- sensitivity/retention/audit.
+
+A node's manifest/contract describes requirements; the policy engine and runtime decide whether those requirements are admissible in the current execution context.
+
+Package trust, signature validity, registry status, and certification are inputs to governance. None of them independently imply execution permission.
+
+---
+
+## 6. State and persistence
+
+NodeChain uses SQLite-backed durable state and multiple append-only or lifecycle ledgers/stores.
+
+Important persistent concepts include:
+
+- chain state snapshots/materialized state;
+- state event log;
+- invocation ledger;
+- decision/action records;
+- side-effect ledger;
+- recovery records;
+- replay capsules and retry lineage;
+- trace persistence/evidence;
+- product-specific workspace records and bundles.
+
+### Current authority seam
+
+The primary runtime still directly mutates some `ChainState` fields before or around persistence calls. This is not automatically incorrect—transactions need in-memory preparation—but it means the codebase does not yet have one explicit state-transition coordinator through which every authoritative transition passes.
+
+The desired invariant is:
+
+> An in-memory calculation may be provisional; a transition is authoritative only after the declared durable boundary accepts it.
+
+This is tracked in `ROADMAP.md` Horizon 0 rather than hidden behind a claim that in-memory and durable state are literally identical at every instant.
+
+---
+
+## 7. Trace architecture
+
+Trace events encode runtime execution, decisions, failures, policy, side effects, review, branches/loops, recovery, and terminal status.
+
+The trace truth rule is:
+
+> No event may claim execution or recovery that did not actually occur.
+
+Runtime facts must come from runtime boundaries. Fixture configuration, intended behavior, or later inspection cannot be used to fabricate an execution event after the fact.
+
+### TraceEmitter and reconciliation
+
+The primary architecture uses a trace emitter plus reconciliation/inspection surfaces. Durable evidence should bind to stable event identities so state/ledger/evidence projections can point back to proving events.
+
+### Current authority seam
+
+At the baseline SHA, at least one resume validation branch still calls `self.trace.add_event(...)` directly for a validation-failure event. Therefore the repository is not yet at the literal end state of “every authoritative event enters through one durability-aware emission API.”
+
+That remaining seam is tracked explicitly in Horizon 0.
+
+---
+
+## 8. Side-effect lifecycle and recovery
+
+External action truth is tracked independently from whether a node invocation as a whole succeeded.
+
+The core lifecycle is:
+
+```text
+planned
+  ↓
+started
+  ↓
+completed | failed | unknown
+```
+
+`unknown` represents the crash/uncertainty window where NodeChain cannot safely infer whether an external effect happened.
+
+Recovery evolved to preserve that uncertainty rather than erase it:
+
+```text
+unknown original attempt
+  ↓
+operator recovery decision
+  ↓
+safe_to_retry / retry_authorized
+  ↓
+governed child retry attempt
+  ↓
+normal planned → started → terminal lifecycle
+```
+
+The original unknown/retry-authorized history remains immutable. Recovery creates lineage rather than rewriting the past.
+
+Replay capsules, adapter attestation, fencing/claims, dispatch-attempt boundaries, and recovery execution actions support this governed retry model.
+
+---
+
+## 9. Node invocation and execution isolation
+
+`runtime/node_invoker.py` is the normal node-call boundary used by the orchestrator.
+
+For in-process paths it executes nodes with the applicable Python-level enforcement contexts. For isolated non-built-in nodes it delegates to `SubprocessRunner`.
+
+### Trust levels
+
+The codebase distinguishes at least:
+
+- `built_in`
+- `local_trusted`
+- `local_untrusted`
+- `remote_untrusted`
+
+Trust level affects execution/isolation requirements but does not supersede policy.
+
+### Python-level enforcement
+
+The trust runtime includes import, filesystem, subprocess, and network enforcement hooks for applicable non-built-in execution.
+
+### Windows isolation path
+
+Windows uses process/subprocess containment mechanisms appropriate to that platform, including bounded process execution and Job Object support in relevant paths. Windows is not claimed to provide Linux namespace/seccomp/cgroup equivalence.
+
+---
+
+## 10. Supervised Linux execution and the T3 boundary
+
+NodeChain contains a hardened supervised Linux execution substrate developed through v3.5.1.
+
+Relevant modules include:
+
+- `runtime/supervised_argv.py`
+- `runtime/supervised_exec_session.py`
+- `runtime/exec_supervisor.py`
+- `runtime/exec_protocol.py`
+- `runtime/async_fd_transport.py`
+- `runtime/pid_namespace_topology.py`
+- supporting streaming/containment helpers.
+
+Important design properties include:
+
+- external launcher / namespace-init / bootstrap topology;
+- PID namespace identity proof;
+- exact `PTRACE_EVENT_EXEC` as workload-start authority;
+- event-loop-owned protocol transport;
+- bounded stdout/stderr/config/payload ownership;
+- deterministic terminal cleanup;
+- namespace-init reaping;
+- independent host process-group containment.
+
+### The current integration boundary
+
+The generic path is:
+
+```text
+Orchestrator
+  ↓
+NodeInvoker
+  ↓
+SubprocessRunner.run_isolated()
+```
+
+On POSIX, `SubprocessRunner.run_isolated()` currently contains an explicit T3.0 fence for `local_untrusted` / `remote_untrusted` and returns `supervised_backend_required` before workload spawn.
+
+Therefore:
+
+```text
+supervised Linux substrate: implemented
+ordinary POSIX untrusted-node routing into it: not yet integrated
+legacy weaker POSIX fallback: deliberately disabled
+```
+
+Documentation and deployment profiles must preserve this distinction.
+
+---
+
+## 11. Registry, package, and trust architecture
+
+NodeChain includes a broad reusable-node supply-chain layer:
+
+```text
+node/package source
+  ↓
+manifest + contract + capabilities
+  ↓
+content digest / signature / publisher identity
+  ↓
+registry admission
+  ↓
+lock / dependency / compatibility resolution
+  ↓
+certification / evaluation metadata
+  ↓
+install / consumption policy
+  ↓
+runtime trust + capability admission
+```
+
+Remote-registry rules deliberately separate concepts that are often conflated:
+
+- remote install does not imply execution permission;
+- publisher signature does not imply safety;
+- registry signature does not imply publisher trust;
+- digest match does not imply certification;
+- certification does not bypass sandboxing;
+- `remote_untrusted` does not self-upgrade to `local_trusted`.
+
+This is a substantial platform capability, but the current implementation is still primarily a developer/operator substrate rather than a polished enterprise registry service.
+
+---
+
+## 12. Research architecture
+
+### 12.1 General Research & Decision Assistant
+
+The main blueprint contains twelve nodes:
+
+```text
+goal_interpreter
+→ task_planner
+→ context_selector
+→ search_tool
+→ source_ingestion
+→ source_quality_evaluator
+→ evidence_synthesizer
+→ claim_validator
+→ risk_classifier
+→ response_generator
+→ memory_write_decision
+→ trace_collector
+```
+
+It is designed around live/general research adapters and normal runtime memory/trace semantics.
+
+### 12.2 Governed Research Workspace
+
+The post-v3.6 Workspace runner constructs a separate linear product-proof blueprint:
+
+```text
+goal_interpreter
+→ task_planner
+→ context_selector
+→ fixture search_tool
+→ source_ingestion
+→ source_quality_evaluator
+→ qualified_source_linker
+→ evidence_synthesizer
+→ claim_validator
+→ risk_classifier
+→ response_generator
+```
+
+The sealed corpus is loaded and canonically digested. The fixture adapter is wrapped by the ordinary dispatch guard. Fault injection is divided between lane admission (pre-dispatch) and adapter behavior (post-dispatch), allowing runtime evidence to distinguish:
+
+- `LANE_ADMISSION_REJECTED`
+- `SEARCH_TIMEOUT_AFTER_DISPATCH`
+- `SEARCH_PROVENANCE_MALFORMED`
+- `SEARCH_PARTIAL_RESULT_SET`
+
+Fault records are projected from recognized trace events rather than from fixture declarations.
+
+`QualifiedSourceLinker` binds qualified source decisions to actual ingested source identity/hash evidence before synthesis consumes them.
+
+Terminal output is finalized into `ResearchWorkspaceBundleV1`, whose member documents and manifest are integrity checked by the corresponding bundle reader.
+
+### Current CLI seam
+
+The library provides `WorkspaceRunner.from_descriptor()` for fresh reconstruction and restores the descriptor used by terminal finalization. The current `nodechain research review` CLI manually constructs a runner rather than using that classmethod, so the descriptor-dependent terminal finalization branch is not guaranteed on that specific CLI reconstruction path. This is a bounded Horizon 0 integration correction.
+
+---
+
+## 13. Evaluation architecture
+
+NodeChain evaluation has multiple evidence classes.
+
+### Structural/generic evaluation
+
+The generic evaluation system can validate suite/case structure, expected properties, thresholds, signatures, certification lifecycle, and custom runner results.
+
+The default runner is structural; default metric values are not evidence that the full governed runtime executed.
+
+### Research quality evaluation
+
+`runtime/research_eval_runner.py` directly executes the synthesis → claim validation → risk → response segment under `MockModelAdapter` for deterministic quality measurement.
+
+It explicitly does not execute the complete orchestrator.
+
+### Desired consolidation
+
+When an evaluation claim depends on policy, trace, side effects, review, recovery, persistence, or containment, the evaluator should consume evidence from the complete governed runtime. Direct-node evaluation remains useful for local node quality and deterministic regression.
+
+---
+
+## 14. Operator surfaces
+
+The repository exposes several operator/developer interfaces:
+
+- Click-based CLI and command groups;
+- run/inspect/reconcile/resume/report/trace flows;
+- recovery console/actions;
+- trust, registry, evaluation, evidence, release/deployment operations;
+- dashboard/health surfaces;
+- governed review workbench;
+- Research Workspace commands;
+- FastAPI local read-only operator API with bearer-token protection.
+
+The CLI `--help` output is the authoritative current command inventory. Documentation should avoid volatile command-count claims unless generated from the executable surface.
+
+---
+
+## 15. Known alternate or narrower execution paths
+
+The repository contains utilities that must not be confused with the primary governed runtime.
+
+### `runtime/chain_orchestrator.py`
+
+A multi-chain composition utility includes `execute_sub_chain()`, which builds an envelope and directly calls `node.execute()` with a comment that full chain execution should use the Orchestrator.
+
+This is a real parallel execution seam. It should either delegate governed execution or remain explicitly classified as a narrow/non-production utility.
+
+### `runtime/research_eval_runner.py`
+
+Directly invokes selected research nodes for deterministic evaluation. Useful, but not full runtime execution.
+
+### Sandbox/native command runners
+
+Some sandbox/native command-runner paths have their own qualification evidence. A green result for one runner/profile is not automatically evidence for the generic Harness Node invocation path.
+
+---
+
+## 16. Deployment profiles
+
+Architecture claims must name the execution profile.
+
+| Profile | Intended role | Baseline claim |
+|---|---|---|
+| Local trusted development | SDK/CLI/runtime development and trusted-node execution | Supported |
+| GitHub-hosted CI | Cross-platform regression, packaging, publication-tree, non-privileged behavior | Supported; not privileged Linux containment proof |
+| Privileged Linux verification | Native/supervised containment qualification on a capability-qualified host | Supported as a qualification profile |
+| Generic POSIX untrusted Harness Node execution | Ordinary `NodeInvoker` untrusted path | Fail-closed pending T3 routing |
+| Windows control-plane/development | CLI/SDK/general runtime behavior without Linux-equivalent containment claims | Supported within platform-specific limits |
+| Managed multi-tenant service | Enterprise hosted execution | Not implemented |
+
+See `docs/linux-deployment.md` for operational details.
+
+---
+
+## 17. Architectural debt that matters
+
+The important remaining architecture work is authority-related, not aesthetic:
+
+1. join generic POSIX untrusted node invocation to the supervised backend;
+2. remove/classify direct node execution outside the primary orchestrator;
+3. route all authoritative trace events through one durable emission boundary;
+4. make the state-transition durability boundary explicit and singular;
+5. connect runtime-level evaluation claims to complete governed execution;
+6. preserve one source of truth while productizing Workspace/enterprise surfaces.
+
+Large files may be refactored when that work creates a stable authority or testability boundary. File size alone is not an architectural invariant.
+
+---
+
+## 18. Historical architecture
+
+Older architecture reports remain valuable historical evidence for the system's evolution. They should be read against their release/tag, not used to infer current implementation status.
+
+For current truth use this document plus `BASELINE.md`. For intended platform semantics use the NodeChain System Specification.
