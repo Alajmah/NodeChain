@@ -2,10 +2,10 @@
 
 **Document class:** Descriptive deployment profile  
 **Baseline date:** 2026-08-10  
-**Baseline SHA:** `af1943c24a58d80ae048b9b9d50842cf0e0b27d1`  
+**Implementation code baseline:** `af1943c24a58d80ae048b9b9d50842cf0e0b27d1`  
 **Current released version:** `v3.6.0`
 
-This document replaces the older “production Linux deployment” narrative with profile-specific claims that match the current code.
+This document replaces the older “production Linux deployment” narrative with profile-specific claims that match the pinned implementation code.
 
 The most important distinction is:
 
@@ -72,7 +72,7 @@ NodeInvoker
 SubprocessRunner.run_isolated()
 ```
 
-At the current baseline, `SubprocessRunner.run_isolated()` begins with an explicit T3.0 safety fence for POSIX `local_untrusted` and `remote_untrusted` nodes.
+At the pinned implementation baseline, `SubprocessRunner.run_isolated()` begins with an explicit T3.0 safety fence for POSIX `local_untrusted` and `remote_untrusted` nodes.
 
 The method returns a failure result containing:
 
@@ -86,7 +86,7 @@ The reason is recorded directly in code: the legacy POSIX runner path is not per
 
 ### Operational consequence
 
-A deployment that requires ordinary untrusted Harness Nodes on POSIX is **not yet complete** simply by installing NodeChain v3.6/current master. It needs the T3 integration/qualification outcome from `ROADMAP.md` or must remain fail-closed.
+A deployment that requires ordinary untrusted Harness Nodes on POSIX is **not yet complete** simply by installing the released/current implementation. It needs the T3 integration/qualification outcome from `ROADMAP.md` or must remain fail-closed.
 
 ---
 
@@ -123,7 +123,7 @@ This is the intended substrate for the generic POSIX untrusted-node routing work
 
 ## 5. Privileged Linux qualification prerequisites
 
-Security/containment evidence for the supervised/native paths may require host capabilities such as:
+Security/containment evidence for supervised/native paths may require host capabilities such as:
 
 - Linux PID namespaces;
 - `/proc` namespace/topology inspection;
@@ -159,6 +159,17 @@ NodeInvoker → SubprocessRunner generic Harness Node path
 ```
 
 The T3 fence exists precisely because those integration boundaries must be proven rather than inferred.
+
+### Historical seccomp evidence-field anchors
+
+Earlier qualified sandbox reports recorded fields such as:
+
+```text
+seccomp_enforced: True
+syscall_filtering_enforced: True
+```
+
+Those names remain useful evidence/compatibility anchors. Their presence in a historical report does **not** mean every current execution path emits `True`; current claims must bind them to the actual runner/profile that produced the evidence.
 
 ---
 
