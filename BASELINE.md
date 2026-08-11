@@ -108,7 +108,7 @@ This workspace is currently a **governed deterministic product-proof substrate**
 
 The fresh-process review command reconstructs the runner through the descriptor-aware authority. `nodechain research review` calls `WorkspaceRunner.from_descriptor(desc)`, which restores `_run_descriptor`, so terminal `WorkspaceRunner.resume()` executes the C5 terminal bundle-finalization branch on the CLI path.
 
-CLI-level regression proof in `tests/research/test_cli_review_finalization.py` covers approve, reject, revise, injected finalization failure, and identity stability across reconstruction (implementation pin `75112ed`).
+CLI-level regression proof in `tests/research/test_cli_review_finalization.py` covers approve, reject, revise, injected finalization failure, and identity stability across reconstruction (implementation pin `f197ecbe4a9ae617ac419342676fd8a89a511f01`).
 
 This was a bounded integration defect corrected in H0.1; it is not a reason to invalidate the accepted WP 5.1/WP 5.2 substrate.
 
@@ -260,7 +260,7 @@ See `docs/documentation-authority.md` for the update rules that keep these class
 
 The following are the concrete corrections discovered or reaffirmed by the rebaseline. They are inputs to `ROADMAP.md`, not hidden caveats:
 
-1. ~~Correct `nodechain research review` to reconstruct through the descriptor-aware path so terminal C5 bundle finalization is guaranteed on the CLI path.~~ **Closed in H0.1 (implementation pin `75112ed`).**
+1. ~~Correct `nodechain research review` to reconstruct through the descriptor-aware path so terminal C5 bundle finalization is guaranteed on the CLI path.~~ **Closed in H0.1 (implementation pin `f197ecbe4a9ae617ac419342676fd8a89a511f01`).**
 2. Complete T3 routing/result mapping from ordinary POSIX untrusted-node invocation into the supervised backend, or retain the explicit fail-closed boundary until it is complete.
 3. Retire or govern the lightweight `chain_orchestrator.py` direct-execution path.
 4. Route every accepted runtime trace event through one durable emission authority.
