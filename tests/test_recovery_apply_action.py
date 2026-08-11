@@ -269,9 +269,9 @@ def test_terminal_cancel_is_atomic_with_outcome_event(service, sm, monkeypatch) 
 
     swe_calls = []
     orig_swe = sm.save_with_event
-    def spy_swe(state, event_type, payload=None):
+    def spy_swe(state, event_type, payload=None, **kwargs):
         swe_calls.append(event_type)
-        return orig_swe(state, event_type, payload)
+        return orig_swe(state, event_type, payload, **kwargs)
     monkeypatch.setattr(sm, "save_with_event", spy_swe)
 
     service.apply_action("r1", RecoveryAction.CANCEL_RUN, operator_identity="op")
@@ -293,9 +293,9 @@ def test_terminal_fail_is_atomic_with_outcome_event(service, sm, monkeypatch) ->
 
     swe_calls = []
     orig_swe = sm.save_with_event
-    def spy_swe(state, event_type, payload=None):
+    def spy_swe(state, event_type, payload=None, **kwargs):
         swe_calls.append(event_type)
-        return orig_swe(state, event_type, payload)
+        return orig_swe(state, event_type, payload, **kwargs)
     monkeypatch.setattr(sm, "save_with_event", spy_swe)
 
     service.apply_action("r1", RecoveryAction.FAIL_RUN, operator_identity="op",

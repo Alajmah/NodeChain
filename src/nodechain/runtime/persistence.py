@@ -235,3 +235,30 @@ class PersistenceCoordinator:
             step_id=step_id,
             payload=payload,
         )
+
+    def append_trace_event(
+        self,
+        run_id: str,
+        revision: int,
+        event_type: str,
+        node_id: str | None,
+        step_id: int | None,
+        trace_event_id: str,
+        timestamp: str,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        """Append an authoritative trace event (H0.4 singular emission authority).
+
+        Delegates to StateManager.append_trace_event. The durable row carries
+        a first-class trace_event_id and the event's own timestamp.
+        """
+        self.state_manager.append_trace_event(
+            run_id=run_id,
+            revision=revision,
+            event_type=event_type,
+            node_id=node_id,
+            step_id=step_id,
+            trace_event_id=trace_event_id,
+            timestamp=timestamp,
+            payload=payload,
+        )

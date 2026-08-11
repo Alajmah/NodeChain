@@ -55,7 +55,10 @@ def _make_trace(run_id: str, events: list[TraceEvent] | None = None) -> ChainTra
 
 def _make_emitter(run_id: str = "run-lifecycle") -> tuple[TraceEmitter, ChainTrace]:
     trace = ChainTrace(run_id=run_id, chain_id="test-chain", chain_name="Test")
-    emitter = TraceEmitter(trace, run_id=run_id, chain_id="test-chain")
+    emitter = TraceEmitter(
+        trace, run_id=run_id, chain_id="test-chain",
+        record_fn=lambda e: trace.add_event(e),
+    )
     return emitter, trace
 
 
