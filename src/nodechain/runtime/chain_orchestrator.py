@@ -1,31 +1,40 @@
-"""Multi-Chain Orchestrator (v1.22.0).
+"""Composition plan model and legacy composition surfaces (H0.3 fail-closed).
 
-Enables chain-of-chains composition: a meta-chain that invokes multiple
-sub-chains, manages dependencies between them, and aggregates results.
+This module previously hosted a lightweight parallel executor that constructed
+its own ``InvocationEnvelope`` and called ``await node.execute(envelope)``
+directly, bypassing the canonical ``Orchestrator`` and every governed
+authority (policy, trust admission, side-effect journal, invocation ledger,
+durable state, trace, recovery, review, validation, containment).
 
-Capabilities:
-  1. SubChainStep — a node that invokes another chain blueprint
-  2. ChainOrchestrator — coordinates multiple sub-chains with dependencies
-  3. Dependency graph — chains can depend on other chains' outputs
-  4. Result aggregation — collects and merges sub-chain outputs
-  5. Failure propagation — configurable failure handling per sub-chain
-  6. Composed trace — full trace including sub-chain executions
+H0.3 removes that bypass. The module now retains only the pure data/model
+utilities that composition planning and validation need:
 
-Design principles:
-  - Each sub-chain executes independently with its own state
-  - Dependencies are data-flow edges (output → input mapping)
-  - The orchestrator is itself a chain node (composable recursively)
-  - No mutation of sub-chain blueprints (read-only composition)
-  - Full trace lineage preserved
+  * :class:`SubChainSpec`
+  * :class:`CompositionPlan`
+  * :class:`SubChainResult`
+  * :func:`CompositionPlan.topological_order`
+  * :func:`CompositionPlan.compute_digest`
+  * :func:`_aggregate_results`
+
+The execution surfaces are retained as import-compatible symbols so callers
+that referenced them get an explicit, stable failure rather than an import
+error:
+
+  * :func:`execute_sub_chain` — raises :class:`GovernedCompositionRequired`
+  * :func:`orchestrate_composition` — raises :class:`GovernedCompositionRequired`
+  * :class:`SubChainStep` — ``execute()`` returns an unsuccessful
+    ``EnvelopeResponse`` with ``error = governed_composition_backend_required``
+
+There is no escape hatch, ``_unsafe`` flag, environment override, or private
+back door in ``src/nodechain`` that re-enables the legacy executor. Governed
+composition — when it becomes a real product requirement — must be designed
+from first principles around a canonical child ``Orchestrator``.
 """
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
-import os
-import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,6 +46,28 @@ from nodechain.core.envelope import InvocationEnvelope, EnvelopeResponse
 from nodechain.core.contract import NodeContract
 from nodechain.core.manifest import NodeManifest
 from nodechain.nodes.base_node import BaseNode
+
+
+#: Stable reason code returned/raised by every legacy composition execution
+#: surface. The CLI maps this to ``EXIT_VALIDATION`` (10).
+GOVERNED_COMPOSITION_BACKEND_REQUIRED = "governed_composition_backend_required"
+
+
+class GovernedCompositionRequired(Exception):
+    """Raised when legacy composition execution is invoked.
+
+    The legacy ``execute_sub_chain`` / ``orchestrate_composition`` paths have
+    been retired in H0.3 because they executed Harness Nodes outside the
+    canonical ``Orchestrator``, bypassing every governed authority. This
+    exception is raised at the boundary so callers fail fast with a stable
+    reason code rather than silently running an ungoverned executor.
+    """
+
+    #: Stable reason code for programmatic consumers.
+    code: str = GOVERNED_COMPOSITION_BACKEND_REQUIRED
+
+    def __init__(self, message: str = GOVERNED_COMPOSITION_BACKEND_REQUIRED) -> None:
+        super().__init__(message)
 
 
 # ── Composition Plan ────────────────────────────────────────────────────────
@@ -209,196 +240,46 @@ class SubChainResult:
 
 async def execute_sub_chain(
     spec: SubChainSpec,
-    upstream_outputs: dict[str, dict[str, Any]],
+    upstream_outputs: dict[str, dict[str, Any]] | None = None,
     node_registry: dict[str, BaseNode] | None = None,
 ) -> SubChainResult:
-    """Execute a single sub-chain node directly (no full Orchestrator).
+    """Fail-closed legacy composition entry point (H0.3).
 
-    For full chain execution, use the Orchestrator. This lightweight executor
-    runs a single node from the node registry, suitable for composition.
+    This function previously resolved a ``BaseNode`` from ``node_registry``,
+    constructed a fresh ``InvocationEnvelope`` with synthesized run/chain/step
+    identity, and called ``await node.execute(envelope)`` directly — bypassing
+    the canonical ``Orchestrator`` and every governed authority.
 
-    Args:
-        spec: Sub-chain specification.
-        upstream_outputs: Outputs from dependency chains.
-        node_registry: Registry of available nodes.
+    H0.3 retires that path. The symbol is retained for import compatibility
+    only. Calling it now raises :class:`GovernedCompositionRequired` before
+    any node resolution, envelope construction, or execution occurs.
 
-    Returns:
-        SubChainResult with output or error.
+    Raises:
+        GovernedCompositionRequired: always. There is no escape hatch.
     """
-    start_ts = time.time()
-
-    if node_registry is None:
-        node_registry = {}
-
-    # Resolve inputs from upstream outputs
-    resolved_inputs: dict[str, Any] = {}
-    for key, value in spec.inputs.items():
-        if isinstance(value, str) and value.startswith("@"):
-            # Reference: @chain_id.field
-            parts = value[1:].split(".", 1)
-            if len(parts) == 2:
-                src_chain, src_field = parts
-                src_data = upstream_outputs.get(src_chain, {})
-                resolved_inputs[key] = src_data.get(src_field, "")
-            else:
-                resolved_inputs[key] = value
-        else:
-            resolved_inputs[key] = value
-
-    # Try to find and execute a node with chain_id
-    node = node_registry.get(spec.chain_id)
-    if node is None:
-        return SubChainResult(
-            chain_id=spec.chain_id,
-            status="failed",
-            error=f"Node '{spec.chain_id}' not found in registry",
-            duration_ms=(time.time() - start_ts) * 1000,
-            blueprint_path=spec.blueprint_path,
-        )
-
-    try:
-        envelope = InvocationEnvelope(
-            envelope_id=str(uuid.uuid4()),
-            run_id=str(uuid.uuid4()),
-            chain_id=f"composed:{spec.chain_id}",
-            node_id=spec.chain_id,
-            step_id=1,
-            payload=resolved_inputs,
-        )
-        response = await node.execute(envelope)
-        return SubChainResult(
-            chain_id=spec.chain_id,
-            status="completed",
-            output=response.output,
-            duration_ms=(time.time() - start_ts) * 1000,
-            blueprint_path=spec.blueprint_path,
-        )
-    except Exception as e:
-        return SubChainResult(
-            chain_id=spec.chain_id,
-            status="failed",
-            error=str(e),
-            duration_ms=(time.time() - start_ts) * 1000,
-            blueprint_path=spec.blueprint_path,
-        )
+    raise GovernedCompositionRequired()
 
 
 async def orchestrate_composition(
     plan: CompositionPlan,
-    node_registry: dict[str, BaseNode],
+    node_registry: dict[str, BaseNode] | None = None,
     initial_input: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Execute a composition plan: run all sub-chains in dependency order.
+    """Fail-closed legacy composition entry point (H0.3).
 
-    Args:
-        plan: The composition plan.
-        node_registry: Available nodes for execution.
-        initial_input: Initial payload passed to root chains.
+    This function previously drove a parallel mini-runtime: it ran sub-chains
+    in topological order, calling :func:`execute_sub_chain` for each, which
+    in turn called ``await node.execute(envelope)`` outside the canonical
+    ``Orchestrator``.
 
-    Returns:
-        Orchestration result with all sub-chain outputs, aggregated result,
-        and lineage metadata.
+    H0.3 retires that path. The symbol is retained for import compatibility
+    only. Calling it now raises :class:`GovernedCompositionRequired` before
+    any sub-chain execution, dependency resolution, or aggregation occurs.
+
+    Raises:
+        GovernedCompositionRequired: always. There is no escape hatch.
     """
-    orchestration_id = str(uuid.uuid4())
-    start_ts = time.time()
-
-    # Get execution order
-    order = plan.topological_order()
-
-    # Track outputs
-    outputs: dict[str, dict[str, Any]] = {}
-    results: list[SubChainResult] = []
-    skipped: list[str] = []
-
-    for chain_id in order:
-        spec = next(s for s in plan.sub_chains if s.chain_id == chain_id)
-
-        # Check if any dependency failed
-        dep_failed = False
-        for dep in spec.depends_on:
-            if dep in skipped or outputs.get(dep, {}).get("_status") == "failed":
-                dep_failed = True
-                break
-
-        if dep_failed:
-            if spec.failure_mode == "skip":
-                skipped.append(chain_id)
-                results.append(SubChainResult(
-                    chain_id=chain_id,
-                    status="skipped",
-                    error="Dependency failed",
-                    blueprint_path=spec.blueprint_path,
-                ))
-                continue
-            elif spec.failure_mode == "default":
-                outputs[chain_id] = {**spec.default_output, "_status": "defaulted"}
-                results.append(SubChainResult(
-                    chain_id=chain_id,
-                    status="defaulted",
-                    output=spec.default_output,
-                    blueprint_path=spec.blueprint_path,
-                ))
-                continue
-
-        # Execute sub-chain
-        # Merge initial_input for root chains (no dependencies)
-        if not spec.depends_on and initial_input:
-            merged_inputs = {**initial_input, **spec.inputs}
-            temp_spec = SubChainSpec(
-                chain_id=spec.chain_id,
-                blueprint_path=spec.blueprint_path,
-                inputs=merged_inputs,
-                depends_on=spec.depends_on,
-                failure_mode=spec.failure_mode,
-                default_output=spec.default_output,
-            )
-            result = await execute_sub_chain(temp_spec, outputs, node_registry)
-        else:
-            result = await execute_sub_chain(spec, outputs, node_registry)
-
-        results.append(result)
-
-        if result.status == "completed":
-            outputs[chain_id] = result.output
-        elif result.status == "failed":
-            outputs[chain_id] = {"_status": "failed", "_error": result.error}
-            if spec.failure_mode == "propagate":
-                # Mark all downstream chains as skipped
-                for downstream in order[order.index(chain_id)+1:]:
-                    skipped.append(downstream)
-                    ds = next(s for s in plan.sub_chains if s.chain_id == downstream)
-                    results.append(SubChainResult(
-                        chain_id=downstream,
-                        status="skipped",
-                        error=f"Upstream '{chain_id}' failed (propagate)",
-                        blueprint_path=ds.blueprint_path,
-                    ))
-                break
-            elif spec.failure_mode == "default":
-                outputs[chain_id] = {**spec.default_output, "_status": "defaulted"}
-            # "continue" mode: just proceed
-
-    # Aggregate results
-    aggregated = _aggregate_results(outputs, plan.aggregation_strategy)
-
-    duration_ms = (time.time() - start_ts) * 1000
-
-    return {
-        "type": "orchestration_result",
-        "orchestration_id": orchestration_id,
-        "plan_id": plan.plan_id,
-        "plan_digest": plan.compute_digest(),
-        "status": "completed" if not skipped or all(r.status in ("completed", "defaulted") for r in results) else "partial",
-        "execution_order": order,
-        "sub_chain_results": [r.to_dict() for r in results],
-        "outputs": outputs,
-        "aggregated_result": aggregated,
-        "aggregation_strategy": plan.aggregation_strategy,
-        "skipped": skipped,
-        "duration_ms": round(duration_ms, 2),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "nodechain_version": "1.22.0",
-    }
+    raise GovernedCompositionRequired()
 
 
 def _aggregate_results(
@@ -450,11 +331,19 @@ def _aggregate_results(
 # ── SubChainStep Node ───────────────────────────────────────────────────────
 
 class SubChainStep(BaseNode):
-    """A node that represents a sub-chain invocation within a composition.
+    """Legacy sub-chain invocation node (H0.3 fail-closed).
 
-    This node can be used in a regular chain blueprint to invoke
-    another chain. When executed, it runs the composition plan
-    and returns the aggregated result.
+    Previously, ``execute()`` built a node registry by scanning the package
+    registry, constructed child nodes, and called
+    :func:`orchestrate_composition` — re-entering the ungoverned executor.
+
+    H0.3 retires that path. The class is retained so existing imports and
+    node registries that reference it keep working, but ``execute()`` now
+    returns an unsuccessful ``EnvelopeResponse`` with
+    ``error = governed_composition_backend_required`` and ``success = False``
+    **before** any registry access, child-node construction, or composition
+    invocation occurs. This ensures a ``SubChainStep`` running inside the
+    real ``Orchestrator`` cannot become a tunnel back into the legacy bypass.
     """
 
     def __init__(self, plan: CompositionPlan | None = None) -> None:
@@ -465,7 +354,7 @@ class SubChainStep(BaseNode):
             node_id="sub_chain_step",
             node_type="deterministic",
             name="Sub-Chain Step",
-            description="Invokes a sub-chain composition plan",
+            description="Legacy sub-chain step (governed composition backend required)",
             version="1.0.0",
             contract=self.contract(),
         )
@@ -492,75 +381,26 @@ class SubChainStep(BaseNode):
         )
 
     async def execute(self, envelope: InvocationEnvelope) -> EnvelopeResponse:
-        payload = envelope.payload
+        """Return a governed-backend-required response; never execute.
 
-        # Resolve plan
-        plan = self._plan
-        if plan is None:
-            plan_data = payload.get("plan", {})
-            if plan_data:
-                plan = CompositionPlan.from_dict(plan_data)
-            else:
-                return EnvelopeResponse(
-                    request_envelope_id=envelope.envelope_id,
-                    run_id=envelope.run_id,
-                    chain_id=envelope.chain_id,
-                    node_id="sub_chain_step",
-                    step_id=envelope.step_id,
-                    output={
-                        "orchestration_id": "",
-                        "plan_digest": "",
-                        "status": "failed",
-                        "error": "No composition plan provided",
-                        "aggregated_result": {},
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    },
-                    output_type="dict",
-                )
-
-        # Build node registry from available nodes
-        from nodechain.registry.local_registry import RegistryIndex
-        registry = RegistryIndex()
-        registry.scan()
-
-        node_registry: dict[str, BaseNode] = {}
-        for spec in plan.sub_chains:
-            pkg = registry.get_package(spec.chain_id)
-            if pkg:
-                try:
-                    node_cls = pkg.load()
-                    if isinstance(node_cls, list):
-                        for cls in node_cls:
-                            instance = cls()
-                            node_registry[instance.manifest().node_id] = instance
-                    else:
-                        instance = node_cls()
-                        node_registry[instance.manifest().node_id] = instance
-                except Exception:
-                    pass
-
-        # Also add built-in nodes
-        from nodechain.nodes.goal_interpreter import GoalInterpreterNode as GoalInterpreter
-        from nodechain.nodes.task_planner import TaskPlannerNode as TaskPlanner
-        from nodechain.nodes.evidence_synthesizer import EvidenceSynthesizerNode as EvidenceSynthesizer
-        from nodechain.nodes.response_generator import ResponseGeneratorNode as ResponseGenerator
-        for cls in [GoalInterpreter, TaskPlanner, EvidenceSynthesizer, ResponseGenerator]:
-            try:
-                instance = cls()
-                node_registry[instance.manifest().node_id] = instance
-            except Exception:
-                pass
-
-        # Execute composition
-        initial_input = {k: v for k, v in payload.items() if k != "plan"}
-        result = await orchestrate_composition(plan, node_registry, initial_input)
-
+        Fails closed before registry access, package loading, child-node
+        construction, or any call to :func:`orchestrate_composition`.
+        """
         return EnvelopeResponse(
             request_envelope_id=envelope.envelope_id,
             run_id=envelope.run_id,
             chain_id=envelope.chain_id,
             node_id="sub_chain_step",
             step_id=envelope.step_id,
-            output=result,
+            output={
+                "orchestration_id": "",
+                "plan_digest": "",
+                "status": "failed",
+                "error": GOVERNED_COMPOSITION_BACKEND_REQUIRED,
+                "aggregated_result": {},
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
             output_type="dict",
+            success=False,
+            error=GOVERNED_COMPOSITION_BACKEND_REQUIRED,
         )

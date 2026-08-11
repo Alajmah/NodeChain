@@ -121,49 +121,61 @@ class TestTopologicalSort:
 # ── Input Resolution Tests ──────────────────────────────────────────────────
 
 class TestInputResolution:
-    """Input references (@chain.field) are resolved correctly."""
+    """H0.3: execute_sub_chain is fail-closed regardless of inputs.
+
+    Previously these tests proved @chain.field reference resolution through
+    actual node execution. H0.3 retires the executor; the tests now prove the
+    fail-closed contract holds whether the input is a literal or a reference.
+    """
 
     @pytest.mark.asyncio
-    async def test_literal_input_passed_through(self):
-        from nodechain.runtime.chain_orchestrator import SubChainSpec, execute_sub_chain
+    async def test_literal_input_fails_closed(self):
+        from nodechain.runtime.chain_orchestrator import (
+            SubChainSpec, execute_sub_chain, GovernedCompositionRequired,
+        )
         spec = SubChainSpec(chain_id="echo", inputs={"message": "hello"})
-        result = await execute_sub_chain(spec, {})
-        # echo may not be registered; check it handles gracefully
-        assert result.status in ("completed", "failed")
+        with pytest.raises(GovernedCompositionRequired):
+            await execute_sub_chain(spec, {})
 
     @pytest.mark.asyncio
-    async def test_reference_input_resolved(self):
-        from nodechain.runtime.chain_orchestrator import SubChainSpec, execute_sub_chain
+    async def test_reference_input_fails_closed(self):
+        from nodechain.runtime.chain_orchestrator import (
+            SubChainSpec, execute_sub_chain, GovernedCompositionRequired,
+        )
         spec = SubChainSpec(chain_id="echo", inputs={"message": "@upstream.result"})
-        result = await execute_sub_chain(spec, {"upstream": {"result": "resolved_value"}})
-        assert result.status in ("completed", "failed")
+        with pytest.raises(GovernedCompositionRequired):
+            await execute_sub_chain(spec, {"upstream": {"result": "resolved_value"}})
 
 
 # ── Orchestration Tests ─────────────────────────────────────────────────────
 
 class TestOrchestration:
-    """Full orchestration execution."""
+    """H0.3: orchestrate_composition is fail-closed.
+
+    These tests previously proved execution order, failure modes, and lineage
+    through real node execution. H0.3 retires the executor; the tests now
+    prove every legacy orchestration entry point raises
+    ``GovernedCompositionRequired`` rather than running an ungoverned runtime.
+    """
 
     @pytest.mark.asyncio
-    async def test_single_node_composition(self):
-        from nodechain.runtime.chain_orchestrator import CompositionPlan, SubChainSpec, orchestrate_composition
-        from nodes.echo_node.implementation import EchoNode
-
+    async def test_single_node_composition_fails_closed(self):
+        from nodechain.runtime.chain_orchestrator import (
+            CompositionPlan, SubChainSpec, orchestrate_composition,
+            GovernedCompositionRequired,
+        )
         plan = CompositionPlan(sub_chains=[
             SubChainSpec(chain_id="echo_node", inputs={"message": "test"}),
         ])
-        registry = {"echo_node": EchoNode()}
-        result = await orchestrate_composition(plan, registry)
-
-        assert result["status"] == "completed"
-        assert len(result["sub_chain_results"]) == 1
-        assert result["sub_chain_results"][0]["status"] == "completed"
+        with pytest.raises(GovernedCompositionRequired):
+            await orchestrate_composition(plan, {})
 
     @pytest.mark.asyncio
-    async def test_linear_composition(self):
-        from nodechain.runtime.chain_orchestrator import CompositionPlan, SubChainSpec, orchestrate_composition
-        from nodes.echo_node.implementation import EchoNode
-
+    async def test_linear_composition_fails_closed(self):
+        from nodechain.runtime.chain_orchestrator import (
+            CompositionPlan, SubChainSpec, orchestrate_composition,
+            GovernedCompositionRequired,
+        )
         plan = CompositionPlan(sub_chains=[
             SubChainSpec(chain_id="echo_node", inputs={"message": "first"}),
             SubChainSpec(
@@ -172,45 +184,41 @@ class TestOrchestration:
                 depends_on=["echo_node"],
             ),
         ])
-        registry = {"echo_node": EchoNode(), "echo_node2": EchoNode()}
-        result = await orchestrate_composition(plan, registry)
-
-        assert result["status"] == "completed"
-        assert len(result["sub_chain_results"]) == 2
-        assert "echo_node" in result["outputs"]
-        assert "echo_node2" in result["outputs"]
+        with pytest.raises(GovernedCompositionRequired):
+            await orchestrate_composition(plan, {})
 
     @pytest.mark.asyncio
-    async def test_failure_propagation(self):
-        from nodechain.runtime.chain_orchestrator import CompositionPlan, SubChainSpec, orchestrate_composition
-
+    async def test_failure_propagation_fails_closed(self):
+        from nodechain.runtime.chain_orchestrator import (
+            CompositionPlan, SubChainSpec, orchestrate_composition,
+            GovernedCompositionRequired,
+        )
         plan = CompositionPlan(sub_chains=[
             SubChainSpec(chain_id="missing", failure_mode="propagate"),
             SubChainSpec(chain_id="also_missing", depends_on=["missing"]),
         ])
-        result = await orchestrate_composition(plan, {})
-
-        assert result["status"] == "partial"
-        assert "missing" in result["skipped"] or len(result["skipped"]) >= 1
+        with pytest.raises(GovernedCompositionRequired):
+            await orchestrate_composition(plan, {})
 
     @pytest.mark.asyncio
-    async def test_failure_skip_mode(self):
-        from nodechain.runtime.chain_orchestrator import CompositionPlan, SubChainSpec, orchestrate_composition
-
+    async def test_failure_skip_mode_fails_closed(self):
+        from nodechain.runtime.chain_orchestrator import (
+            CompositionPlan, SubChainSpec, orchestrate_composition,
+            GovernedCompositionRequired,
+        )
         plan = CompositionPlan(sub_chains=[
             SubChainSpec(chain_id="missing", failure_mode="skip"),
             SubChainSpec(chain_id="also_missing", depends_on=["missing"], failure_mode="skip"),
         ])
-        result = await orchestrate_composition(plan, {})
-
-        # Failed chain + skipped dependent
-        statuses = [r["status"] for r in result["sub_chain_results"]]
-        assert "failed" in statuses or "skipped" in statuses
+        with pytest.raises(GovernedCompositionRequired):
+            await orchestrate_composition(plan, {})
 
     @pytest.mark.asyncio
-    async def test_failure_default_mode(self):
-        from nodechain.runtime.chain_orchestrator import CompositionPlan, SubChainSpec, orchestrate_composition
-
+    async def test_failure_default_mode_fails_closed(self):
+        from nodechain.runtime.chain_orchestrator import (
+            CompositionPlan, SubChainSpec, orchestrate_composition,
+            GovernedCompositionRequired,
+        )
         plan = CompositionPlan(sub_chains=[
             SubChainSpec(
                 chain_id="missing",
@@ -218,44 +226,35 @@ class TestOrchestration:
                 default_output={"fallback": True, "score": 50},
             ),
         ])
-        result = await orchestrate_composition(plan, {})
-
-        assert result["status"] == "completed"
-        assert result["outputs"]["missing"].get("fallback") is True
+        with pytest.raises(GovernedCompositionRequired):
+            await orchestrate_composition(plan, {})
 
     @pytest.mark.asyncio
-    async def test_parallel_composition(self):
-        from nodechain.runtime.chain_orchestrator import CompositionPlan, SubChainSpec, orchestrate_composition
-        from nodes.echo_node.implementation import EchoNode
-
+    async def test_parallel_composition_fails_closed(self):
+        from nodechain.runtime.chain_orchestrator import (
+            CompositionPlan, SubChainSpec, orchestrate_composition,
+            GovernedCompositionRequired,
+        )
         plan = CompositionPlan(sub_chains=[
             SubChainSpec(chain_id="chain_a", inputs={"message": "a"}),
             SubChainSpec(chain_id="chain_b", inputs={"message": "b"}),
         ], aggregation_strategy="merge_all")
-        registry = {"chain_a": EchoNode(), "chain_b": EchoNode()}
-        result = await orchestrate_composition(plan, registry)
-
-        assert result["status"] == "completed"
-        assert "chain_a" in result["outputs"]
-        assert "chain_b" in result["outputs"]
+        with pytest.raises(GovernedCompositionRequired):
+            await orchestrate_composition(plan, {})
 
     @pytest.mark.asyncio
-    async def test_orchestration_has_lineage(self):
-        from nodechain.runtime.chain_orchestrator import CompositionPlan, SubChainSpec, orchestrate_composition
-        from nodes.echo_node.implementation import EchoNode
-
+    async def test_orchestration_does_not_produce_lineage(self):
+        """H0.3: orchestrate_composition raises before allocating any IDs."""
+        from nodechain.runtime.chain_orchestrator import (
+            CompositionPlan, SubChainSpec, orchestrate_composition,
+            GovernedCompositionRequired,
+        )
         plan = CompositionPlan(
             plan_id="test-lineage",
             sub_chains=[SubChainSpec(chain_id="echo_node", inputs={"message": "test"})],
         )
-        registry = {"echo_node": EchoNode()}
-        result = await orchestrate_composition(plan, registry)
-
-        assert result["plan_id"] == "test-lineage"
-        assert result["plan_digest"]
-        assert result["orchestration_id"]
-        assert result["execution_order"] == ["echo_node"]
-        assert result["duration_ms"] >= 0
+        with pytest.raises(GovernedCompositionRequired):
+            await orchestrate_composition(plan, {})
 
 
 # ── Aggregation Strategy Tests ──────────────────────────────────────────────
@@ -305,7 +304,13 @@ class TestAggregationStrategies:
 # ── SubChainStep Node Tests ─────────────────────────────────────────────────
 
 class TestSubChainStep:
-    """SubChainStep composable node."""
+    """H0.3: SubChainStep.execute() is fail-closed.
+
+    The class and its manifest/contract surface are retained for import
+    compatibility, but execute() now returns an unsuccessful
+    EnvelopeResponse with ``error = governed_composition_backend_required``
+    before any registry access or composition invocation.
+    """
 
     @pytest.mark.asyncio
     async def test_contract_valid(self):
@@ -315,19 +320,28 @@ class TestSubChainStep:
         assert node.contract().contract_id == "composition.subchain.v1"
 
     @pytest.mark.asyncio
-    async def test_execute_without_plan_returns_error(self):
-        from nodechain.runtime.chain_orchestrator import SubChainStep
+    async def test_execute_without_plan_fails_closed(self):
+        from nodechain.runtime.chain_orchestrator import (
+            SubChainStep, GOVERNED_COMPOSITION_BACKEND_REQUIRED,
+        )
         node = SubChainStep()
         envelope = InvocationEnvelope(
             envelope_id=str(uuid.uuid4()), run_id="test", chain_id="test",
             node_id="test", step_id=1, payload={},
         )
         result = await node.execute(envelope)
+        assert result.success is False
+        assert result.error == GOVERNED_COMPOSITION_BACKEND_REQUIRED
         assert result.output["status"] == "failed"
+        assert result.output["error"] == GOVERNED_COMPOSITION_BACKEND_REQUIRED
 
     @pytest.mark.asyncio
-    async def test_execute_with_plan(self):
-        from nodechain.runtime.chain_orchestrator import SubChainStep, CompositionPlan, SubChainSpec
+    async def test_execute_with_plan_fails_closed(self):
+        """H0.3: even with a plan attached, execute() refuses to run."""
+        from nodechain.runtime.chain_orchestrator import (
+            SubChainStep, CompositionPlan, SubChainSpec,
+            GOVERNED_COMPOSITION_BACKEND_REQUIRED,
+        )
         plan = CompositionPlan(sub_chains=[
             SubChainSpec(chain_id="echo_node", inputs={"message": "orchestrated"}),
         ])
@@ -337,8 +351,9 @@ class TestSubChainStep:
             node_id="test", step_id=1, payload={},
         )
         result = await node.execute(envelope)
-        assert result.output["status"] in ("completed", "partial")
-        assert result.output["plan_digest"]
+        assert result.success is False
+        assert result.error == GOVERNED_COMPOSITION_BACKEND_REQUIRED
+        assert result.output["error"] == GOVERNED_COMPOSITION_BACKEND_REQUIRED
 
 
 # ── YAML Loading Test ───────────────────────────────────────────────────────

@@ -1,10 +1,11 @@
-"""v2.86 — Click declarations for the compose command group.
+"""Click declarations for the compose command group.
 
-Relocated from cli/main.py (was inline at L3792-3884). The implementation
-logic stays in nodechain.runtime.chain_orchestrator and
-nodechain.registry.local_registry; this module holds only the Click
-declaration shell + lazy delegation. Behavior is identical to the
-pre-relocation code.
+H0.3: the ``--plan`` execution path has been retired because it loaded
+registry packages directly and called ``orchestrate_composition()``, which
+executed ``await node.execute(envelope)`` outside the canonical
+``Orchestrator`` — bypassing every governed authority. The command now fails
+closed with a stable reason code before any package loading or node
+execution. Plan validation (``compose validate``) remains read-only.
 """
 from __future__ import annotations
 
@@ -12,6 +13,11 @@ import json
 
 import click
 from rich.console import Console
+
+from nodechain.cli.exit_codes import EXIT_VALIDATION
+from nodechain.runtime.chain_orchestrator import (
+    GOVERNED_COMPOSITION_BACKEND_REQUIRED,
+)
 
 console = Console()
 
@@ -21,60 +27,51 @@ console = Console()
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 def compose(ctx, plan_path: str, as_json: bool) -> None:
-    """Multi-chain orchestration — compose and execute chain-of-chains.
+    """Composition plan tooling — validation only (H0.3).
 
-    A composition plan defines multiple sub-chains with dependencies.
-    The orchestrator executes them in topological order and aggregates results.
+    Composition plan validation is supported via ``compose validate``.
+    Direct execution (``compose --plan ...``) has been retired: the legacy
+    executor ran Harness Nodes outside the canonical Orchestrator and
+    bypassed every governed authority. Execution now fails closed with a
+    stable reason code before any package loading or node execution.
 
-    Read-only plan validation by default. Executes with --plan.
+    To validate a plan, use:
+
+      nodechain compose validate --plan blueprints/composition_cross_domain_v1.yaml
     """
     if ctx.invoked_subcommand is None:
         if not plan_path:
-            console.print("[yellow]Use --plan to specify a composition plan YAML.[/]")
-            console.print("  nodechain compose --plan blueprints/composition_cross_domain_v1.yaml")
+            console.print("[yellow]Use --plan with a composition plan YAML.[/]")
+            console.print("  nodechain compose validate --plan blueprints/composition_cross_domain_v1.yaml")
+            console.print(
+                "[dim]Note: direct execution via `compose --plan` was retired in H0.3 "
+                "(governed composition backend required).[/]"
+            )
             return
-        from nodechain.runtime.chain_orchestrator import CompositionPlan, orchestrate_composition
-        from nodechain.registry.local_registry import RegistryIndex
-        import asyncio as _aio
-
-        plan = CompositionPlan.from_yaml(plan_path)
-
-        # Build node registry
-        registry = RegistryIndex()
-        registry.scan()
-        node_registry = {}
-        from nodechain.nodes.base_node import BaseNode
-        for pkg_info in registry.list_packages():
-            pkg = registry.get_package(pkg_info["node_id"])
-            if pkg:
-                try:
-                    cls = pkg.load()
-                    if isinstance(cls, list):
-                        for c in cls:
-                            inst = c()
-                            node_registry[inst.manifest().node_id] = inst
-                    else:
-                        inst = cls()
-                        node_registry[inst.manifest().node_id] = inst
-                except Exception:
-                    pass
-
-        result = _aio.run(orchestrate_composition(plan, node_registry))
-
+        # H0.3: fail closed before any package loading or node execution. The
+        # legacy --plan path loaded registry packages and called
+        # orchestrate_composition(), which executed nodes outside the
+        # canonical Orchestrator. We refuse here, before RegistryIndex.scan()
+        # or pkg.load(), so no admission/loading occurs.
         if as_json:
-
-            click.echo(json.dumps(result, indent=2, sort_keys=True))
+            click.echo(json.dumps({
+                "error": GOVERNED_COMPOSITION_BACKEND_REQUIRED,
+                "message": (
+                    "composition execution is not available; direct execution "
+                    "via `compose --plan` was retired in H0.3. Plan validation "
+                    "remains available via `compose validate --plan ...`."
+                ),
+            }, indent=2, sort_keys=True))
         else:
-            console.print(f"[bold]Composition: {plan.description}[/]")
-            console.print(f"  Plan ID:     {plan.plan_id}")
-            console.print(f"  Plan digest: {plan.compute_digest()[:16]}...")
-            console.print(f"  Status:      {result['status']}")
-            console.print(f"  Chains:      {len(result['sub_chain_results'])}")
-            console.print(f"  Duration:    {result['duration_ms']:.1f}ms")
-            console.print()
-            for sr in result["sub_chain_results"]:
-                status_color = "green" if sr["status"] == "completed" else "red" if sr["status"] == "failed" else "yellow"
-                console.print(f"  [{status_color}]{sr['status']:12s}[/] {sr['chain_id']}")
+            console.print(
+                f"[red]Error:[/red] composition execution is not available "
+                f"({GOVERNED_COMPOSITION_BACKEND_REQUIRED})."
+            )
+            console.print(
+                "[dim]Direct execution via `compose --plan` was retired in H0.3. "
+                "Plan validation remains available via `compose validate --plan ...`.[/]"
+            )
+        ctx.exit(EXIT_VALIDATION)
 
 
 @compose.command()
