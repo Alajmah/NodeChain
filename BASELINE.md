@@ -2,9 +2,9 @@
 
 **Document class:** Descriptive baseline  
 **Status:** Active development truth  
-**Baseline date:** 2026-08-10  
+**Baseline date:** 2026-08-11  
 **Released version:** `v3.6.0`  
-**Implementation code baseline:** `af1943c24a58d80ae048b9b9d50842cf0e0b27d1` (the `master` code state traced before this documentation-only rebaseline)  
+**Implementation code baseline:** `989b21fe1d61332f3848474fdfd3e0d9ca1aaf5c` (the `master` code state at the H0.3 fail-closed closure)  
 **Supersedes for current-state claims:** implementation/status sections in older README, VISION, ROADMAP, and architecture snapshots
 
 This document answers one question: **what does the NodeChain codebase actually contain and support at the pinned implementation baseline?** Documentation-only commits may follow this SHA without changing the implementation facts recorded here.
@@ -20,7 +20,7 @@ NodeChain has two legitimate anchors and they must not be conflated.
 | Anchor | Value | Meaning |
 |---|---|---|
 | Released product baseline | `v3.6.0` | Latest packaged/released version represented by `pyproject.toml` and `nodechain.__version__` |
-| Implementation code baseline | `af1943c24a58d80ae048b9b9d50842cf0e0b27d1` | `master` code state traced for this rebaseline; includes post-v3.6 work merged in PR #12 and PR #13 |
+| Implementation code baseline | `989b21fe1d61332f3848474fdfd3e0d9ca1aaf5c` | `master` code state at the H0.3 fail-closed closure; includes post-v3.6 work merged through PR #17 |
 
 The implementation baseline includes the `ResearchWorkspaceBundleV1` contract and the governed Research Workspace runner. Those capabilities are **post-v3.6 development state**, not retroactively part of the v3.6.0 release.
 
@@ -126,7 +126,7 @@ Several responsibilities have been extracted behind named controllers, including
 
 The codebase still contains execution or state/trace paths that are not yet reduced to one singular authority:
 
-- `runtime/chain_orchestrator.py` contains a lightweight composition executor that directly calls `node.execute()` and explicitly does not use the full `Orchestrator`;
+- `runtime/chain_orchestrator.py` previously contained a lightweight composition executor that directly called `node.execute()` outside the full `Orchestrator`; H0.3 retired that path — the execution surfaces (`execute_sub_chain`, `orchestrate_composition`, `SubChainStep.execute`) now fail closed with `governed_composition_backend_required`, and `nodechain compose --plan` exits before any registry/package loading. Pure composition-plan data utilities (`SubChainSpec`, `CompositionPlan`, `SubChainResult`, topological ordering, digest, aggregation) remain; `compose validate` remains a supported read-only surface;
 - the resume path in the main orchestrator still contains at least one direct `self.trace.add_event(...)` path instead of routing every accepted event through one durable emission boundary;
 - the orchestrator still performs direct `ChainState` field mutation around persistence boundaries;
 - the research evaluation runner directly executes quality-critical nodes rather than executing the complete governed runtime.
@@ -262,7 +262,7 @@ The following are the concrete corrections discovered or reaffirmed by the rebas
 
 1. ~~Correct `nodechain research review` to reconstruct through the descriptor-aware path so terminal C5 bundle finalization is guaranteed on the CLI path.~~ **Closed in H0.1 (implementation pin `f197ecbe4a9ae617ac419342676fd8a89a511f01`).**
 2. Complete T3 routing/result mapping from ordinary POSIX untrusted-node invocation into the supervised backend, or retain the explicit fail-closed boundary until it is complete.
-3. Retire or govern the lightweight `chain_orchestrator.py` direct-execution path.
+3. ~~Retire or govern the lightweight `chain_orchestrator.py` direct-execution path.~~ **Closed in H0.3 (implementation pin `989b21fe1d61332f3848474fdfd3e0d9ca1aaf5c`).** Legacy composition execution is fail-closed; no `BaseNode.execute()` call remains in the module (AST-guarded).
 4. Route every accepted runtime trace event through one durable emission authority.
 5. Consolidate authoritative state transitions behind one durability-before-acknowledgement boundary.
 6. Connect evaluation to the complete governed runtime where the evaluation claim requires runtime-level evidence.

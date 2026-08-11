@@ -1,8 +1,8 @@
 # NodeChain Roadmap — Post-Rebaseline
 
 **Document class:** Future work  
-**Baseline date:** 2026-08-10  
-**Baseline SHA:** `af1943c24a58d80ae048b9b9d50842cf0e0b27d1`  
+**Baseline date:** 2026-08-11  
+**Baseline SHA:** `989b21fe1d61332f3848474fdfd3e0d9ca1aaf5c`  
 **Current released version:** `v3.6.0`  
 **Current implementation truth:** [BASELINE.md](BASELINE.md)
 
@@ -51,20 +51,6 @@ No legacy weaker POSIX fallback is acceptable.
 - `NodeInvoker` sees truthful start/exit/timeout/output/containment results;
 - no double-spawn or parallel containment authority;
 - qualified Linux host evidence covers the integrated production path.
-
-## H0.3 — Singular execution authority
-
-**Observed gap**
-
-`runtime/chain_orchestrator.py` contains a lightweight composition executor that directly invokes `node.execute()` and explicitly bypasses the full `Orchestrator`.
-
-**Required outcome**
-
-Multi-chain/composition utilities must either delegate actual governed execution to the primary orchestrator or be explicitly classified as non-production/test-only utilities that cannot be confused with governed chain execution.
-
-**Exit evidence**
-
-No production-facing composition path can execute arbitrary Harness Nodes outside the accepted policy, persistence, side-effect, trace, and recovery authorities.
 
 ## H0.4 — Singular durable trace-emission authority
 

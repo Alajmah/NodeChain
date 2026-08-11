@@ -1,8 +1,8 @@
 # NodeChain Current Architecture
 
 **Document class:** Descriptive architecture  
-**Baseline date:** 2026-08-10  
-**Implementation code baseline:** `af1943c24a58d80ae048b9b9d50842cf0e0b27d1`  
+**Baseline date:** 2026-08-11  
+**Implementation code baseline:** `989b21fe1d61332f3848474fdfd3e0d9ca1aaf5c`  
 **Released version at baseline:** `v3.6.0`  
 **Current-state summary:** [BASELINE.md](BASELINE.md)  
 **Strategic source:** [VISION.md](VISION.md)
@@ -451,9 +451,9 @@ The executable CLI `--help` tree is the authoritative current command inventory.
 
 ### `runtime/chain_orchestrator.py`
 
-A multi-chain composition utility includes `execute_sub_chain()`, which constructs an envelope and directly calls `node.execute()`, while its own documentation says full chain execution should use the Orchestrator.
+H0.3 retired the legacy composition executor. The module previously hosted `execute_sub_chain()`, which constructed an envelope and directly called `node.execute()` outside the canonical `Orchestrator`. All execution surfaces now fail closed with `governed_composition_backend_required` and no `BaseNode.execute()` call expression remains in the module (AST-guarded by `tests/research/test_compose_execution_fails_closed.py`). Pure composition-plan data utilities (`SubChainSpec`, `CompositionPlan`, `SubChainResult`, topological ordering, digest, aggregation) are retained for plan validation. `nodechain compose validate` remains a supported read-only surface; `nodechain compose --plan` exits before any registry/package loading.
 
-This is a real parallel execution seam. It should delegate governed execution or remain explicitly classified as a narrow/non-production utility.
+Governed multi-chain composition — when it becomes a real product requirement — must be designed around a canonical child `Orchestrator` rather than retrofitting this legacy module.
 
 ### `runtime/research_eval_runner.py`
 
