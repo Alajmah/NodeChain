@@ -52,20 +52,6 @@ No legacy weaker POSIX fallback is acceptable.
 - no double-spawn or parallel containment authority;
 - qualified Linux host evidence covers the integrated production path.
 
-## H0.3 — Singular execution authority
-
-**Observed gap**
-
-`runtime/chain_orchestrator.py` contains a lightweight composition executor that directly invokes `node.execute()` and explicitly bypasses the full `Orchestrator`.
-
-**Required outcome**
-
-Multi-chain/composition utilities must either delegate actual governed execution to the primary orchestrator or be explicitly classified as non-production/test-only utilities that cannot be confused with governed chain execution.
-
-**Exit evidence**
-
-No production-facing composition path can execute arbitrary Harness Nodes outside the accepted policy, persistence, side-effect, trace, and recovery authorities.
-
 ## H0.4 — Singular durable trace-emission authority
 
 **Observed gap**

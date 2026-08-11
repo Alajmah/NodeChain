@@ -41,7 +41,7 @@ Major public families include, among others:
 - evaluation and certification;
 - evidence and trace replay;
 - deployment/release-history/drift/assurance operations;
-- dashboards and console/graph/compose tooling;
+- dashboards and console/graph tooling; compose plan validation (`compose validate`);
 - local API server;
 - governed review workbench;
 - post-v3.6 Research Workspace commands.

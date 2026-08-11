@@ -23,6 +23,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   5.2 bundle semantics, resume(), finalize_bundle(), or C5 terminal-status
   classification.
 
+### Changed
+
+- **H0.3 — Legacy composition execution is now fail-closed.**
+  `runtime/chain_orchestrator.py` previously hosted a lightweight composition
+  executor (`execute_sub_chain`, `orchestrate_composition`) that constructed
+  its own `InvocationEnvelope` and called `await node.execute(envelope)`
+  directly, bypassing the canonical `Orchestrator` and every governed
+  authority (policy, trust admission, side-effect journal, invocation ledger,
+  durable state, trace, recovery, review, validation, containment). All three
+  execution surfaces now fail closed with stable reason
+  `governed_composition_backend_required`:
+  `execute_sub_chain()` and `orchestrate_composition()` raise
+  `GovernedCompositionRequired`; `SubChainStep.execute()` returns an
+  unsuccessful `EnvelopeResponse` before registry access. No `BaseNode.execute()`
+  call expression remains in the module (AST-guarded). `nodechain compose --plan`
+  exits 10 (`EXIT_VALIDATION`) before any registry/package loading;
+  `nodechain compose --plan --json` emits a parseable JSON error object.
+  `nodechain compose validate --plan` remains a supported read-only surface.
+  Pure composition-plan data utilities (`SubChainSpec`, `CompositionPlan`,
+  `SubChainResult`, topological ordering, digest, aggregation) are retained.
+  Adversarial proof in
+  `tests/research/test_compose_execution_fails_closed.py` (sentinel node,
+  registry/package monkeypatching, AST guard, JSON parseability, positive
+  validate proof). Governed multi-chain composition is deferred to a
+  post-Horizon-0 design.
+
 ## [3.6.0] — First Public-Era Release
 
 **Release type:** feature + governance (minor).
