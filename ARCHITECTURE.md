@@ -1,8 +1,8 @@
 # NodeChain Current Architecture
 
 **Document class:** Descriptive architecture  
-**Baseline date:** 2026-08-10  
-**Implementation code baseline:** `af1943c24a58d80ae048b9b9d50842cf0e0b27d1`  
+**Baseline date:** 2026-08-11  
+**Implementation code baseline:** `989b21fe1d61332f3848474fdfd3e0d9ca1aaf5c`  
 **Released version at baseline:** `v3.6.0`  
 **Current-state summary:** [BASELINE.md](BASELINE.md)  
 **Strategic source:** [VISION.md](VISION.md)

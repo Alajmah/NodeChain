@@ -2,9 +2,9 @@
 
 **Document class:** Descriptive baseline  
 **Status:** Active development truth  
-**Baseline date:** 2026-08-10  
+**Baseline date:** 2026-08-11  
 **Released version:** `v3.6.0`  
-**Implementation code baseline:** `af1943c24a58d80ae048b9b9d50842cf0e0b27d1` (the `master` code state traced before this documentation-only rebaseline)  
+**Implementation code baseline:** `989b21fe1d61332f3848474fdfd3e0d9ca1aaf5c` (the `master` code state at the H0.3 fail-closed closure)  
 **Supersedes for current-state claims:** implementation/status sections in older README, VISION, ROADMAP, and architecture snapshots
 
 This document answers one question: **what does the NodeChain codebase actually contain and support at the pinned implementation baseline?** Documentation-only commits may follow this SHA without changing the implementation facts recorded here.
@@ -20,7 +20,7 @@ NodeChain has two legitimate anchors and they must not be conflated.
 | Anchor | Value | Meaning |
 |---|---|---|
 | Released product baseline | `v3.6.0` | Latest packaged/released version represented by `pyproject.toml` and `nodechain.__version__` |
-| Implementation code baseline | `af1943c24a58d80ae048b9b9d50842cf0e0b27d1` | `master` code state traced for this rebaseline; includes post-v3.6 work merged in PR #12 and PR #13 |
+| Implementation code baseline | `989b21fe1d61332f3848474fdfd3e0d9ca1aaf5c` | `master` code state at the H0.3 fail-closed closure; includes post-v3.6 work merged through PR #17 |
 
 The implementation baseline includes the `ResearchWorkspaceBundleV1` contract and the governed Research Workspace runner. Those capabilities are **post-v3.6 development state**, not retroactively part of the v3.6.0 release.
 
