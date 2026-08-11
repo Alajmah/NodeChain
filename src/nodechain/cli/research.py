@@ -204,7 +204,7 @@ def research_review(
     from pathlib import Path
 
     from nodechain.core.state import StateManager
-    from nodechain.research.runner import ResearchBrief, WorkspaceRunner
+    from nodechain.research.runner import WorkspaceRunner
     from nodechain.research.run_descriptor import load_descriptor
 
     # Discover the workspace and descriptor.
@@ -261,15 +261,12 @@ def research_review(
         title="Resuming Run",
     ))
 
-    # Reconstruct the runner from the descriptor (no resupplied inputs).
-    runner = WorkspaceRunner(
-        brief=ResearchBrief.from_question(desc.question),
-        corpus_path=desc.corpus_path,
-        workspace_dir=desc.workspace_dir,
-        db_path=desc.db_path,
-        trace_dir=desc.trace_dir,
-        chain_id=desc.chain_id,
-    )
+    # Reconstruct the runner from the descriptor via the reconstruction
+    # authority. from_descriptor restores runner._run_descriptor, which the
+    # terminal resume() path requires to call finalize_bundle(). The earlier
+    # manual WorkspaceRunner(...) reconstruction left _run_descriptor unset,
+    # so CLI resume silently skipped terminal bundle finalization.
+    runner = WorkspaceRunner.from_descriptor(desc)
 
     # Apply the review decision (stores one-shot env vars).
     runner.apply_review(decision, reason, reviewer)

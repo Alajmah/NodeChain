@@ -30,23 +30,6 @@ The roadmap is organized by outcomes rather than pre-assigned release numbers. A
 
 These are bounded corrections identified by the current code/document rebaseline. They are not a new platform expansion phase.
 
-## H0.1 — Research Workspace CLI descriptor/finalization correction
-
-**Observed gap**
-
-`WorkspaceRunner.from_descriptor()` restores `_run_descriptor`, and terminal `resume()` finalizes the Research Workspace bundle only when `_run_descriptor` exists. The user-facing `nodechain research review` command reconstructs `WorkspaceRunner(...)` manually instead of using the descriptor-aware constructor.
-
-**Required outcome**
-
-The CLI fresh-process review path must reconstruct from the persisted descriptor so terminal approve/reject/revise behavior retains the same bundle-finalization truth as the accepted backend/library path.
-
-**Exit evidence**
-
-- CLI review reconstruction uses the descriptor-aware path or an equivalent proven binding;
-- terminal review/resume produces or fails the terminal bundle through the same C5 boundary;
-- fresh-process approve/reject/revise regression proof covers the CLI wiring;
-- no change to accepted WP 5.1/WP 5.2 bundle semantics.
-
 ## H0.2 — T3 generic POSIX untrusted-node routing
 
 **Observed gap**

@@ -104,17 +104,13 @@ This workspace is currently a **governed deterministic product-proof substrate**
 
 ---
 
-## 4. Known Research Workspace integration gap
+## 4. Research Workspace CLI finalization
 
-A code-trace discrepancy remains in the user-facing fresh-process review command.
+The fresh-process review command reconstructs the runner through the descriptor-aware authority. `nodechain research review` calls `WorkspaceRunner.from_descriptor(desc)`, which restores `_run_descriptor`, so terminal `WorkspaceRunner.resume()` executes the C5 terminal bundle-finalization branch on the CLI path.
 
-`WorkspaceRunner.from_descriptor(desc)` restores `_run_descriptor`. Terminal `WorkspaceRunner.resume()` finalizes the Research Workspace bundle only when `_run_descriptor` is present.
+CLI-level regression proof in `tests/research/test_cli_review_finalization.py` covers approve, reject, revise, injected finalization failure, and identity stability across reconstruction (implementation pin `75112ed`).
 
-However, `nodechain research review` currently reconstructs `WorkspaceRunner(...)` manually rather than calling `WorkspaceRunner.from_descriptor(desc)`. On that CLI path, `_run_descriptor` is therefore not restored before `resume()`, so a terminal review/resume can complete without executing the C5 terminal bundle-finalization branch.
-
-**Baseline claim:** the backend/library descriptor reconstruction and bundle-finalization mechanisms exist and were qualified in WP 5.2; the current `nodechain research review` CLI reconstruction wiring must be corrected before the CLI path is claimed as end-to-end authoritative for terminal bundle production.
-
-This is a bounded integration defect, not a reason to invalidate the accepted WP 5.1/WP 5.2 substrate.
+This was a bounded integration defect corrected in H0.1; it is not a reason to invalidate the accepted WP 5.1/WP 5.2 substrate.
 
 ---
 
@@ -195,7 +191,7 @@ For exact verification semantics, see `docs/ci.md`.
 | Registry/trust | Substantial | Local/certified/remote registry mechanics, signatures, trust and consumption policies | Not yet an enterprise registry service product |
 | Research & Decision Assistant | Proven reference domain | General governed 12-node research chain and prior real-model/baseline evidence | Model-family breadth and live product UX remain separate questions |
 | Code Review | Proven second domain | Governed read/review, patch-proposal and bounded test-execution patterns | Not a hosted developer product |
-| Governed Research Workspace | Product-proof backend | Sealed deterministic governed run, fault truth, review/resume, qualified sources, terminal bundle | CLI review finalization wiring defect; live-search productization not yet closed |
+| Governed Research Workspace | Product-proof backend + CLI | Sealed deterministic governed run, fault truth, review/resume, qualified sources, terminal bundle, descriptor-aware CLI review finalization | Live-search productization not yet closed |
 | Evaluation | Substantial | Suites, metrics, signing/certification, deterministic research-quality eval | Complete governed-runtime evaluation is not yet universal |
 | Local API | Available | Authenticated local read-only operator API | Not a remote multi-tenant API service |
 | Hosted SaaS | Not available | — | Future |
@@ -264,7 +260,7 @@ See `docs/documentation-authority.md` for the update rules that keep these class
 
 The following are the concrete corrections discovered or reaffirmed by the rebaseline. They are inputs to `ROADMAP.md`, not hidden caveats:
 
-1. Correct `nodechain research review` to reconstruct through the descriptor-aware path so terminal C5 bundle finalization is guaranteed on the CLI path.
+1. ~~Correct `nodechain research review` to reconstruct through the descriptor-aware path so terminal C5 bundle finalization is guaranteed on the CLI path.~~ **Closed in H0.1 (implementation pin `75112ed`).**
 2. Complete T3 routing/result mapping from ordinary POSIX untrusted-node invocation into the supervised backend, or retain the explicit fail-closed boundary until it is complete.
 3. Retire or govern the lightweight `chain_orchestrator.py` direct-execution path.
 4. Route every accepted runtime trace event through one durable emission authority.

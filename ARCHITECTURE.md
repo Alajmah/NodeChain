@@ -408,9 +408,7 @@ Fault records are projections of recognized trace evidence rather than fixture d
 
 Terminal output is finalized into `ResearchWorkspaceBundleV1`, whose members and manifest are integrity-checked by the bundle reader.
 
-### Current CLI seam
-
-`WorkspaceRunner.from_descriptor()` restores the descriptor used by terminal finalization. `nodechain research review` currently reconstructs a runner manually instead of using that descriptor-aware classmethod, so terminal bundle finalization is not guaranteed on that specific CLI reconstruction path. This is the bounded H0.1 correction in `ROADMAP.md`.
+The `nodechain research review` command reconstructs the runner through `WorkspaceRunner.from_descriptor(desc)`, which restores `_run_descriptor`, so terminal `resume()` executes C5 bundle finalization on the fresh-process CLI review path.
 
 ---
 
