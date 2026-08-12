@@ -61,14 +61,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   lifecycle, validation events, ReviewManager callback, both controllers)
   route through `_emit()` or `_record_trace_event`. `TraceEmitter` and
   `ContractPreflightController` require the injected authority at
-  construction — no in-memory-only fallback. Operator trace events
-  (including terminal CANCEL_RUN / FAIL_RUN through the atomic
-  `save_with_event` transaction) carry first-class `trace_event_id` and
-  appear in `get_trace_events()`. Schema: `state_events` gains
+  construction — no in-memory-only fallback. `RecoveryService` operator
+  and audit trace events are durable trace producers outside the live-trace
+  boundary: they write through `append_trace_event()` or the atomic
+  `save_with_event()` path (for terminal CANCEL_RUN / FAIL_RUN), carry
+  first-class `trace_event_id`, and participate in the same
+  `get_trace_events()` projection. Schema: `state_events` gains
   `trace_event_id TEXT NULL` + partial unique index. AST guard enforces
   exactly one `.add_event()` call in all of `src/nodechain/`. Adversarial
-  proof in `tests/research/test_singular_trace_authority.py` (14 tests).
-  No change to replay, state-transition semantics, or `save_with_invocation`.
+  proof: 13 cases in `tests/research/test_singular_trace_authority.py` plus
+  1 AST-guard test in `tests/research/test_trace_authority_guard.py`
+  (14 total). No change to replay, state-transition semantics, or
+  `save_with_invocation`.
 
 ## [3.6.0] — First Public-Era Release
 

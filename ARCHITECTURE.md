@@ -209,7 +209,9 @@ Runtime facts must come from runtime boundaries. Fixture configuration, expected
 
 ### Singular trace-emission authority (H0.4)
 
-Every authoritative runtime trace event routes through one singular boundary: `Orchestrator._record_trace_event(event)`. This method performs the durable append first (via `persistence.append_trace_event`, carrying the event's own `event_id` and `timestamp`), then appends the exact same `TraceEvent` object to the live `ChainTrace`. No other production code path calls `ChainTrace.add_event()` — enforced by a repository-wide AST guard. Operator trace events (including terminal CANCEL_RUN / FAIL_RUN actions written through the atomic `save_with_event` transaction) carry first-class `trace_event_id` and appear in the authoritative `get_trace_events()` projection.
+Live `ChainTrace` events route through one singular boundary: `Orchestrator._record_trace_event(event)`. This method performs the durable append first (via `persistence.append_trace_event`, carrying the event's own `event_id` and `timestamp`), then appends the exact same `TraceEvent` object to the live `ChainTrace`. No other production code path calls `ChainTrace.add_event()` — enforced by a repository-wide AST guard.
+
+`RecoveryService` operator and audit trace events are durable trace producers outside that live-trace boundary. They write through `StateManager.append_trace_event()` or the atomic `save_with_event()` path (for terminal CANCEL_RUN / FAIL_RUN actions), carry first-class `trace_event_id`, and participate in the same authoritative `get_trace_events()` projection. These paths do not call `_record_trace_event` because they do not append to the live `ChainTrace`; they persist directly to the durable log.
 
 ---
 
