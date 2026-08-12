@@ -1,8 +1,8 @@
 # NodeChain Current Architecture
 
 **Document class:** Descriptive architecture  
-**Baseline date:** 2026-08-11  
-**Implementation code baseline:** `989b21fe1d61332f3848474fdfd3e0d9ca1aaf5c`  
+**Baseline date:** 2026-08-12  
+**Implementation code baseline:** `b89c9dd7ba2890d4fa66f89b2b682f036446a591`  
 **Released version at baseline:** `v3.6.0`  
 **Current-state summary:** [BASELINE.md](BASELINE.md)  
 **Strategic source:** [VISION.md](VISION.md)
@@ -207,11 +207,9 @@ The trace truth rule is:
 
 Runtime facts must come from runtime boundaries. Fixture configuration, expected behavior, or later inference cannot be used to fabricate a proving event.
 
-### Current trace-authority seam
+### Singular trace-emission authority (H0.4)
 
-The primary architecture uses a trace emitter plus reconciliation/inspection surfaces, but at the pinned implementation baseline at least one resume validation branch still calls `self.trace.add_event(...)` directly for a validation-failure event. The repository is therefore not yet at the literal end state where every authoritative event passes through one durability-aware emission API.
-
-That remaining seam is tracked in Horizon 0.
+Every authoritative runtime trace event routes through one singular boundary: `Orchestrator._record_trace_event(event)`. This method performs the durable append first (via `persistence.append_trace_event`, carrying the event's own `event_id` and `timestamp`), then appends the exact same `TraceEvent` object to the live `ChainTrace`. No other production code path calls `ChainTrace.add_event()` — enforced by a repository-wide AST guard. Operator trace events (including terminal CANCEL_RUN / FAIL_RUN actions written through the atomic `save_with_event` transaction) carry first-class `trace_event_id` and appear in the authoritative `get_trace_events()` projection.
 
 ---
 

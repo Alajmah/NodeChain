@@ -1,8 +1,8 @@
 # NodeChain Roadmap — Post-Rebaseline
 
 **Document class:** Future work  
-**Baseline date:** 2026-08-11  
-**Baseline SHA:** `989b21fe1d61332f3848474fdfd3e0d9ca1aaf5c`  
+**Baseline date:** 2026-08-12  
+**Baseline SHA:** `b89c9dd7ba2890d4fa66f89b2b682f036446a591`  
 **Current released version:** `v3.6.0`  
 **Current implementation truth:** [BASELINE.md](BASELINE.md)
 
@@ -51,22 +51,6 @@ No legacy weaker POSIX fallback is acceptable.
 - `NodeInvoker` sees truthful start/exit/timeout/output/containment results;
 - no double-spawn or parallel containment authority;
 - qualified Linux host evidence covers the integrated production path.
-
-## H0.4 — Singular durable trace-emission authority
-
-**Observed gap**
-
-The main runtime has a TraceEmitter/controller architecture, but at least one resume validation path still directly calls `self.trace.add_event(...)`.
-
-**Required outcome**
-
-Every accepted authoritative runtime event is emitted through one durability-aware boundary and the live trace is projected from the same logical record.
-
-**Exit evidence**
-
-- no production direct append bypass for authoritative events;
-- event identity is stable across durable/live views;
-- resume, failure, review, recovery, side-effect, and validation paths use the same emission authority.
 
 ## H0.5 — Authoritative state-transition boundary
 
