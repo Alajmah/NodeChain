@@ -596,8 +596,11 @@ class RecoveryService:
             payload: dict[str, Any] = {"actor": Actor_OPERATOR}
             if reason:
                 payload["reason"] = reason
+            cancel_tev_id = f"tev-{uuid.uuid4().hex[:12]}"
+            payload["trace_event_id"] = cancel_tev_id
             self.state_manager.save_with_event(
                 state, EventType.RUN_CANCELLED_BY_OPERATOR.value, payload,
+                trace_event_id=cancel_tev_id,
             )
             return DelegationResult(resulting_state=state.status)
 
@@ -608,8 +611,11 @@ class RecoveryService:
             payload = {"actor": Actor_OPERATOR}
             if reason:
                 payload["reason"] = reason
+            fail_tev_id = f"tev-{uuid.uuid4().hex[:12]}"
+            payload["trace_event_id"] = fail_tev_id
             self.state_manager.save_with_event(
                 state, EventType.RUN_FAILED_BY_OPERATOR.value, payload,
+                trace_event_id=fail_tev_id,
             )
             return DelegationResult(resulting_state=state.status)
 
@@ -721,8 +727,15 @@ class RecoveryService:
             payload["rejection_reason"] = rejection
         if target_step_id is not None:
             payload["target_step_id"] = target_step_id
-        self.state_manager.append_event(
-            run_id, revision, event_type.value, payload=payload,
+        # H0.4: write through append_trace_event so the first-class
+        # trace_event_id SQL column is populated, making operator trace
+        # events visible in get_trace_events() — the authoritative projection.
+        timestamp = datetime.now(timezone.utc).isoformat()
+        self.state_manager.append_trace_event(
+            run_id, revision, event_type.value,
+            node_id=None, step_id=target_step_id,
+            trace_event_id=tev_id, timestamp=timestamp,
+            payload=payload,
         )
         return tev_id
 
@@ -730,11 +743,17 @@ class RecoveryService:
         self, run_id: str, revision: int, event_type: EventType,
         node_id: str, *, reason: str | None = None,
     ) -> None:
-        payload: dict[str, Any] = {"actor": Actor_OPERATOR}
+        tev_id = f"tev-{uuid.uuid4().hex[:12]}"
+        payload: dict[str, Any] = {"actor": Actor_OPERATOR, "trace_event_id": tev_id}
         if reason:
             payload["reason"] = reason
-        self.state_manager.append_event(
-            run_id, revision, event_type.value, node_id=node_id, payload=payload,
+        # H0.4: write through append_trace_event for first-class trace identity.
+        timestamp = datetime.now(timezone.utc).isoformat()
+        self.state_manager.append_trace_event(
+            run_id, revision, event_type.value,
+            node_id=node_id, step_id=None,
+            trace_event_id=tev_id, timestamp=timestamp,
+            payload=payload,
         )
 
     # --- snapshot-for-policy ----------------------------------------------

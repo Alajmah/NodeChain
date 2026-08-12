@@ -13,13 +13,18 @@ Does NOT own:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from nodechain.core.trace import ChainTrace, TraceEvent, EventType, Actor
 
 
 class TraceEmitter:
     """Creates and records trace events.
+
+    H0.4: when ``record_fn`` is provided (production), ``emit()`` delegates
+    to the singular emission authority (``_record_trace_event``) instead of
+    appending directly to ``ChainTrace``. This prevents the side-effect
+    journal's helper calls from bypassing the durable-first boundary.
 
     Usage:
         emitter = TraceEmitter(trace=my_trace, run_id="...", chain_id="...")
@@ -28,11 +33,21 @@ class TraceEmitter:
         emitter.node_succeeded("goal_interpreter", step_id=1, latency_ms=150)
     """
 
-    def __init__(self, trace: ChainTrace, run_id: str, chain_id: str):
+    def __init__(
+        self,
+        trace: ChainTrace,
+        run_id: str,
+        chain_id: str,
+        record_fn: Callable[[TraceEvent], None],
+    ):
         self.trace = trace
         self.run_id = run_id
         self.chain_id = chain_id
         self._step = 0
+        # H0.4: record_fn is mandatory. The singular emission authority
+        # (_record_trace_event) is the only path to ChainTrace.add_event.
+        # There is no in-memory-only fallback in production code.
+        self._record_fn = record_fn
 
     def set_step(self, step: int) -> None:
         """Update current step counter."""
@@ -52,8 +67,12 @@ class TraceEmitter:
         latency_ms: int = 0,
         step_id: int | None = None,
     ) -> None:
-        """Emit a trace event with standard fields."""
-        self.trace.add_event(TraceEvent(
+        """Emit a trace event with standard fields.
+
+        H0.4: always delegates to the injected ``record_fn`` (the singular
+        emission authority). No in-memory-only fallback.
+        """
+        event = TraceEvent(
             run_id=self.run_id,
             chain_id=self.chain_id,
             node_id=node_id,
@@ -65,7 +84,8 @@ class TraceEmitter:
             metadata=metadata or {},
             cost_usd=cost_usd,
             latency_ms=latency_ms,
-        ))
+        )
+        self._record_fn(event)
 
     # ── Chain lifecycle ──
 

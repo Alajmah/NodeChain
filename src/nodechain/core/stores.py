@@ -96,6 +96,65 @@ class EventLogStore:
                 for r in cursor.fetchall()
             ]
 
+    # ── H0.4: authoritative trace-event storage ────────────────────────────
+
+    def append_trace_event(
+        self,
+        run_id: str,
+        revision: int,
+        event_type: str,
+        node_id: str | None,
+        step_id: int | None,
+        trace_event_id: str,
+        timestamp: str,
+        payload: dict | None = None,
+    ) -> None:
+        """Append an authoritative trace event to the durable log.
+
+        Unlike ``append_event``, this carries a first-class ``trace_event_id``
+        linking the durable row to the in-memory ``TraceEvent``. The
+        ``timestamp`` is the TraceEvent's own timestamp, not a fresh
+        ``datetime.now()``. The ``payload`` carries a reconstruction-complete
+        projection of the remaining TraceEvent fields.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO state_events
+                    (run_id, revision, event_type, node_id, step_id,
+                     payload, timestamp, trace_event_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (run_id, revision, event_type, node_id, step_id,
+                 _json.dumps(payload) if payload else None,
+                 timestamp, trace_event_id),
+            )
+
+    def get_trace_events(self, run_id: str) -> list[dict]:
+        """Get authoritative trace events for a run (``trace_event_id`` non-NULL).
+
+        Returns only rows written by the H0.4 singular emission authority,
+        excluding internal journal rows from ``save_with_invocation`` etc.
+        Ordered by durable ``seq``.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                """
+                SELECT seq, revision, event_type, node_id, step_id,
+                       payload, timestamp, trace_event_id
+                FROM state_events
+                WHERE run_id = ? AND trace_event_id IS NOT NULL
+                ORDER BY seq
+                """,
+                (run_id,),
+            )
+            return [
+                {"seq": r[0], "revision": r[1], "event_type": r[2],
+                 "node_id": r[3], "step_id": r[4], "payload": r[5],
+                 "timestamp": r[6], "trace_event_id": r[7]}
+                for r in cursor.fetchall()
+            ]
+
 
 class InvocationLedgerStore:
     """Persistence for the invocation ledger (invocation_ledger table).

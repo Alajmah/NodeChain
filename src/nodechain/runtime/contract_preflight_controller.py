@@ -21,6 +21,7 @@ refactor. v2.91 characterization tests must pass unchanged.
 from __future__ import annotations
 
 import os
+from typing import Any, Callable
 
 from nodechain.core.blueprint import ChainBlueprint
 from nodechain.core.contract import ContractRegistry
@@ -30,7 +31,11 @@ from nodechain.core.trace import Actor, ChainTrace, EventType, TraceEvent
 class ContractPreflightController:
     """Validates node contracts and port connections before chain execution.
 
-    Extracted from Orchestrator.validate_contracts() in v2.92.
+    Extracted from Orchestrator.validate_contracts() in v2.92. H0.4: the
+    CONTRACT_VALIDATED failure event now routes through the injected
+    ``emit_fn`` (the Orchestrator's bound ``_emit``) rather than appending
+    directly to ``ChainTrace``, so it is durable through the singular
+    emission authority.
     """
 
     def __init__(
@@ -38,10 +43,14 @@ class ContractPreflightController:
         blueprint: ChainBlueprint,
         contract_registry: ContractRegistry,
         trace: ChainTrace,
+        emit_fn: Callable[..., None],
     ) -> None:
         self.blueprint = blueprint
         self.contract_registry = contract_registry
         self.trace = trace
+        # H0.4: emit_fn is mandatory. Routes through the singular emission
+        # authority (_record_trace_event). No in-memory-only fallback.
+        self._emit = emit_fn
 
     def validate(self, run_id: str, chain_id: str) -> list[str]:
         """Validate all node contracts and port connections.
@@ -68,18 +77,13 @@ class ContractPreflightController:
         for result in results:
             if not result.compatible:
                 issues.extend(result.issues)
-                # Emit trace event for validation failure
-                self.trace.add_event(
-                    TraceEvent(
-                        run_id=run_id,
-                        chain_id=chain_id,
-                        node_id=result.source_node,
-                        step_id=0,
-                        event_type=EventType.CONTRACT_VALIDATED,
-                        actor=Actor.RUNTIME,
-                        decision="invalid",
-                        reason_codes=result.issues,
-                    )
+                # Emit trace event for validation failure through the authority.
+                self._emit(
+                    EventType.CONTRACT_VALIDATED,
+                    node_id=result.source_node,
+                    step_id=0,
+                    decision="invalid",
+                    reason_codes=result.issues,
                 )
 
         # Validate port compatibility (including branches and joins)

@@ -96,7 +96,7 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
         self.persistence = PersistenceCoordinator(self.state_manager)
         self.review_manager = ReviewManager(
             save_snapshot=self.persistence.save_snapshot,
-            add_trace_event=lambda e: self.trace.add_event(e),
+            add_trace_event=self._record_trace_event,
             record_attempt=self.state_manager.record_review_attempt,
         )
 
@@ -134,6 +134,7 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
             trace=self.trace,
             run_id=self.state.run_id,
             chain_id=blueprint.chain_id,
+            record_fn=self._record_trace_event,
         )
         self._contract_registry = ContractRegistry()
         self._step = 0
@@ -154,6 +155,7 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
             blueprint=self.blueprint,
             contract_registry=self._contract_registry,
             trace=self.trace,
+            emit_fn=self._emit,
         )
 
         # v2.93: extracted node output validation controller (internal implementation detail).
@@ -1135,16 +1137,12 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
                     if schema_result.valid:
                         self._emit(EventType.VALIDATION_PASSED, node_id, decision="schema_valid")
                     if not schema_result.valid:
-                        self.trace.add_event(TraceEvent(
-                            run_id=self.state.run_id,
-                            chain_id=self.state.chain_id,
+                        self._emit(
+                            EventType.VALIDATION_FAILED,
                             node_id=node_id,
-                            step_id=self._step,
-                            event_type=EventType.VALIDATION_FAILED,
-                            actor=Actor.RUNTIME,
                             decision="schema_validation_warning",
                             reason_codes=schema_result.errors[:3],
-                        ))
+                        )
 
                 # Update state (atomic write)
                 self.state.outputs[node_id] = response.output
@@ -1374,15 +1372,11 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
         step_id = envelope.step_id
 
         # Emit node_invoked
-        self.trace.add_event(
-            TraceEvent(
-                run_id=self.state.run_id,
-                chain_id=self.state.chain_id,
-                node_id=node_id,
-                step_id=step_id,
-                event_type=EventType.NODE_INVOKED,
-                actor=Actor.RUNTIME,
-            )
+        self._emit(
+            EventType.NODE_INVOKED,
+            node_id=node_id,
+            step_id=step_id,
+            actor=Actor.RUNTIME,
         )
 
         # Delegate to NodeInvoker
@@ -1396,32 +1390,24 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
 
         if response.success:
             # Emit node_succeeded
-            self.trace.add_event(
-                TraceEvent(
-                    run_id=self.state.run_id,
-                    chain_id=self.state.chain_id,
-                    node_id=node_id,
-                    step_id=step_id,
-                    event_type=EventType.NODE_SUCCEEDED,
-                    actor=Actor.NODE,
-                    cost_usd=response.cost_usd,
-                    latency_ms=elapsed_ms,
-                )
+            self._emit(
+                EventType.NODE_SUCCEEDED,
+                node_id=node_id,
+                step_id=step_id,
+                actor=Actor.NODE,
+                cost_usd=response.cost_usd,
+                latency_ms=elapsed_ms,
             )
             return response
         else:
             # Emit node_failed
-            self.trace.add_event(
-                TraceEvent(
-                    run_id=self.state.run_id,
-                    chain_id=self.state.chain_id,
-                    node_id=node_id,
-                    step_id=step_id,
-                    event_type=EventType.NODE_FAILED,
-                    actor=Actor.NODE,
-                    latency_ms=elapsed_ms,
-                    reason_codes=[response.error or "unknown"],
-                )
+            self._emit(
+                EventType.NODE_FAILED,
+                node_id=node_id,
+                step_id=step_id,
+                actor=Actor.NODE,
+                latency_ms=elapsed_ms,
+                reason_codes=[response.error or "unknown"],
             )
             return response
 
@@ -1437,17 +1423,13 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
         Returns None if failure is unrecoverable.
         """
         # Default: retry once with same envelope
-        self.trace.add_event(
-            TraceEvent(
-                run_id=self.state.run_id,
-                chain_id=self.state.chain_id,
-                node_id=node_id,
-                step_id=envelope.step_id,
-                event_type=EventType.NODE_FAILED,
-                actor=Actor.RUNTIME,
-                decision="retry",
-                reason_codes=["retrying_once"],
-            )
+        self._emit(
+            EventType.NODE_FAILED,
+            node_id=node_id,
+            step_id=envelope.step_id,
+            actor=Actor.RUNTIME,
+            decision="retry",
+            reason_codes=["retrying_once"],
         )
 
         # Retry once
@@ -1647,6 +1629,47 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
             side_effect_status_map=se_status_map,
         )
 
+    def _record_trace_event(self, event: TraceEvent) -> None:
+        """H0.4 singular trace-emission authority.
+
+        The ONLY production method allowed to call ``ChainTrace.add_event()``.
+        Durable append happens FIRST; the in-memory append happens SECOND with
+        the exact same TraceEvent object. If the durable write fails, the event
+        is not acknowledged in-memory and the exception propagates.
+
+        One logical event → one TraceEvent → one event_id → one timestamp →
+        one durable trace row (carrying that event_id and timestamp) → one
+        in-memory append of that same object.
+        """
+        # Build reconstruction-complete payload from fields not in dedicated columns.
+        payload = {
+            "chain_id": event.chain_id,
+            "actor": event.actor.value,
+            "contract_id": event.contract_id,
+            "policy_id": event.policy_id,
+            "input_reference": event.input_reference,
+            "output_reference": event.output_reference,
+            "decision": event.decision,
+            "reason_codes": event.reason_codes,
+            "cost_usd": event.cost_usd,
+            "latency_ms": event.latency_ms,
+            "risk_level": event.risk_level,
+            "metadata": event.metadata,
+        }
+        # Durable FIRST — no in-memory acknowledgement before persistence succeeds.
+        self.persistence.append_trace_event(
+            run_id=event.run_id,
+            revision=self.state.revision,
+            event_type=event.event_type.value,
+            node_id=event.node_id,
+            step_id=event.step_id,
+            trace_event_id=event.event_id,
+            timestamp=event.timestamp,
+            payload=payload,
+        )
+        # In-memory — exact same object, appended only after durable success.
+        self.trace.add_event(event)
+
     def _emit(
         self,
         event_type: EventType,
@@ -1659,72 +1682,56 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
         latency_ms: int = 0,
         step_id: int | None = None,
     ) -> None:
-        """Emit a trace event via TraceEmitter and persist to event log."""
+        """Emit an authoritative trace event through the singular boundary.
+
+        Constructs one TraceEvent from the parameters and delegates to
+        ``_record_trace_event``, which does the durable-first write and the
+        in-memory append of the same object.
+        """
         effective_step = step_id if step_id is not None else self._step
-        self.emitter.emit(
-            event_type=event_type,
+        event = TraceEvent(
+            run_id=self.state.run_id,
+            chain_id=self.state.chain_id,
             node_id=node_id,
+            step_id=effective_step,
+            event_type=event_type,
             actor=actor,
             decision=decision,
-            reason_codes=reason_codes,
-            metadata=metadata,
+            reason_codes=reason_codes or [],
+            metadata=metadata or {},
             cost_usd=cost_usd,
             latency_ms=latency_ms,
-            step_id=effective_step,
         )
-        # Persist to append-only event log
-        self.persistence.append_event(
-            run_id=self.state.run_id,
-            revision=self.state.revision,
-            event_type=event_type.value,
-            node_id=node_id,
-            step_id=effective_step,
-            payload={
-                "decision": decision,
-                "reason_codes": reason_codes or [],
-                "metadata": metadata or {},
-            },
-        )
+        self._record_trace_event(event)
 
     def _emit_chain_started(self) -> None:
-        self.trace.add_event(
-            TraceEvent(
-                run_id=self.state.run_id,
-                chain_id=self.state.chain_id,
-                node_id="runtime",
-                step_id=0,
-                event_type=EventType.CHAIN_STARTED,
-                actor=Actor.RUNTIME,
-                decision="chain_initialized",
-                reason_codes=["goal_received"],
-            )
+        self._emit(
+            EventType.CHAIN_STARTED,
+            node_id="runtime",
+            step_id=0,
+            decision="chain_initialized",
+            reason_codes=["goal_received"],
         )
 
     def _emit_chain_completed(self) -> None:
-        self.trace.add_event(
-            TraceEvent(
-                run_id=self.state.run_id,
-                chain_id=self.state.chain_id,
-                node_id="runtime",
-                step_id=self._step,
-                event_type=EventType.CHAIN_COMPLETED,
-                actor=Actor.RUNTIME,
-                decision="chain_completed_successfully",
-                metadata={
-                    "nodes_executed": sum(
-                        1 for e in self.trace.events
-                        if e.event_type == EventType.NODE_SUCCEEDED
-                    ),
-                    "loops_entered": sum(
-                        1 for e in self.trace.events
-                        if e.event_type == EventType.LOOP_ENTERED
-                    ),
-                    "human_reviews": sum(
-                        1 for e in self.trace.events
-                        if e.event_type == EventType.HUMAN_REVIEW_REQUESTED
-                    ),
-                },
-            )
+        self._emit(
+            EventType.CHAIN_COMPLETED,
+            node_id="runtime",
+            decision="chain_completed_successfully",
+            metadata={
+                "nodes_executed": sum(
+                    1 for e in self.trace.events
+                    if e.event_type == EventType.NODE_SUCCEEDED
+                ),
+                "loops_entered": sum(
+                    1 for e in self.trace.events
+                    if e.event_type == EventType.LOOP_ENTERED
+                ),
+                "human_reviews": sum(
+                    1 for e in self.trace.events
+                    if e.event_type == EventType.HUMAN_REVIEW_REQUESTED
+                ),
+            },
         )
 
     def _resume_receipt_metadata(self, review_result, base: dict) -> dict:
@@ -1852,17 +1859,11 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
 
     def _fail_chain(self, reason: str, details: list[str]) -> None:
         self.state.status = "failed"
-        self.trace.add_event(
-            TraceEvent(
-                run_id=self.state.run_id,
-                chain_id=self.state.chain_id,
-                node_id="runtime",
-                step_id=self._step,
-                event_type=EventType.CHAIN_FAILED,
-                actor=Actor.RUNTIME,
-                decision=reason,
-                reason_codes=details,
-            )
+        self._emit(
+            EventType.CHAIN_FAILED,
+            node_id="runtime",
+            decision=reason,
+            reason_codes=details,
         )
         self.trace.finalize("failed")
 

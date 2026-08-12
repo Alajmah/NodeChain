@@ -19,18 +19,14 @@ The Orchestrator retains:
   - State mutation for state.outputs[node_id] and persistence commits — these
     happen in run() between the schema and semantic validation phases.
 
-Emission fidelity:
-  The original code used two distinct emission paths, both of which are
-  preserved here exactly:
-    - Orchestrator._emit(...)  — emits to the trace AND appends to the
-      persistent event log. Used for: schema PASSED, and all semantic
-      validation events (failed / calibrated / warning / validator_error).
-    - self.trace.add_event(TraceEvent(...)) — emits to the trace only, WITHOUT
-      persisting. Used for: schema FAILED (the "schema_validation_warning"
-      event at the original line ~420-431).
-  To preserve this, the controller is constructed with the Orchestrator's
-  bound _emit callable (emit_fn) and the ChainTrace (trace). The schema-FAILED
-  path appends directly to trace; every other path goes through emit_fn.
+Emission fidelity (H0.4 corrected):
+  Both schema-PASSED and schema-FAILED now route through the injected
+  ``emit_fn`` (the Orchestrator's bound ``_emit``), which delegates to the
+  singular ``_record_trace_event`` authority (durable-first, then in-memory).
+  Previously the schema-FAILED path appended directly to ``ChainTrace``
+  without persisting; H0.4 classifies validation failures as authoritative
+  runtime events and routes them through the same boundary as every other
+  lifecycle event.
 
 Because the schema-validation phase and the semantic-validation phase are
 separated in run() by orchestrator-owned work (state update, persistence
@@ -119,17 +115,12 @@ class NodeOutputValidationController:
                 step_id=step_id,
             )
         else:
-            self.trace.add_event(
-                TraceEvent(
-                    run_id=run_id,
-                    chain_id=chain_id,
-                    node_id=node_id,
-                    step_id=step_id,
-                    event_type=EventType.VALIDATION_FAILED,
-                    actor=Actor.RUNTIME,
-                    decision="schema_validation_warning",
-                    reason_codes=schema_result.errors[:3],
-                )
+            self._emit(
+                EventType.VALIDATION_FAILED,
+                node_id=node_id,
+                step_id=step_id,
+                decision="schema_validation_warning",
+                reason_codes=schema_result.errors[:3],
             )
 
         return ValidationResult(

@@ -208,12 +208,31 @@ class StateManager:
                     node_id TEXT,
                     step_id INTEGER,
                     payload TEXT,
-                    timestamp TEXT NOT NULL
+                    timestamp TEXT NOT NULL,
+                    trace_event_id TEXT
                 )
             """)
+            # H0.4: add trace_event_id column to existing databases.
+            # Nullable: NULL for internal journal rows (save_with_invocation,
+            # save_with_event, standalone append_event); populated for
+            # authoritative trace events routed through _record_trace_event.
+            try:
+                conn.execute(
+                    "ALTER TABLE state_events ADD COLUMN trace_event_id TEXT"
+                )
+            except sqlite3.OperationalError:
+                pass  # Column already exists
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_events_run
                 ON state_events (run_id, revision)
+            """)
+            # H0.4: partial unique index — one durable trace row per trace_event_id.
+            # Only applies to authoritative trace rows (trace_event_id IS NOT NULL).
+            # Internal journal rows (trace_event_id NULL) are unconstrained.
+            conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_state_events_trace_event_id
+                ON state_events (run_id, trace_event_id)
+                WHERE trace_event_id IS NOT NULL
             """)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS invocation_ledger (
@@ -844,6 +863,7 @@ class StateManager:
         state: ChainState,
         event_type: str,
         event_payload: dict | None = None,
+        trace_event_id: str | None = None,
     ) -> None:
         """Atomic transaction: increment revision, save state, append ONE event.
 
@@ -852,6 +872,10 @@ class StateManager:
         the outcome event land in a single SQLite transaction, so there is no
         crash window where a run is terminal but its outcome event is missing.
         (v2.46.0)
+
+        H0.4: ``trace_event_id`` enriches the event row with first-class trace
+        identity so terminal operator outcome events appear in
+        ``get_trace_events()``. The atomic transaction is preserved unchanged.
         """
         import json as _json
         state.revision += 1
@@ -867,11 +891,12 @@ class StateManager:
             )
             conn.execute(
                 """
-                INSERT INTO state_events (run_id, revision, event_type, node_id, step_id, payload, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO state_events (run_id, revision, event_type, node_id, step_id, payload, timestamp, trace_event_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (state.run_id, state.revision, event_type, None, None,
-                 _json.dumps(event_payload) if event_payload else None, now),
+                 _json.dumps(event_payload) if event_payload else None, now,
+                 trace_event_id),
             )
             conn.commit()
 
@@ -891,6 +916,35 @@ class StateManager:
         self._event_log.append_event(
             run_id, revision, event_type, node_id, step_id, payload,
         )
+
+    def append_trace_event(
+        self,
+        run_id: str,
+        revision: int,
+        event_type: str,
+        node_id: str | None,
+        step_id: int | None,
+        trace_event_id: str,
+        timestamp: str,
+        payload: dict | None = None,
+    ) -> None:
+        """Append an authoritative trace event (H0.4 singular emission authority).
+
+        Delegates to EventLogStore.append_trace_event. Carries a first-class
+        trace_event_id linking the durable row to the in-memory TraceEvent,
+        and uses the event's own timestamp.
+        """
+        self._event_log.append_trace_event(
+            run_id, revision, event_type, node_id, step_id,
+            trace_event_id, timestamp, payload,
+        )
+
+    def get_trace_events(self, run_id: str) -> list[dict]:
+        """Get authoritative trace events for a run (trace_event_id non-NULL).
+
+        Delegates to EventLogStore.get_trace_events.
+        """
+        return self._event_log.get_trace_events(run_id)
 
     def record_invocation(
         self,

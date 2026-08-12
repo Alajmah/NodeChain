@@ -20,7 +20,10 @@ from nodechain.runtime.trace_emitter import TraceEmitter
 
 def _make_emitter() -> tuple[TraceEmitter, ChainTrace]:
     trace = ChainTrace(run_id="test-run", chain_id="test-chain")
-    emitter = TraceEmitter(trace=trace, run_id="test-run", chain_id="test-chain")
+    emitter = TraceEmitter(
+        trace=trace, run_id="test-run", chain_id="test-chain",
+        record_fn=lambda e: trace.add_event(e),
+    )
     return emitter, trace
 
 
