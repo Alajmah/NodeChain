@@ -1,8 +1,8 @@
 # NodeChain Current Public Surfaces
 
 **Document class:** Descriptive compatibility map  
-**Baseline date:** 2026-08-11  
-**Baseline SHA:** `989b21fe1d61332f3848474fdfd3e0d9ca1aaf5c`  
+**Baseline date:** 2026-08-12  
+**Baseline SHA:** `b89c9dd7ba2890d4fa66f89b2b682f036446a591`  
 **Released version:** `v3.6.0`
 
 This document is the current companion to the historical `docs/frozen-surfaces.md` v1 compatibility contract.

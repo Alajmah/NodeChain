@@ -49,6 +49,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   validate proof). Governed multi-chain composition is deferred to a
   post-Horizon-0 design.
 
+- **H0.4 — Singular durable trace-emission authority.**
+  The orchestrator previously had 11 bypass sites that appended trace events
+  directly to `ChainTrace` (in-memory only, no durability), and the existing
+  `_emit()` constructed two separate objects with no shared identity. H0.4
+  establishes `_record_trace_event(event)` as the ONLY production method
+  allowed to call `ChainTrace.add_event()`. Durable append happens first
+  (via `persistence.append_trace_event`, carrying the event's own `event_id`
+  and timestamp); the in-memory append happens second with the exact same
+  `TraceEvent` object. All 11 former bypass sites (node lifecycle, chain
+  lifecycle, validation events, ReviewManager callback, both controllers)
+  route through `_emit()` or `_record_trace_event`. `TraceEmitter` and
+  `ContractPreflightController` require the injected authority at
+  construction — no in-memory-only fallback. `RecoveryService` operator
+  and audit trace events are durable trace producers outside the live-trace
+  boundary: they write through `append_trace_event()` or the atomic
+  `save_with_event()` path (for terminal CANCEL_RUN / FAIL_RUN), carry
+  first-class `trace_event_id`, and participate in the same
+  `get_trace_events()` projection. Schema: `state_events` gains
+  `trace_event_id TEXT NULL` + partial unique index. AST guard enforces
+  exactly one `.add_event()` call in all of `src/nodechain/`. Adversarial
+  proof: 13 cases in `tests/research/test_singular_trace_authority.py` plus
+  1 AST-guard test in `tests/research/test_trace_authority_guard.py`
+  (14 total). No change to replay, state-transition semantics, or
+  `save_with_invocation`.
+
 ## [3.6.0] — First Public-Era Release
 
 **Release type:** feature + governance (minor).
