@@ -268,8 +268,16 @@ class TestAC6InvalidSigFailsClosed:
         from nodechain.sdk.org_policy import OrganizationTrustPolicyProfile
 
         idx, public_pem, fingerprint = _make_signed_index(tmp_path)
-        # Tamper with the signature
-        idx.signature = "00" + idx.signature[2:]
+        # Tamper with the signature deterministically: flip exactly one bit
+        # of the first byte. RSA-PSS signatures are randomized, so blindly
+        # replacing the first byte with "00" is a no-op whenever the signature
+        # already begins with 00 — the verifier then correctly accepts the
+        # unmodified signature and the test false-fails. XOR with 0x01
+        # guarantees the tampered signature differs from the original.
+        original = idx.signature
+        first_byte = int(original[:2], 16) ^ 0x01
+        idx.signature = f"{first_byte:02x}" + original[2:]
+        assert idx.signature != original
         resolver = DiscoverySignerResolver()
         resolver.add_signer(fingerprint, public_pem)
         profile = OrganizationTrustPolicyProfile(
