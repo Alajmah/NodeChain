@@ -12,8 +12,15 @@ class TestHumanReviewGate:
 
     def _make_review_manager(self):
         from nodechain.runtime.review_manager import ReviewManager
+
+        def stub_transition(s, e, *, status, paused_at=None, metadata=None):
+            s.status = status
+            s.paused_at = paused_at
+            if metadata:
+                s.metadata = {**(s.metadata or {}), **metadata}
+
         return ReviewManager(
-            save_snapshot=lambda s: None,
+            commit_review_transition=stub_transition,
             add_trace_event=lambda e: None,
         )
 

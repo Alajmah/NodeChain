@@ -263,8 +263,10 @@ def test_pause_for_budget_persists_pending_loop_back(sm) -> None:
 
     class _StubOrch(Orchestrator):
         def __init__(self, st, mgr):
+            from nodechain.runtime.persistence import PersistenceCoordinator
             self.state = st
             self.state_manager = mgr
+            self.persistence = PersistenceCoordinator(mgr)
 
     stub = _StubOrch(state, sm)
     stub._pause_for_budget(

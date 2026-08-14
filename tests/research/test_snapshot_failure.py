@@ -1,8 +1,11 @@
-"""Snapshot-failure fail-closed proof.
+"""Snapshot-failure fail-closed proof (H0.5 rewiring).
 
-If the ReviewManager's _save_snapshot raises, the run must NOT return a
-successfully paused result. The exception must propagate or the run must
-fail explicitly.
+If the review pause transition's persistence raises, the run must NOT
+return a successfully paused result. The exception must propagate or the
+run must fail explicitly. H0.5 moved the pause persistence boundary from
+the retired ``_save_snapshot`` callback to the atomic review-transition
+seam (``_commit_review_transition`` → ``commit_lifecycle``), so the fault
+injection patches that seam.
 """
 
 from __future__ import annotations
@@ -17,7 +20,7 @@ CORPUS = Path(__file__).parent.parent.parent / "tests" / "fixtures" / "research"
 
 
 def test_snapshot_failure_does_not_produce_paused_result(tmp_path: Path) -> None:
-    """If _save_snapshot fails, the run must not claim a valid paused state."""
+    """If the pause transition fails, the run must not claim a valid paused state."""
     runner = WorkspaceRunner(
         brief=ResearchBrief.from_question("Is async Rust memory-safe?"),
         corpus_path=str(CORPUS),
@@ -26,28 +29,28 @@ def test_snapshot_failure_does_not_produce_paused_result(tmp_path: Path) -> None
 
     orch = runner._compose()
 
-    # Patch the ReviewManager's save_snapshot callback directly (it was
-    # captured at construction, so patching orch.persistence won't affect it).
-    original_save = orch.review_manager._save_snapshot
+    # Patch the review-transition seam directly (it was captured at
+    # construction, so patching orch.persistence won't affect it).
+    original_transition = orch.review_manager._commit_review_transition
 
     call_count = [0]
 
-    def failing_save(state):
+    def failing_transition(state, event, *, status, **kwargs):
         call_count[0] += 1
-        if state.status == "waiting_for_review":
+        if status == "waiting_for_review":
             raise OSError("simulated snapshot failure")
-        return original_save(state)
+        return original_transition(state, event, status=status, **kwargs)
 
-    orch.review_manager._save_snapshot = failing_save
+    orch.review_manager._commit_review_transition = failing_transition
 
     import asyncio
 
-    # The snapshot failure must propagate as a failed run — NOT a paused result.
-    # The orchestrator catches the exception and fails the chain.
+    # The transition failure must propagate as a failed run — NOT a paused
+    # result. The orchestrator catches the exception and fails the chain.
     trace = asyncio.run(orch.run("Is async Rust memory-safe?"))
 
-    # Verify the waiting_for_review snapshot was attempted (and failed).
-    assert call_count[0] > 0, "save_snapshot was never called with waiting_for_review"
+    # Verify the waiting_for_review transition was attempted (and failed).
+    assert call_count[0] > 0, "transition was never called with waiting_for_review"
 
     # The run must NOT be paused — it must be failed.
     assert trace.final_status == "failed", (
@@ -60,11 +63,7 @@ def test_snapshot_failure_does_not_produce_paused_result(tmp_path: Path) -> None
 
 
 def test_snapshot_failure_propagates_as_failed_not_paused(tmp_path: Path) -> None:
-    """A snapshot failure during pause must not produce a valid pause token.
-
-    Patches review_manager._save_snapshot (not orch.persistence.save_snapshot)
-    so the failure occurs in the actual callback path.
-    """
+    """A pause-transition failure must not produce a valid pause token."""
     runner = WorkspaceRunner(
         brief=ResearchBrief.from_question("Is async Rust memory-safe?"),
         corpus_path=str(CORPUS),
@@ -72,14 +71,14 @@ def test_snapshot_failure_propagates_as_failed_not_paused(tmp_path: Path) -> Non
     )
     orch = runner._compose()
 
-    original_save = orch.review_manager._save_snapshot
+    original_transition = orch.review_manager._commit_review_transition
 
-    def failing_save(state):
-        if state.status == "waiting_for_review":
+    def failing_transition(state, event, *, status, **kwargs):
+        if status == "waiting_for_review":
             raise OSError("simulated disk failure")
-        return original_save(state)
+        return original_transition(state, event, status=status, **kwargs)
 
-    orch.review_manager._save_snapshot = failing_save
+    orch.review_manager._commit_review_transition = failing_transition
 
     import asyncio
 

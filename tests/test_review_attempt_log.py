@@ -40,10 +40,18 @@ def clean_env():
             os.environ.pop(k, None)
 
 
+def _apply_transition(state, event, *, status, paused_at=None, metadata=None):
+    """In-memory stand-in for the H0.5 review-transition seam."""
+    state.status = status
+    state.paused_at = paused_at
+    if metadata:
+        state.metadata = {**(state.metadata or {}), **metadata}
+
+
 def _make_rm(sm):
     """ReviewManager wired to persist attempts to the given StateManager."""
     return ReviewManager(
-        save_snapshot=lambda s: None,
+        commit_review_transition=_apply_transition,
         add_trace_event=lambda e: None,
         record_attempt=sm.record_review_attempt,
     )

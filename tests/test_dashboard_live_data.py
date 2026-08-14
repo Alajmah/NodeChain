@@ -42,11 +42,19 @@ def clean_env():
             os.environ.pop(k, None)
 
 
+def _rm_transition(state, event, *, status, paused_at=None, metadata=None):
+    """In-memory stand-in for the H0.5 review-transition seam."""
+    state.status = status
+    state.paused_at = paused_at
+    if metadata:
+        state.metadata = {**(state.metadata or {}), **metadata}
+
+
 def _make_paused_run(sm, *, stale=False):
     """Create a run paused waiting for review (governed_review_request present)."""
     from nodechain.runtime.review_manager import ReviewManager, ReviewPausedException
     os.environ["NODECHAIN_REVIEW_MODE"] = "pause"
-    rm = ReviewManager(save_snapshot=lambda s: None, add_trace_event=lambda e: None)
+    rm = ReviewManager(commit_review_transition=_rm_transition, add_trace_event=lambda e: None)
     s = ChainState(chain_id="paused")
     s.execution_order_hash = "h"
     s.outputs = {"run_id": s.run_id, "step_id": 9}
@@ -65,7 +73,7 @@ def _make_rejected_run(sm):
     """Create a run with a committed reject receipt, terminal failed status."""
     from nodechain.runtime.review_manager import ReviewManager
     os.environ["NODECHAIN_REVIEW_MODE"] = "auto-reject"
-    rm = ReviewManager(save_snapshot=lambda s: None, add_trace_event=lambda e: None)
+    rm = ReviewManager(commit_review_transition=_rm_transition, add_trace_event=lambda e: None)
     s = ChainState(chain_id="rej")
     s.execution_order_hash = "h"
     asyncio.run(rm.request_review(_high_risk(), s, "T", step_id=9))
@@ -78,7 +86,7 @@ def _make_approved_run(sm):
     """Create a run with a committed approve receipt (not blocking)."""
     from nodechain.runtime.review_manager import ReviewManager
     os.environ["NODECHAIN_REVIEW_MODE"] = "auto-approve"
-    rm = ReviewManager(save_snapshot=lambda s: None, add_trace_event=lambda e: None)
+    rm = ReviewManager(commit_review_transition=_rm_transition, add_trace_event=lambda e: None)
     s = ChainState(chain_id="appr")
     s.execution_order_hash = "h"
     asyncio.run(rm.request_review(_high_risk(), s, "T", step_id=9))

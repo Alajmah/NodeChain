@@ -11,6 +11,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from nodechain.core.trace import TraceEvent
+
 
 class SideEffectCollisionError(RuntimeError):
     """Same idempotency_key with different identity (node/type/request_hash).
@@ -113,6 +115,30 @@ class ChainState(BaseModel):
     execution_order_hash: str = ""  # SHA-256 of initial execution order for resume verification
 
     model_config = {"extra": "forbid"}
+
+    def transition_candidate(self) -> "ChainState":
+        """H0.5: construct a transition candidate copy without mutating self.
+
+        The accepted-state rule requires proposed transitions to be built on
+        a copy so a failed commit never poisons the live authoritative
+        object. This shallow-copies the model and fresh-copies every mutable
+        container; key assignments and appends on the candidate never touch
+        the accepted object. Container values are shared by reference —
+        transitions assign new keys or append new records; they must not
+        mutate shared values in place.
+        """
+        cand = self.model_copy()
+        cand.outputs = dict(self.outputs)
+        cand.loop_state = dict(self.loop_state)
+        cand.metadata = dict(self.metadata or {})
+        cand.branch_outputs = dict(self.branch_outputs)
+        cand.join_inputs = dict(self.join_inputs)
+        cand.skipped_nodes = list(self.skipped_nodes)
+        cand.routing_decisions = list(self.routing_decisions)
+        cand.branch_states = dict(self.branch_states)
+        cand.completed_steps = dict(self.completed_steps)
+        cand.side_effects = list(self.side_effects)
+        return cand
 
 
 class RunSummary(BaseModel):
@@ -876,29 +902,82 @@ class StateManager:
         H0.4: ``trace_event_id`` enriches the event row with first-class trace
         identity so terminal operator outcome events appear in
         ``get_trace_events()``. The atomic transaction is preserved unchanged.
+
+        H0.5 (V6): revision is restored on transaction failure, matching the
+        ``save_with_invocation`` B2 discipline, so a failed commit never
+        leaves a consumed revision on the caller's object.
         """
         import json as _json
-        state.revision += 1
+        original_revision = state.revision
+        state.revision = original_revision + 1
         now = datetime.now(timezone.utc).isoformat()
         state_json = state.model_dump_json()
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO chain_states (run_id, state_json, revision, updated_at)
-                VALUES (?, ?, ?, ?)
-                """,
-                (state.run_id, state_json, state.revision, now),
-            )
-            conn.execute(
-                """
-                INSERT INTO state_events (run_id, revision, event_type, node_id, step_id, payload, timestamp, trace_event_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (state.run_id, state.revision, event_type, None, None,
-                 _json.dumps(event_payload) if event_payload else None, now,
-                 trace_event_id),
-            )
-            conn.commit()
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO chain_states (run_id, state_json, revision, updated_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (state.run_id, state_json, state.revision, now),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO state_events (run_id, revision, event_type, node_id, step_id, payload, timestamp, trace_event_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (state.run_id, state.revision, event_type, None, None,
+                     _json.dumps(event_payload) if event_payload else None, now,
+                     trace_event_id),
+                )
+                conn.commit()
+        except Exception:
+            state.revision = original_revision
+            raise
+
+    def save_with_trace_event(
+        self,
+        state: ChainState,
+        event: "TraceEvent",
+    ) -> None:
+        """H0.5: atomic lifecycle transition — candidate state + trace row.
+
+        One SQLite transaction commits the candidate state snapshot and the
+        authoritative trace event's durable row together: the row carries
+        the event's exact ``event_id`` and ``timestamp`` and the shared
+        reconstruction-complete projection (``TraceEvent.durable_payload()``).
+        A state-asserting lifecycle event can no longer be durable without
+        the state it asserts. Revision is restored on failure (B2
+        discipline). No connection or transaction crosses above this layer.
+        """
+        import json as _json
+        original_revision = state.revision
+        state.revision = original_revision + 1
+        now = datetime.now(timezone.utc).isoformat()
+        state_json = state.model_dump_json()
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO chain_states (run_id, state_json, revision, updated_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (state.run_id, state_json, state.revision, now),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO state_events (run_id, revision, event_type, node_id, step_id, payload, timestamp, trace_event_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (state.run_id, state.revision, event.event_type.value,
+                     event.node_id, event.step_id,
+                     _json.dumps(event.durable_payload()), event.timestamp,
+                     event.event_id),
+                )
+                conn.commit()
+        except Exception:
+            state.revision = original_revision
+            raise
 
     def append_event(
         self,

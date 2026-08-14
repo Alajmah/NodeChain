@@ -148,6 +148,29 @@ class TraceEvent(BaseModel):
 
     model_config = {"extra": "forbid"}
 
+    def durable_payload(self) -> dict[str, Any]:
+        """H0.4/H0.5: the reconstruction-complete durable projection.
+
+        The TraceEvent fields not carried by dedicated ``state_events``
+        columns. Every durable trace-row writer uses this one definition so
+        the projection cannot drift between the standalone emission
+        authority and the atomic lifecycle-transition path.
+        """
+        return {
+            "chain_id": self.chain_id,
+            "actor": self.actor.value,
+            "contract_id": self.contract_id,
+            "policy_id": self.policy_id,
+            "input_reference": self.input_reference,
+            "output_reference": self.output_reference,
+            "decision": self.decision,
+            "reason_codes": self.reason_codes,
+            "cost_usd": self.cost_usd,
+            "latency_ms": self.latency_ms,
+            "risk_level": self.risk_level,
+            "metadata": self.metadata,
+        }
+
 
 class TraceSummary(BaseModel):
     """Summary statistics for a complete chain trace."""

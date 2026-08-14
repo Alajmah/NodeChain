@@ -95,7 +95,7 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
         )
         self.persistence = PersistenceCoordinator(self.state_manager)
         self.review_manager = ReviewManager(
-            save_snapshot=self.persistence.save_snapshot,
+            commit_review_transition=self._commit_review_transition,
             add_trace_event=self._record_trace_event,
             record_attempt=self.state_manager.record_review_attempt,
         )
@@ -214,9 +214,22 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
         """
         start_time = time.time()
 
-        # Step 0: chain_started
-        self.state.status = "running"
-        self._emit_chain_started()
+        # Step 0: chain_started — H0.5 lifecycle transition (V7). The running
+        # state and its asserting CHAIN_STARTED event commit in ONE SQLite
+        # transaction, so a run can never carry durable start evidence
+        # without a durable state row.
+        start_event = TraceEvent(
+            run_id=self.state.run_id,
+            chain_id=self.state.chain_id,
+            node_id="runtime",
+            step_id=0,
+            event_type=EventType.CHAIN_STARTED,
+            actor=Actor.RUNTIME,
+            decision="chain_initialized",
+            reason_codes=["goal_received"],
+        )
+        self.persistence.commit_lifecycle(self.state, event=start_event, status="running")
+        self._record_trace_event(start_event, already_durable=True)
 
         try:
             # Validate contracts at load time
@@ -334,8 +347,11 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
                     self.state.run_id, node_id,
                 )
                 self._step = invocation.step_id
-                self.state.step = self._step
-                self.state.current_node = node_id
+
+                # H0.5 (criterion 4): the cursor (step, current_node) is a
+                # proposal owned by the invocation transition below; the
+                # accepted state is not mutated pre-commit. Execution
+                # mechanics use the local ``self._step``.
 
                 # Check for loop conditions
                 loop_result = self.scheduler.check_loop_exhaustion(node_id, self.state)
@@ -489,13 +505,13 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
                         invoke_fn=invoke_retry_with_trace,
                     )
                     if not result.recovered:
-                        self._record_last_failure(
-                            failure_type, node_id, self._step,
-                            response.error or "", retryable=False,
-                        )
                         self._fail_chain(
                             f"node_execution_failed:{failure_type.value}",
                             [f"Node '{node_id}' failed: {response.error}", f"Recovery action: {result.action}"],
+                            metadata=self._record_last_failure(
+                                failure_type, node_id, self._step,
+                                response.error or "", retryable=False,
+                            ),
                         )
                         return self.trace
                     # v3.2.0: retry-recovery success invariant. recovered=True is
@@ -507,31 +523,30 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
                     # (memory-write policy rejection, trace fallback) are exempt.
                     if result.recovered and result.response is None:
                         if result.action not in _SKIP_CONTINUE_ACTIONS:
-                            self._record_last_failure(
-                                failure_type, node_id, self._step,
-                                "recovered_with_no_response", retryable=False,
-                            )
                             self._fail_chain(
                                 "node_execution_failed:invalid_recovery_response",
                                 [f"Node '{node_id}' recovery returned recovered=True with no response"],
+                                metadata=self._record_last_failure(
+                                    failure_type, node_id, self._step,
+                                    "recovered_with_no_response", retryable=False,
+                                ),
                             )
                             return self.trace
                     if result.recovered and result.response is not None and not result.response.success:
-                        self._record_last_failure(
-                            failure_type, node_id, self._step,
-                            result.response.error or "recovered_with_failed_response",
-                            retryable=False,
-                        )
                         self._fail_chain(
                             "node_execution_failed:invalid_recovery_response",
                             [f"Node '{node_id}' recovery returned recovered=True with a failed response"],
+                            metadata=self._record_last_failure(
+                                failure_type, node_id, self._step,
+                                result.response.error or "recovered_with_failed_response",
+                                retryable=False,
+                            ),
                         )
                         return self.trace
                     response = result.response
                     # Sync step_id from retry — FailureManager allocated a new step
                     if response is not None and hasattr(response, 'step_id'):
                         self._step = response.step_id
-                        self.state.step = self._step
                     if response is None:
                         # Policy rejection or trace fallback — continue with empty output
                         self.state.outputs[node_id] = {"skipped": True, "reason": result.action}
@@ -560,14 +575,15 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
                     )
                     return self.trace
 
-                # Update state with output
-                self.state.outputs[node_id] = response.output
-
-                # Atomic write: state + ledger + event log
+                # H0.5: propose the output through the candidate/adopt
+                # invocation transition — the accepted state is not mutated
+                # before its owning commit succeeds (V2).
                 self.persistence.commit_invocation_success(
                     self.state,
                     step_id=self._step,
                     node_id=node_id,
+                    output=response.output,
+                    cursor=(self._step, node_id),
                     event_type="node_completed",
                     event_payload={"node_id": node_id, "step_id": self._step},
                     cost_usd=response.cost_usd or 0.0,
@@ -796,11 +812,41 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
 
                 sched_idx += 1  # Advance to next node
 
-            # Chain completed successfully
-            self.state.status = "completed"
-            self.state.completed_at = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
-            self._emit_chain_completed()
-            self.persistence.save_final(self.state)  # Final save
+            # Chain completed successfully — H0.5 lifecycle transition (V3).
+            # The completed state and its asserting CHAIN_COMPLETED event
+            # commit in ONE transaction; a failed commit acknowledges
+            # nothing, so the contradictory COMPLETED-then-FAILED durable
+            # pair cannot be produced.
+            completed_event = TraceEvent(
+                run_id=self.state.run_id,
+                chain_id=self.state.chain_id,
+                node_id="runtime",
+                step_id=self._step,
+                event_type=EventType.CHAIN_COMPLETED,
+                actor=Actor.RUNTIME,
+                decision="chain_completed_successfully",
+                metadata={
+                    "nodes_executed": sum(
+                        1 for e in self.trace.events
+                        if e.event_type == EventType.NODE_SUCCEEDED
+                    ),
+                    "loops_entered": sum(
+                        1 for e in self.trace.events
+                        if e.event_type == EventType.LOOP_ENTERED
+                    ),
+                    "human_reviews": sum(
+                        1 for e in self.trace.events
+                        if e.event_type == EventType.HUMAN_REVIEW_REQUESTED
+                    ),
+                },
+            )
+            self.persistence.commit_lifecycle(
+                self.state,
+                event=completed_event,
+                status="completed",
+                completed_at=time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
+            )
+            self._record_trace_event(completed_event, already_durable=True)
 
         except Exception as e:
             self._fail_chain("unhandled_exception", [str(e)])
@@ -836,9 +882,14 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
 
         saved = recovery.state
 
-        # Restore state
+        # Restore state. H0.5 (amendment 5): ``is_resumed`` is a persisted
+        # field, so it is proposed through a bounded state-only resume
+        # transition rather than mutating the loaded accepted state before
+        # persistence.
         self.state = saved
-        self.state.is_resumed = True
+        self.persistence.commit_checkpoint(
+            self.state, lambda c: setattr(c, "is_resumed", True)
+        )
         self._step = self.state.step
         self.step_allocator.initialize_from(self._step)
 
@@ -877,33 +928,21 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
         # Reconcile side effects: mark started-but-not-completed as 'unknown'
         self._reconcile_side_effects_on_resume(saved.run_id)
 
-        # Emit pending review event (from _resume_waiting_for_review delegation)
-        pending_review = saved.metadata.get("pending_review_event")
-        if pending_review:
-            self._emit(
-                EventType.HUMAN_REVIEW_COMPLETED,
-                node_id="risk_classifier",
-                actor=Actor.HUMAN,
-                decision=pending_review["decision"],
-                metadata={
-                    "resumed_review": True,
-                    "transition": pending_review["transition"],
-                    "reason": pending_review["reason"],
-                    "receipt_id": pending_review.get("receipt_id"),
-                    "receipt_digest": pending_review.get("receipt_digest"),
-                    "request_id": pending_review.get("request_id"),
-                    "request_digest": pending_review.get("request_digest"),
-                    "subject_type": pending_review.get("subject_type"),
-                    "reviewer_identity": pending_review.get("reviewer_identity"),
-                },
-            )
-            # Clear pending event so it's not re-emitted
-            saved.metadata.pop("pending_review_event", None)
-            self.persistence.save_snapshot(saved)
+        # H0.5: the pending_review_event deferral is retired — the review
+        # decision transition (_resume_waiting_for_review) now commits the
+        # HUMAN_REVIEW_COMPLETED event atomically with the state it asserts
+        # and acknowledges it there, before delegating back here.
 
-        # Handle waiting_for_review: don't continue execution until decision exists
+        # Handle waiting_for_review: resolve the decision before execution.
+        # H0.5: approve/revision commits its decision transition (state +
+        # HUMAN_REVIEW_COMPLETED atomically, acknowledged into THIS trace)
+        # and then continues the same resume pass — the delegation re-entry
+        # is retired because it rebuilt the live trace and discarded the
+        # acknowledged decision event. Terminal outcomes return the trace.
         if saved.status == "waiting_for_review":
-            return await self._resume_waiting_for_review(saved)
+            review_trace = await self._resume_waiting_for_review(saved)
+            if review_trace is not None:
+                return review_trace
 
         try:
             # Validate contracts
@@ -1036,8 +1075,8 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
                     self.state.run_id, node_id,
                 )
                 self._step = invocation.step_id
-                self.state.step = self._step
-                self.state.current_node = node_id
+                # H0.5 (criterion 4): cursor is an invocation-transition
+                # proposal; accepted state not mutated pre-commit.
 
                 # Policy gate
                 policy_denied = self._check_policy_gate(node_id, node)
@@ -1079,13 +1118,13 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
                         invoke_fn=self._invoke_node,
                     )
                     if not result.recovered:
-                        self._record_last_failure(
-                            failure_type, node_id, self._step,
-                            response.error or "", retryable=False,
-                        )
                         self._fail_chain(
                             f"node_execution_failed:{failure_type.value}",
                             [f"Node '{node_id}' failed: {response.error}"],
+                            metadata=self._record_last_failure(
+                                failure_type, node_id, self._step,
+                                response.error or "", retryable=False,
+                            ),
                         )
                         return self.trace
                     # v3.2.0: retry-recovery success invariant. recovered=True is
@@ -1097,31 +1136,30 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
                     # (memory-write policy rejection, trace fallback) are exempt.
                     if result.recovered and result.response is None:
                         if result.action not in _SKIP_CONTINUE_ACTIONS:
-                            self._record_last_failure(
-                                failure_type, node_id, self._step,
-                                "recovered_with_no_response", retryable=False,
-                            )
                             self._fail_chain(
                                 "node_execution_failed:invalid_recovery_response",
                                 [f"Node '{node_id}' recovery returned recovered=True with no response"],
+                                metadata=self._record_last_failure(
+                                    failure_type, node_id, self._step,
+                                    "recovered_with_no_response", retryable=False,
+                                ),
                             )
                             return self.trace
                     if result.recovered and result.response is not None and not result.response.success:
-                        self._record_last_failure(
-                            failure_type, node_id, self._step,
-                            result.response.error or "recovered_with_failed_response",
-                            retryable=False,
-                        )
                         self._fail_chain(
                             "node_execution_failed:invalid_recovery_response",
                             [f"Node '{node_id}' recovery returned recovered=True with a failed response"],
+                            metadata=self._record_last_failure(
+                                failure_type, node_id, self._step,
+                                result.response.error or "recovered_with_failed_response",
+                                retryable=False,
+                            ),
                         )
                         return self.trace
                     response = result.response
                     # Sync step_id from retry — FailureManager allocated a new step
                     if response is not None and hasattr(response, 'step_id'):
                         self._step = response.step_id
-                        self.state.step = self._step
                     if response is None:
                         self.state.outputs[node_id] = {"skipped": True, "reason": result.action}
                         payload = {"skipped": True, "reason": result.action}
@@ -1144,12 +1182,13 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
                             reason_codes=schema_result.errors[:3],
                         )
 
-                # Update state (atomic write)
-                self.state.outputs[node_id] = response.output
+                # Update state (atomic write) — H0.5 candidate/adopt (V2)
                 self.persistence.commit_invocation_success(
                     self.state,
                     step_id=self._step,
                     node_id=node_id,
+                    output=response.output,
+                    cursor=(self._step, node_id),
                     event_type="node_completed",
                     event_payload={"node_id": node_id, "step_id": self._step, "resumed": True},
                 )
@@ -1194,11 +1233,37 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
                 self.persistence.save_snapshot(self.state)
                 sched_idx += 1
 
-            # Chain completed
-            self.state.status = "completed"
-            self.state.completed_at = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
-            self._emit_chain_completed()
-            self.persistence.save_final(self.state)  # Final save
+            # Chain completed — H0.5 lifecycle transition (V3), resume path.
+            completed_event = TraceEvent(
+                run_id=self.state.run_id,
+                chain_id=self.state.chain_id,
+                node_id="runtime",
+                step_id=self._step,
+                event_type=EventType.CHAIN_COMPLETED,
+                actor=Actor.RUNTIME,
+                decision="chain_completed_successfully",
+                metadata={
+                    "nodes_executed": sum(
+                        1 for e in self.trace.events
+                        if e.event_type == EventType.NODE_SUCCEEDED
+                    ),
+                    "loops_entered": sum(
+                        1 for e in self.trace.events
+                        if e.event_type == EventType.LOOP_ENTERED
+                    ),
+                    "human_reviews": sum(
+                        1 for e in self.trace.events
+                        if e.event_type == EventType.HUMAN_REVIEW_REQUESTED
+                    ),
+                },
+            )
+            self.persistence.commit_lifecycle(
+                self.state,
+                event=completed_event,
+                status="completed",
+                completed_at=time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
+            )
+            self._record_trace_event(completed_event, already_durable=True)
 
         except Exception as e:
             self._fail_chain("unhandled_exception", [str(e)])
@@ -1258,24 +1323,37 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
             {"outputs": self.state.outputs}, invoke_fn=self._invoke_node,
         )
 
+        # H0.5 class-3 checkpoint: the route-fallback outcome (recovered
+        # output + running, or failed) is proposed on a candidate and
+        # committed before adoption — no pre-commit mutation of the
+        # accepted state, no revision consumed on failure (V1).
+        route_outputs: dict[str, Any] | None = None
         if result.recovered and result.response is not None:
             response = result.response
             if hasattr(response, "outputs") and response.outputs:
-                self.state.outputs[node_id] = response.outputs
-            self.state.status = "running"
+                route_outputs = response.outputs
+            outcome_status = "running"
         else:
-            self.state.status = "failed"
+            outcome_status = "failed"
 
-        self.state_manager.save(self.state)
+        def _apply_route_fallback(cand: ChainState) -> None:
+            cand.status = outcome_status
+            if route_outputs is not None:
+                cand.outputs[node_id] = route_outputs
+
+        self.persistence.commit_checkpoint(self.state, _apply_route_fallback)
         return self.state.status
 
     async def _resume_waiting_for_review(self, saved: ChainState) -> ChainTrace:
         """Handle resume when chain is waiting for human review.
 
         Resolves the review decision via ReviewManager, applies the
-        scheduler transition, updates saved state, then delegates to
-        resume() for execution. The review event is emitted inside
-        resume() as a startup event.
+        scheduler transition, and commits the decision-specific transition
+        atomically (H0.5 amendment 3). Terminal outcomes (reject, timeout,
+        governance failure) return the terminal trace; approve/revision
+        returns None so the caller's resume pass continues execution with
+        decision-complete metadata — the review event is acknowledged
+        here, into the caller's live trace.
 
         No duplicated execution loop.
         """
@@ -1306,7 +1384,6 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
         ):
             # Need to initialize state and trace for the terminal event
             self.state = saved
-            self.state.is_resumed = True
             self._step = self.state.step
             self.step_allocator.initialize_from(self._step)
             self.trace = ChainTrace(
@@ -1317,9 +1394,17 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
             self.emitter.run_id = saved.run_id
             self.emitter.chain_id = saved.chain_id
 
-            self._emit(
-                EventType.HUMAN_REVIEW_COMPLETED,
+            # H0.5 (amendment 3): the review-completion event commits in ONE
+            # transaction with the terminal outcome (failed) — no artificial
+            # intermediate running state is persisted. ``saved`` serves as
+            # scratch for the receipt materialization; only this commit
+            # makes any of it durable or acknowledged.
+            completed_event = TraceEvent(
+                run_id=saved.run_id,
+                chain_id=saved.chain_id,
                 node_id="risk_classifier",
+                step_id=self._step,
+                event_type=EventType.HUMAN_REVIEW_COMPLETED,
                 actor=Actor.HUMAN,
                 decision=review_result.decision,
                 metadata=self._resume_receipt_metadata(review_result, {
@@ -1328,6 +1413,17 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
                     "reason": transition.reason,
                 }),
             )
+            self.persistence.commit_lifecycle(
+                self.state,
+                event=completed_event,
+                status="failed",
+                is_resumed=True,
+                metadata=(
+                    {"governed_decision_receipt": review_result.decision_receipt}
+                    if review_result.decision_receipt else None
+                ),
+            )
+            self._record_trace_event(completed_event, already_durable=True)
             reason = (
                 "human_review_rejected" if transition.action == SchedulingDecision.REVIEW_REJECT
                 else "review_timeout"
@@ -1340,26 +1436,47 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
             self._fail_chain(reason, [message])
             return self.trace
 
-        # For revision: store revision target in metadata
+        # H0.5 (amendment 3): approve/revision decision transition. The
+        # running state, the review metadata proposals, and the
+        # review-completion event commit in ONE SQLite transaction; the
+        # event is acknowledged (appended to the live trace) only after
+        # that commit succeeds. The pending_review_event deferral is
+        # retired — this is the single durable record of the decision.
+        completed_event = TraceEvent(
+            run_id=saved.run_id,
+            chain_id=saved.chain_id,
+            node_id="risk_classifier",
+            step_id=saved.step,
+            event_type=EventType.HUMAN_REVIEW_COMPLETED,
+            actor=Actor.HUMAN,
+            decision=review_result.decision,
+            metadata={
+                "resumed_review": True,
+                "transition": transition.action,
+                "reason": transition.reason,
+                **self._resume_receipt_metadata(review_result, {}),
+            },
+        )
+        decision_metadata: dict[str, Any] = {}
+        if review_result.decision_receipt:
+            decision_metadata["governed_decision_receipt"] = review_result.decision_receipt
         if transition.action == SchedulingDecision.REVIEW_REVISION:
-            saved.metadata["review_revision_target"] = transition.revision_target
+            decision_metadata["review_revision_target"] = transition.revision_target
+        self.persistence.commit_lifecycle(
+            saved,
+            event=completed_event,
+            status="running",
+            paused_at=None,
+            is_resumed=True,
+            metadata=decision_metadata or None,
+        )
+        self._record_trace_event(completed_event, already_durable=True)
 
-        # Store review info so resume() can emit the event
-        saved.metadata["pending_review_event"] = {
-            "decision": review_result.decision,
-            "transition": transition.action,
-            "reason": transition.reason,
-            **self._resume_receipt_metadata(review_result, {}),
-        }
-
-        # Mark state as running so resume() doesn't re-enter this method
-        saved.status = "running"
-        saved.paused_at = None
-        self.persistence.save_snapshot(saved)
-
-        # Delegate to resume() — it handles the execution loop
-        # with proper step allocation, persistence, and trace emission
-        return await self.resume(saved.run_id)
+        # Continue in the caller's resume pass — its preamble (trace,
+        # resume-start event, cursor setup) is already done, and the
+        # metadata the execution loop reads (revision target, receipts) is
+        # now decision-complete. Returning None signals continuation.
+        return None
 
     async def _invoke_node(
         self, node: BaseNode, envelope: InvocationEnvelope
@@ -1629,7 +1746,9 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
             side_effect_status_map=se_status_map,
         )
 
-    def _record_trace_event(self, event: TraceEvent) -> None:
+    def _record_trace_event(
+        self, event: TraceEvent, *, already_durable: bool = False
+    ) -> None:
         """H0.4 singular trace-emission authority.
 
         The ONLY production method allowed to call ``ChainTrace.add_event()``.
@@ -1640,35 +1759,53 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
         One logical event → one TraceEvent → one event_id → one timestamp →
         one durable trace row (carrying that event_id and timestamp) → one
         in-memory append of that same object.
+
+        H0.5 ``already_durable=True`` is the lifecycle-transition mode: the
+        event's durable row already committed inside the same SQLite
+        transaction as the state it asserts
+        (``PersistenceCoordinator.commit_lifecycle`` →
+        ``StateManager.save_with_trace_event``), so only the singular
+        in-memory append of the exact same object remains.
         """
-        # Build reconstruction-complete payload from fields not in dedicated columns.
-        payload = {
-            "chain_id": event.chain_id,
-            "actor": event.actor.value,
-            "contract_id": event.contract_id,
-            "policy_id": event.policy_id,
-            "input_reference": event.input_reference,
-            "output_reference": event.output_reference,
-            "decision": event.decision,
-            "reason_codes": event.reason_codes,
-            "cost_usd": event.cost_usd,
-            "latency_ms": event.latency_ms,
-            "risk_level": event.risk_level,
-            "metadata": event.metadata,
-        }
-        # Durable FIRST — no in-memory acknowledgement before persistence succeeds.
-        self.persistence.append_trace_event(
-            run_id=event.run_id,
-            revision=self.state.revision,
-            event_type=event.event_type.value,
-            node_id=event.node_id,
-            step_id=event.step_id,
-            trace_event_id=event.event_id,
-            timestamp=event.timestamp,
-            payload=payload,
-        )
+        if not already_durable:
+            # Durable FIRST — no in-memory acknowledgement before persistence
+            # succeeds. Projection is the single shared definition.
+            self.persistence.append_trace_event(
+                run_id=event.run_id,
+                revision=self.state.revision,
+                event_type=event.event_type.value,
+                node_id=event.node_id,
+                step_id=event.step_id,
+                trace_event_id=event.event_id,
+                timestamp=event.timestamp,
+                payload=event.durable_payload(),
+            )
         # In-memory — exact same object, appended only after durable success.
         self.trace.add_event(event)
+
+    def _commit_review_transition(
+        self,
+        state: ChainState,
+        event: TraceEvent,
+        *,
+        status: str,
+        paused_at: Any = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """H0.5 (amendment 3): atomic review-transition seam for ReviewManager.
+
+        The candidate review state (status, paused_at, metadata proposals)
+        and the asserting trace event commit in ONE SQLite transaction;
+        the exact same event object is then appended to the live trace
+        through the singular authority's already-durable mode. This is the
+        only path by which review pause, decision, and governance-failure
+        transitions become durable or acknowledged.
+        """
+        self.persistence.commit_lifecycle(
+            state, event=event, status=status, paused_at=paused_at,
+            metadata=metadata,
+        )
+        self._record_trace_event(event, already_durable=True)
 
     def _emit(
         self,
@@ -1704,36 +1841,6 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
         )
         self._record_trace_event(event)
 
-    def _emit_chain_started(self) -> None:
-        self._emit(
-            EventType.CHAIN_STARTED,
-            node_id="runtime",
-            step_id=0,
-            decision="chain_initialized",
-            reason_codes=["goal_received"],
-        )
-
-    def _emit_chain_completed(self) -> None:
-        self._emit(
-            EventType.CHAIN_COMPLETED,
-            node_id="runtime",
-            decision="chain_completed_successfully",
-            metadata={
-                "nodes_executed": sum(
-                    1 for e in self.trace.events
-                    if e.event_type == EventType.NODE_SUCCEEDED
-                ),
-                "loops_entered": sum(
-                    1 for e in self.trace.events
-                    if e.event_type == EventType.LOOP_ENTERED
-                ),
-                "human_reviews": sum(
-                    1 for e in self.trace.events
-                    if e.event_type == EventType.HUMAN_REVIEW_REQUESTED
-                ),
-            },
-        )
-
     def _resume_receipt_metadata(self, review_result, base: dict) -> dict:
         """Build full receipt metadata for resume trace events (code-review fix B).
 
@@ -1764,25 +1871,33 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
 
         Persists pending_loop_back so resume re-enters the loop target node
         (not the post-loop node) after the operator approves the budget.
+
+        H0.5 class-3 checkpoint: the pause is proposed on a candidate and
+        committed before adoption — no pre-commit mutation of the accepted
+        state (V1).
         """
-        self.state.status = "paused_for_budget"
-        md = dict(self.state.metadata or {})
-        md["loop_budget_exceeded"] = loop_id
-        md["budget_context"] = {
-            "loop_id": loop_id,
-            "accumulated_cost": accumulated_cost,
-            "previous_budget": previous_budget,
-            "reason": reason,
+        pause_md = {
+            "loop_budget_exceeded": loop_id,
+            "budget_context": {
+                "loop_id": loop_id,
+                "accumulated_cost": accumulated_cost,
+                "previous_budget": previous_budget,
+                "reason": reason,
+            },
         }
         if target_node:
-            md["pending_loop_back"] = {
+            pause_md["pending_loop_back"] = {
                 "loop_id": loop_id,
                 "source_node": source_node,
                 "target_node": target_node,
                 "accumulated_cost": accumulated_cost,
             }
-        self.state.metadata = md
-        self.state_manager.save(self.state)
+
+        def _apply_budget_pause(cand: ChainState) -> None:
+            cand.status = "paused_for_budget"
+            cand.metadata = {**(cand.metadata or {}), **pause_md}
+
+        self.persistence.commit_checkpoint(self.state, _apply_budget_pause)
 
     async def approve_budget_increase(
         self, run_id: str, new_budget: float,
@@ -1809,26 +1924,27 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
         # v2.47.0: persist the budget override so LoopEnforcer.check_budget
         # uses the operator-approved ceiling (effective_budget). The override
         # is an absolute ceiling — accumulated spend is carried, not reset.
-        md = dict(self.state.metadata or {})
-        md["budget_overrides"] = {
-            **md.get("budget_overrides", {}),
-            loop_id: new_budget,
-        }
-        self.state.metadata = md
+        # H0.5 class-3 checkpoint: the approval is proposed on a candidate
+        # and committed before adoption (V1).
+        def _apply_budget_approval(cand: ChainState) -> None:
+            amd = dict(cand.metadata or {})
+            amd["budget_overrides"] = {
+                **amd.get("budget_overrides", {}),
+                loop_id: new_budget,
+            }
+            # Clear the pause markers and resume.
+            amd.pop("loop_budget_exceeded", None)
+            amd["budget_approved"] = {
+                "loop_id": loop_id,
+                "previous_budget": ctx.get("previous_budget", 0.0),
+                "new_budget": new_budget,
+                "accumulated_cost_at_pause": ctx.get("accumulated_cost", 0.0),
+                "remaining_budget": new_budget - ctx.get("accumulated_cost", 0.0),
+            }
+            cand.metadata = amd
+            cand.status = "running"
 
-        # Clear the pause markers and resume.
-        self.state.status = "running"
-        md = dict(self.state.metadata or {})
-        md.pop("loop_budget_exceeded", None)
-        md["budget_approved"] = {
-            "loop_id": loop_id,
-            "previous_budget": ctx.get("previous_budget", 0.0),
-            "new_budget": new_budget,
-            "accumulated_cost_at_pause": ctx.get("accumulated_cost", 0.0),
-            "remaining_budget": new_budget - ctx.get("accumulated_cost", 0.0),
-        }
-        self.state.metadata = md
-        self.state_manager.save(self.state)
+        self.persistence.commit_checkpoint(self.state, _apply_budget_approval)
 
         # Resume execution from the paused point.
         trace = await self.resume(run_id)
@@ -1838,33 +1954,54 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
     def _record_last_failure(
         self, failure_type, node_id: str, step_id: int,
         error: str, *, retryable: bool = False,
-    ) -> None:
-        """Persist durable last_failure metadata for recovery classification (#13).
+    ) -> dict[str, Any]:
+        """Build the last_failure metadata proposal for recovery classification (#13).
 
-        The recovery classifier + OperatorActionPolicy read this to determine
-        FAILED_RETRYABLE vs FAILED_NON_RETRYABLE, the failed step for retry
-        precision, and the failure_type for ROUTE_FALLBACK eligibility. Without
-        this, failed runs fall through to CRASH_RECOVERABLE and retry/fallback
-        actions can't target the right step.
+        H0.5: returns the proposal instead of mutating the accepted state.
+        The caller passes it into the failing lifecycle transition
+        (``_fail_chain(metadata=...)``) so it commits atomically with the
+        failed status. The recovery classifier + OperatorActionPolicy read
+        this to determine FAILED_RETRYABLE vs FAILED_NON_RETRYABLE, the
+        failed step for retry precision, and the failure_type for
+        ROUTE_FALLBACK eligibility. Without it, failed runs fall through to
+        CRASH_RECOVERABLE and retry/fallback actions can't target the right
+        step.
         """
-        md = dict(self.state.metadata or {})
-        md["last_failure"] = {
-            "failure_type": failure_type.value if hasattr(failure_type, "value") else str(failure_type),
-            "node_id": node_id,
-            "step_id": step_id,
-            "error": error,
-            "retryable": retryable,
+        return {
+            "last_failure": {
+                "failure_type": failure_type.value if hasattr(failure_type, "value") else str(failure_type),
+                "node_id": node_id,
+                "step_id": step_id,
+                "error": error,
+                "retryable": retryable,
+            }
         }
-        self.state.metadata = md
 
-    def _fail_chain(self, reason: str, details: list[str]) -> None:
-        self.state.status = "failed"
-        self._emit(
-            EventType.CHAIN_FAILED,
+    def _fail_chain(
+        self, reason: str, details: list[str], *,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """H0.5 lifecycle transition (V4): failed status commits durably.
+
+        The failed status and its asserting CHAIN_FAILED event commit in ONE
+        SQLite transaction. ``metadata`` carries only proposals the calling
+        failure path already produces (e.g. ``last_failure``); H0.5 does not
+        synthesize ``last_failure`` for previously unclassified failure paths.
+        """
+        failure_event = TraceEvent(
+            run_id=self.state.run_id,
+            chain_id=self.state.chain_id,
             node_id="runtime",
+            step_id=self._step,
+            event_type=EventType.CHAIN_FAILED,
+            actor=Actor.RUNTIME,
             decision=reason,
             reason_codes=details,
         )
+        self.persistence.commit_lifecycle(
+            self.state, event=failure_event, status="failed", metadata=metadata,
+        )
+        self._record_trace_event(failure_event, already_durable=True)
         self.trace.finalize("failed")
 
     def _compute_loop_cost(self, node_id: str) -> float:
@@ -1945,20 +2082,24 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
 
         all_branch_names = list(branch_def.branches.keys())
 
-        # Record routing decision in state
-        self.state.routing_decisions.append({
-            "from_node": branch_def.from_node,
-            "selected": selected_branches,
-            "skipped": [b for b in all_branch_names if b not in selected_branches],
-            "available": all_branch_names,
-        })
+        # H0.5 (criterion 4): the routing decision record and initial branch
+        # markers are proposed through a state-only checkpoint — a failed
+        # branch invocation commit then compares equal against this accepted
+        # pre-transition state.
+        def _apply_branch_group(cand) -> None:
+            cand.routing_decisions.append({
+                "from_node": branch_def.from_node,
+                "selected": selected_branches,
+                "skipped": [b for b in all_branch_names if b not in selected_branches],
+                "available": all_branch_names,
+            })
+            for bname in all_branch_names:
+                if bname not in selected_branches:
+                    cand.branch_states[bname] = "skipped"
+                else:
+                    cand.branch_states[bname] = "pending"
 
-        # Initialize branch states
-        for bname in all_branch_names:
-            if bname not in selected_branches:
-                self.state.branch_states[bname] = "skipped"
-            else:
-                self.state.branch_states[bname] = "pending"
+        self.persistence.commit_checkpoint(self.state, _apply_branch_group)
 
         # ── Build node executor callback ──
         async def node_executor(
@@ -1978,9 +2119,8 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
             )
             captured_step = invocation.step_id
 
-            self.state.step = captured_step
-            self.state.current_node = node_id
-            self.state.branch_states[branch_name] = "running"
+            # H0.5 (criterion 4): branch cursor and the running marker are
+            # proposals owned by the branch invocation transition below.
 
             # Policy gate (after step allocation)
             policy_denied = self._check_policy_gate(node_id, node)
@@ -2009,15 +2149,16 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
                     node_id=node_id, success=False, error=response.error or "unknown",
                 )
 
-            # Update state (branch-local output)
-            self.state.outputs[node_id] = response.output
-
+            # Update state (branch-local output) — H0.5 candidate/adopt (V2).
             # Atomic write using captured step_id (not mutable self._step)
             self.persistence.commit_invocation_success(
                 self.state,
                 step_id=captured_step,
                 node_id=node_id,
                 branch_name=branch_name,
+                output=response.output,
+                cursor=(captured_step, node_id),
+                branch_states={branch_name: "running"},
                 event_type="branch_node_completed",
                 event_payload={"node_id": node_id, "branch": branch_name, "step_id": captured_step},
             )
