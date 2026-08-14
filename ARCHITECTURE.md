@@ -2,7 +2,7 @@
 
 **Document class:** Descriptive architecture  
 **Baseline date:** 2026-08-14  
-**Implementation code baseline:** `70c8921da34ed1db86233942b70fe597318b3f5b`  
+**Implementation code baseline:** `71afaef186dca695770c73f212a7f198e97dac2b`  
 **Released version at baseline:** `v3.6.0`  
 **Current-state summary:** [BASELINE.md](BASELINE.md)  
 **Strategic source:** [VISION.md](VISION.md)

@@ -2,7 +2,7 @@
 
 **Document class:** Descriptive compatibility map  
 **Baseline date:** 2026-08-14  
-**Baseline SHA:** `70c8921da34ed1db86233942b70fe597318b3f5b`  
+**Baseline SHA:** `71afaef186dca695770c73f212a7f198e97dac2b`  
 **Released version:** `v3.6.0`
 
 This document is the current companion to the historical `docs/frozen-surfaces.md` v1 compatibility contract.

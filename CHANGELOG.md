@@ -110,8 +110,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `tests/research/test_state_transition_authority.py` (candidate
   isolation; checkpoint/invocation/lifecycle/branch failure semantics;
   reject never passing through running; failed review commit preserving
-  waiting state; recovery revision adoption). No H0.4 trace redesign, no
-  RecoveryService redesign, no replay.
+  waiting state; recovery revision adoption). Resume control-marker
+  removals (`review_revision_target`, `pending_loop_back`) are likewise
+  candidate-owned: a failed commit leaves the marker accepted in live,
+  durable, and fresh-process state with no revision consumed. The rule
+  applies to authoritative/accepted transition boundaries; scheduler-local
+  provisional preparation is not itself an authoritative transition. No
+  H0.4 trace redesign, no RecoveryService redesign, no replay.
 
 ## [3.6.0] — First Public-Era Release
 
