@@ -522,3 +522,134 @@ def test_recovery_cancel_adopts_committed_revision(tmp_path: Path) -> None:
     assert allowed[0]["revision"] == fresh.revision, (
         "ALLOWED event recorded a pre-transition revision"
     )
+
+
+# --------------------------------------------------------------------------- #
+# 13. H0.5 resume-marker transitions — candidate-owned marker removal
+# --------------------------------------------------------------------------- #
+
+
+def test_marker_checkpoint_failure_rule_at_coordinator(tmp_path: Path) -> None:
+    """The frozen failure rule for marker removal: injected persistence
+    failure leaves live state, durable state, fresh-process state, and
+    revision at the pre-transition values."""
+    pc, sm = _make_coordinator(tmp_path)
+    st = ChainState(run_id="rmk", chain_id="c", status="running")
+    st.metadata["review_revision_target"] = "goal_interpreter"
+    sm.save(st)
+    rev_before = st.revision
+
+    with patch.object(sm, "save", side_effect=RuntimeError("injected marker failure")):
+        with pytest.raises(RuntimeError):
+            pc.commit_checkpoint(
+                st, lambda c: c.metadata.pop("review_revision_target", None)
+            )
+
+    assert "review_revision_target" in st.metadata, "live marker removed pre-commit"
+    assert st.revision == rev_before, "revision consumed by failed marker commit"
+    fresh = sm.load("rmk")
+    assert "review_revision_target" in fresh.metadata
+    assert fresh.revision == rev_before
+
+
+def _resume_with_failing_marker_save(orch, sm, marker: str):
+    """Run resume() with sm.save failing exactly when the candidate no
+    longer carries the marker — i.e., the save that would commit the
+    marker's removal. Earlier saves (whose candidates retain the marker)
+    pass through."""
+    import asyncio
+    original_save = sm.save
+
+    def failing_marker_save(cand):
+        if marker not in (cand.metadata or {}):
+            raise RuntimeError(f"injected {marker} checkpoint failure")
+        return original_save(cand)
+
+    async def do_resume():
+        with patch.object(sm, "save", side_effect=failing_marker_save):
+            return await orch.resume(orch.state.run_id)
+
+    return asyncio.run(do_resume())
+
+
+def _seed_resume_marker(orch, sm, marker: str, value) -> None:
+    orch.state.status = "running"
+    orch.state.metadata[marker] = value
+    sm.save(orch.state)
+
+
+def test_resume_revision_marker_failure_leaves_marker_accepted(
+    tmp_path: Path,
+) -> None:
+    """Integration: the review-revision marker's removal is candidate-owned.
+    Injected checkpoint failure leaves the marker accepted in live, durable,
+    and fresh-process state — and the failure transition is constructed
+    from a live object that still carries it."""
+    orch, sm = _make_orchestrator(tmp_path, "revmark.db")
+    _seed_resume_marker(
+        orch, sm, "review_revision_target", "goal_interpreter"
+    )
+
+    trace = _resume_with_failing_marker_save(
+        orch, sm, "review_revision_target"
+    )
+    assert trace.final_status != "completed"
+
+    # Live, durable, and fresh-process state all retain the marker.
+    assert "review_revision_target" in orch.state.metadata, (
+        "live marker removed despite failed commit"
+    )
+    fresh = sm.load(orch.state.run_id)
+    assert "review_revision_target" in fresh.metadata, (
+        "durable marker removed despite failed commit"
+    )
+
+
+def test_resume_pending_loop_marker_failure_leaves_marker_accepted(
+    tmp_path: Path,
+) -> None:
+    """Integration: the pending-loop marker's removal is candidate-owned,
+    with the same failure semantics."""
+    orch, sm = _make_orchestrator(tmp_path, "loopmark.db")
+    _seed_resume_marker(
+        orch, sm, "pending_loop_back",
+        {"loop_id": "search", "source_node": "goal_interpreter",
+         "target_node": "goal_interpreter", "accumulated_cost": 1.0},
+    )
+
+    trace = _resume_with_failing_marker_save(orch, sm, "pending_loop_back")
+    assert trace.final_status != "completed"
+
+    assert "pending_loop_back" in orch.state.metadata, (
+        "live marker removed despite failed commit"
+    )
+    fresh = sm.load(orch.state.run_id)
+    assert "pending_loop_back" in fresh.metadata, (
+        "durable marker removed despite failed commit"
+    )
+
+
+def test_resume_markers_removed_only_after_commit(tmp_path: Path) -> None:
+    """Success path: each marker is removed from live and durable state
+    only after its checkpoint commits."""
+    import asyncio
+    orch, sm = _make_orchestrator(tmp_path, "markok.db")
+    orch.state.status = "running"
+    orch.state.metadata["review_revision_target"] = "goal_interpreter"
+    orch.state.metadata["pending_loop_back"] = {
+        "loop_id": "search", "source_node": "goal_interpreter",
+        "target_node": "goal_interpreter", "accumulated_cost": 1.0,
+    }
+    sm.save(orch.state)
+
+    asyncio.run(orch.resume(orch.state.run_id))
+
+    # Both markers consumed by their committing checkpoints.
+    assert "review_revision_target" not in (orch.state.metadata or {}), (
+        "revision marker survives a committed removal"
+    )
+    fresh = sm.load(orch.state.run_id)
+    assert "review_revision_target" not in (fresh.metadata or {})
+    assert "pending_loop_back" not in (fresh.metadata or {}), (
+        "pending-loop marker survives a committed removal"
+    )

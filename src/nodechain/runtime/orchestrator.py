@@ -998,9 +998,15 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
                 except ValueError:
                     start_index = 0  # Fall back to beginning
                 payload = {"revision_requested": True, "previous_outputs": saved.outputs}
-                # Clear revision target so it's not reapplied on subsequent resumes
-                saved.metadata.pop("review_revision_target", None)
-                self.persistence.save_snapshot(saved)
+                # Clear revision target so it's not reapplied on subsequent
+                # resumes. H0.5 class-3 checkpoint: the marker removal is
+                # candidate-owned — a failed commit leaves the marker
+                # accepted in live, durable, and fresh-process state, and
+                # consumes no revision.
+                def _clear_revision_target(cand: ChainState) -> None:
+                    cand.metadata.pop("review_revision_target", None)
+
+                self.persistence.commit_checkpoint(saved, _clear_revision_target)
 
             # v2.47.0: handle pending loop-back from budget approval resume.
             # The pause happened AFTER loop_decision but BEFORE rebuild_order_with_loop,
@@ -1023,9 +1029,13 @@ class Orchestrator(NodeEventEmitterMixin, SideEffectJournalMixin):
                     # which has context_selector/task_planner logic per target.
                     source_output = self.state.outputs.get(source_node, payload)
                     payload = self._build_loop_payload(target_node, source_output)
-                # Clear so it's not reapplied on subsequent resumes
-                saved.metadata.pop("pending_loop_back", None)
-                self.persistence.save_snapshot(saved)
+                # Clear so it's not reapplied on subsequent resumes. H0.5
+                # class-3 checkpoint: candidate-owned marker removal (same
+                # failure semantics as the revision-target marker).
+                def _clear_pending_loop(cand: ChainState) -> None:
+                    cand.metadata.pop("pending_loop_back", None)
+
+                self.persistence.commit_checkpoint(saved, _clear_pending_loop)
 
             # Resume: check for pending branch execution
             # If state was paused after routing decision but before branch execution,
