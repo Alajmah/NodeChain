@@ -74,6 +74,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (14 total). No change to replay, state-transition semantics, or
   `save_with_invocation`.
 
+- **H0.5 — Authoritative state-transition boundary.**
+  Authoritative `ChainState` transitions previously mutated the accepted
+  live state before (or without) their owning commit: invocation outputs,
+  cursors, and branch state were written pre-commit; terminal completion
+  was acknowledged by a durable `CHAIN_COMPLETED` event before its state
+  committed (a failed save could then produce durable COMPLETED and FAILED
+  events for one run); `_fail_chain` never persisted the failed status;
+  review transitions mutated loaded state before snapshot; and failed
+  commits consumed revisions on the live object. H0.5 establishes one
+  accepted-state rule: construct a candidate copy
+  (`ChainState.transition_candidate()`), durably commit, then adopt and
+  acknowledge; a failed commit leaves the accepted state untouched with
+  no revision consumed. Invocation transitions (output, completed-step,
+  cursor, branch state) are proposals owned by
+  `PersistenceCoordinator.commit_invocation_success`; state-asserting
+  lifecycle transitions (chain start, terminal completion, runtime
+  failure, review pause/decision) commit their candidate state and
+  authoritative trace row in ONE SQLite transaction
+  (`StateManager.save_with_trace_event`), so a completion-commit failure
+  can no longer durably produce `CHAIN_COMPLETED` and the contradictory
+  COMPLETED-then-FAILED pair is unproducible. Review decisions are
+  outcome-specific: approve/revision commit running; reject/timeout
+  commit their terminal failed outcome directly with the decision event;
+  the governed decision receipt rides as a committed metadata proposal.
+  Recovery CANCEL/FAIL remain their existing operator-transition authority
+  while becoming candidate-safe and adopting the committed revision.
+  Budget pause/approve and route fallback are candidate-safe checkpoints.
+  `_record_trace_event` gains an already-durable mode for lifecycle
+  events; the H0.4 singular `ChainTrace.add_event()` authority and AST
+  guard are unchanged. The review-resume delegation re-entry is retired
+  (it rebuilt the live trace and discarded the acknowledged decision
+  event); the `pending_review_event` deferral is retired with it.
+  Adversarial proof: 17 tests in
+  `tests/research/test_state_transition_authority.py` (candidate
+  isolation; checkpoint/invocation/lifecycle/branch failure semantics;
+  reject never passing through running; failed review commit preserving
+  waiting state; recovery revision adoption). No H0.4 trace redesign, no
+  RecoveryService redesign, no replay.
+
 ## [3.6.0] — First Public-Era Release
 
 **Release type:** feature + governance (minor).

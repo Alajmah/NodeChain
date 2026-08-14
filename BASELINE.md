@@ -2,9 +2,9 @@
 
 **Document class:** Descriptive baseline  
 **Status:** Active development truth  
-**Baseline date:** 2026-08-12  
+**Baseline date:** 2026-08-14  
 **Released version:** `v3.6.0`  
-**Implementation code baseline:** `b89c9dd7ba2890d4fa66f89b2b682f036446a591` (the `master` code state at the H0.4 singular trace-emission authority)  
+**Implementation code baseline:** `70c8921da34ed1db86233942b70fe597318b3f5b` (the `master` code state at the H0.5 authoritative state-transition boundary)  
 **Supersedes for current-state claims:** implementation/status sections in older README, VISION, ROADMAP, and architecture snapshots
 
 This document answers one question: **what does the NodeChain codebase actually contain and support at the pinned implementation baseline?** Documentation-only commits may follow this SHA without changing the implementation facts recorded here.
@@ -20,7 +20,7 @@ NodeChain has two legitimate anchors and they must not be conflated.
 | Anchor | Value | Meaning |
 |---|---|---|
 | Released product baseline | `v3.6.0` | Latest packaged/released version represented by `pyproject.toml` and `nodechain.__version__` |
-| Implementation code baseline | `b89c9dd7ba2890d4fa66f89b2b682f036446a591` | `master` code state at the H0.4 singular trace-emission authority; includes post-v3.6 work merged through PR #19 |
+| Implementation code baseline | `70c8921da34ed1db86233942b70fe597318b3f5b` | `master` code state at the H0.5 authoritative state-transition boundary; includes post-v3.6 work merged through PR #22 |
 
 The implementation baseline includes the `ResearchWorkspaceBundleV1` contract and the governed Research Workspace runner. Those capabilities are **post-v3.6 development state**, not retroactively part of the v3.6.0 release.
 
@@ -128,7 +128,7 @@ The codebase still contains execution or state/trace paths that are not yet redu
 
 - `runtime/chain_orchestrator.py` previously contained a lightweight composition executor that directly called `node.execute()` outside the full `Orchestrator`; H0.3 retired that path — the execution surfaces (`execute_sub_chain`, `orchestrate_composition`, `SubChainStep.execute`) now fail closed with `governed_composition_backend_required`, and `nodechain compose --plan` exits before any registry/package loading. Pure composition-plan data utilities (`SubChainSpec`, `CompositionPlan`, `SubChainResult`, topological ordering, digest, aggregation) remain; `compose validate` remains a supported read-only surface;
 - live `ChainTrace` appends now route through one singular authority (`_record_trace_event`); the orchestrator no longer contains direct `self.trace.add_event(...)` calls outside that boundary (AST-guarded); authoritative durable trace rows — including operator/recovery events — carry first-class `trace_event_id` and participate in one `get_trace_events()` projection;
-- the orchestrator still performs direct `ChainState` field mutation around persistence boundaries;
+- authoritative `ChainState` transitions now follow one accepted-state rule (H0.5): a candidate copy is constructed (`ChainState.transition_candidate()`), committed durably, and only then adopted; a failed commit leaves the accepted state untouched with no revision consumed. Invocation transitions (output, completed-step, cursor, branch state) and state-asserting lifecycle transitions (start, completion, failure, review pause/decision) commit through `PersistenceCoordinator` primitives; lifecycle state and their asserting trace events commit in one SQLite transaction. Review decisions are outcome-specific (reject/timeout commit failed directly); recovery terminal actions are candidate-safe and adopt the committed revision;
 - the research evaluation runner directly executes quality-critical nodes rather than executing the complete governed runtime.
 
 These are current architectural seams. They are not evidence that the primary runtime is absent; they are the remaining work required to make the “one execution / one trace / one authoritative state-transition path” claim literal throughout the repository.
@@ -264,7 +264,7 @@ The following are the concrete corrections discovered or reaffirmed by the rebas
 2. Complete T3 routing/result mapping from ordinary POSIX untrusted-node invocation into the supervised backend, or retain the explicit fail-closed boundary until it is complete.
 3. ~~Retire or govern the lightweight `chain_orchestrator.py` direct-execution path.~~ **Closed in H0.3 (implementation pin `989b21fe1d61332f3848474fdfd3e0d9ca1aaf5c`).** Legacy composition execution is fail-closed; no `BaseNode.execute()` call remains in the module (AST-guarded).
 4. ~~Route every accepted runtime trace event through one durable emission authority.~~ **Closed in H0.4 (implementation pin `b89c9dd7ba2890d4fa66f89b2b682f036446a591`).** One live `ChainTrace` append authority (`_record_trace_event`, durable-first, same object); first-class `trace_event_id` for authoritative durable trace rows including operator/recovery events; one `get_trace_events()` projection; AST guard enforces exactly one `.add_event()` call in all of `src/nodechain/`.
-5. Consolidate authoritative state transitions behind one durability-before-acknowledgement boundary.
+5. ~~Consolidate authoritative state transitions behind one durability-before-acknowledgement boundary.~~ **Closed in H0.5 (implementation pin `70c8921da34ed1db86233942b70fe597318b3f5b`).** Accepted-state rule: candidate copy → durable commit → adopt; failed commits leave the accepted state untouched with no revision consumed; lifecycle state and asserting trace events commit in one transaction.
 6. Connect evaluation to the complete governed runtime where the evaluation claim requires runtime-level evidence.
 7. Keep deployment-profile documentation explicit about which execution path and host capability profile is being claimed.
 

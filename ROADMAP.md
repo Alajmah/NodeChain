@@ -1,8 +1,8 @@
 # NodeChain Roadmap — Post-Rebaseline
 
 **Document class:** Future work  
-**Baseline date:** 2026-08-12  
-**Baseline SHA:** `b89c9dd7ba2890d4fa66f89b2b682f036446a591`  
+**Baseline date:** 2026-08-14  
+**Baseline SHA:** `70c8921da34ed1db86233942b70fe597318b3f5b`  
 **Current released version:** `v3.6.0`  
 **Current implementation truth:** [BASELINE.md](BASELINE.md)
 
@@ -51,22 +51,6 @@ No legacy weaker POSIX fallback is acceptable.
 - `NodeInvoker` sees truthful start/exit/timeout/output/containment results;
 - no double-spawn or parallel containment authority;
 - qualified Linux host evidence covers the integrated production path.
-
-## H0.5 — Authoritative state-transition boundary
-
-**Observed gap**
-
-The orchestrator still performs direct `ChainState` mutation around persistence operations.
-
-**Required outcome**
-
-Make the durability-before-authoritative-acknowledgement rule explicit through one transition boundary. Ephemeral in-memory preparation is allowed; treating an uncommitted mutation as authoritative is not.
-
-**Exit evidence**
-
-- named transition API/coordinator owns accepted chain-state transitions;
-- interruption reconstructs the last accepted state deterministically;
-- run and resume share the same transition semantics.
 
 ## H0.6 — Deployment profile truth
 
