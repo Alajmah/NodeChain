@@ -106,7 +106,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   guard are unchanged. The review-resume delegation re-entry is retired
   (it rebuilt the live trace and discarded the acknowledged decision
   event); the `pending_review_event` deferral is retired with it.
-  Adversarial proof: 17 tests in
+  Adversarial proof: 21 tests in
   `tests/research/test_state_transition_authority.py` (candidate
   isolation; checkpoint/invocation/lifecycle/branch failure semantics;
   reject never passing through running; failed review commit preserving
