@@ -31,9 +31,18 @@ def _make_review_manager(captured_events=None, captured_state=None):
     """Build a ReviewManager with capturing callbacks."""
     events = captured_events if captured_events is not None else []
     state_cap = captured_state
+    def _transition(s, e, *, status, paused_at=None, metadata=None):
+        s.status = status
+        s.paused_at = paused_at
+        if metadata:
+            s.metadata = {**(s.metadata or {}), **metadata}
+        if state_cap is not None:
+            state_cap.append(s)
+        events.append(e)
+
     return ReviewManager(
-        save_snapshot=(lambda s: state_cap.append(s) if state_cap is not None else None),
-        add_trace_event=lambda e: events.append(e),
+        commit_review_transition=_transition,
+        add_trace_event=lambda e: None,
     ), events
 
 
@@ -308,7 +317,12 @@ class TestFailClosed:
         rm1, _ = _make_review_manager()
         res1 = asyncio.run(rm1.request_review(_high_risk_output(), state, "T", step_id=9))
         assert res1.receipt_id is not None
-        assert state.status != "failed"
+        # H0.5 amendment 3: a valid reject commits failed WITH its receipt;
+        # the verifier-failure path commits failed with NO receipt and a
+        # governed_review_failure marker. The receipt is the distinction.
+        assert state.status == "failed"
+        assert state.metadata["governed_decision_receipt"]["receipt_id"] == res1.receipt_id
+        assert "governed_review_failure" not in state.metadata
 
     def test_tampered_subject_digest_rejected_by_verifier(self, clean_review_env):
         """Direct verifier rejects a real subject_digest mismatch."""

@@ -79,8 +79,15 @@ def _produce_full_run(db_path, mode="auto-approve"):
     events = []
     sm = StateManager(db_path=db_path)
     rm = ReviewManager(
-        save_snapshot=lambda s: None,
-        add_trace_event=lambda e: events.append(e),
+        commit_review_transition=(
+            lambda s, e, *, status, paused_at=None, metadata=None: (
+                setattr(s, "status", status),
+                setattr(s, "paused_at", paused_at),
+                s.metadata.update(metadata or {}),
+                events.append(e),
+            )
+        ),
+        add_trace_event=lambda e: None,
         record_attempt=sm.record_review_attempt,
     )
     state = ChainState(chain_id="bind")

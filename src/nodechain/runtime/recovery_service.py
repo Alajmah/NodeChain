@@ -588,35 +588,51 @@ class RecoveryService:
             return DelegationResult(resulting_state=state.status)  # no transition
 
         if action is RecoveryAction.CANCEL_RUN:
-            state.status = "cancelled"
+            # H0.5 (amendment 2): candidate-before-commit — the cancelled
+            # status and reason metadata are proposed on a copy; the loaded
+            # accepted state stays untouched if the atomic transaction
+            # fails. #5 semantics (atomic state + outcome event, no crash
+            # window) are preserved unchanged.
+            cand = state.transition_candidate()
+            cand.status = "cancelled"
             if reason:
-                state.metadata = {**(state.metadata or {}), "cancel_reason": reason}
-            # #5: atomic state + outcome event in ONE transaction (no crash window
-            # where the run is terminal but the outcome event is missing).
+                cand.metadata = {**(cand.metadata or {}), "cancel_reason": reason}
             payload: dict[str, Any] = {"actor": Actor_OPERATOR}
             if reason:
                 payload["reason"] = reason
             cancel_tev_id = f"tev-{uuid.uuid4().hex[:12]}"
             payload["trace_event_id"] = cancel_tev_id
             self.state_manager.save_with_event(
-                state, EventType.RUN_CANCELLED_BY_OPERATOR.value, payload,
+                cand, EventType.RUN_CANCELLED_BY_OPERATOR.value, payload,
                 trace_event_id=cancel_tev_id,
             )
+            # Commit succeeded — adopt the committed candidate as the live
+            # authoritative state (success half of the accepted-state rule),
+            # so subsequent operator events observe the committed revision.
+            state.status = cand.status
+            state.metadata = cand.metadata
+            state.revision = cand.revision
             return DelegationResult(resulting_state=state.status)
 
         if action is RecoveryAction.FAIL_RUN:
-            state.status = "failed"
+            # H0.5 (amendment 2): candidate-before-commit, as CANCEL_RUN.
+            cand = state.transition_candidate()
+            cand.status = "failed"
             if reason:
-                state.metadata = {**(state.metadata or {}), "fail_reason": reason}
+                cand.metadata = {**(cand.metadata or {}), "fail_reason": reason}
             payload = {"actor": Actor_OPERATOR}
             if reason:
                 payload["reason"] = reason
             fail_tev_id = f"tev-{uuid.uuid4().hex[:12]}"
             payload["trace_event_id"] = fail_tev_id
             self.state_manager.save_with_event(
-                state, EventType.RUN_FAILED_BY_OPERATOR.value, payload,
+                cand, EventType.RUN_FAILED_BY_OPERATOR.value, payload,
                 trace_event_id=fail_tev_id,
             )
+            # Commit succeeded — adopt the committed candidate (as CANCEL_RUN).
+            state.status = cand.status
+            state.metadata = cand.metadata
+            state.revision = cand.revision
             return DelegationResult(resulting_state=state.status)
 
         if action is RecoveryAction.RESOLVE_SIDE_EFFECT:

@@ -15,10 +15,18 @@ from nodechain.runtime.review_manager import ReviewManager, ReviewDecision
 from nodechain.core.state import ChainState
 
 
+def _stub_review_transition(state, event, *, status, paused_at=None, metadata=None):
+    """In-memory stand-in for the H0.5 atomic review-transition seam."""
+    state.status = status
+    state.paused_at = paused_at
+    if metadata:
+        state.metadata = {**(state.metadata or {}), **metadata}
+
+
 def _make_review_manager():
-    """Create a ReviewManager with no-op callbacks."""
+    """Create a ReviewManager with the in-memory transition-seam stub."""
     return ReviewManager(
-        save_snapshot=lambda s: None,
+        commit_review_transition=_stub_review_transition,
         add_trace_event=lambda e: None,
     )
 
@@ -92,7 +100,9 @@ class TestRequestReview:
                 {"risk_level": "HIGH"}, state, "Test Chain", step_id=3
             )
             assert result.decision == "reject"
-            assert state.status == "running"
+            # H0.5 amendment 3: reject commits its terminal failed outcome
+            # directly — no intermediate running state.
+            assert state.status == "failed"
         finally:
             del os.environ["NODECHAIN_REVIEW_MODE"]
 
@@ -118,8 +128,12 @@ class TestRequestReview:
         def capture_status(s):
             saved_statuses.append(s.status)
 
+        def capture_transition(s, e, *, status, paused_at=None, metadata=None):
+            _stub_review_transition(s, e, status=status, paused_at=paused_at, metadata=metadata)
+            saved_statuses.append(s.status)
+
         rm = ReviewManager(
-            save_snapshot=capture_status,
+            commit_review_transition=capture_transition,
             add_trace_event=lambda e: None,
         )
         state = ChainState(chain_id="test")
@@ -137,9 +151,13 @@ class TestRequestReview:
         os.environ["NODECHAIN_REVIEW_MODE"] = "auto-approve"
         events = []
 
+        def capture_events(s, e, *, status, paused_at=None, metadata=None):
+            _stub_review_transition(s, e, status=status, paused_at=paused_at, metadata=metadata)
+            events.append(e)
+
         rm = ReviewManager(
-            save_snapshot=lambda s: None,
-            add_trace_event=lambda e: events.append(e),
+            commit_review_transition=capture_events,
+            add_trace_event=lambda e: None,
         )
         state = ChainState(chain_id="test")
         await rm.request_review({"risk_level": "HIGH"}, state, "Test", step_id=1)

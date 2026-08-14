@@ -70,24 +70,39 @@ def test_record_last_failure_persists_durable_metadata() -> None:
 
     sm = StateManager(db_path=Path("/tmp/test_regression_sm.db"))
     state = ChainState(run_id="r1", chain_id="c", status="running")
+    sm.save(state)
 
     class _StubOrch(Orchestrator):
         def __init__(self):
             pass
 
+    from nodechain.runtime.persistence import PersistenceCoordinator
+    from nodechain.core.trace import ChainTrace
     orch = _StubOrch()
     orch.state = state
     orch.state_manager = sm
+    orch.persistence = PersistenceCoordinator(sm)
+    orch.trace = ChainTrace(run_id="r1", chain_id="c")
+    orch._step = 4
 
-    # Record a retryable failure
+    # H0.5: _record_last_failure builds the proposal; the failing lifecycle
+    # transition commits it atomically with the failed status.
     from nodechain.runtime.failure_manager import FailureType
-    orch._record_last_failure(
+    proposal = orch._record_last_failure(
         FailureType.MODEL_TIMEOUT, "flaky_node", 4,
         "connection timeout", retryable=True,
     )
+    orch._fail_chain(
+        "node_execution_failed:model_timeout",
+        ["Node 'flaky_node' failed: connection timeout"],
+        metadata=proposal,
+    )
 
-    # The metadata must now carry last_failure
-    md = orch.state.metadata
+    # The DURABLE metadata must carry last_failure (stronger than the old
+    # in-memory-only assertion — this is what the classifier reads).
+    fresh = sm.load("r1")
+    md = fresh.metadata
+    assert fresh.status == "failed"
     assert "last_failure" in md
     assert md["last_failure"]["failure_type"] == "model_timeout"
     assert md["last_failure"]["node_id"] == "flaky_node"
@@ -95,6 +110,5 @@ def test_record_last_failure_persists_durable_metadata() -> None:
     assert md["last_failure"]["retryable"] is True
 
     # And the classifier must reach FAILED_RETRYABLE (not CRASH_RECOVERABLE)
-    orch.state.status = "failed"
-    result = classify(orch.state, side_effects=[], report=None, review_attempts=[])
+    result = classify(fresh, side_effects=[], report=None, review_attempts=[])
     assert result.state is RecoveryState.FAILED_RETRYABLE

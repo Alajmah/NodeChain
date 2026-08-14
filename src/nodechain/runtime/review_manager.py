@@ -81,11 +81,15 @@ class ReviewManager:
     def __init__(
         self,
         *,
-        save_snapshot: Callable[[ChainState], None],
+        commit_review_transition: Callable[..., None],
         add_trace_event: Callable[[TraceEvent], None],
         record_attempt: Callable[[dict], None] | None = None,
     ) -> None:
-        self._save_snapshot = save_snapshot
+        # H0.5 (amendment 3): the transition seam owns every authoritative
+        # review state change — pause, decision, and governance failure
+        # commit their candidate state and asserting trace event in ONE
+        # transaction, then append the event to the live trace.
+        self._commit_review_transition = commit_review_transition
         self._add_trace_event = add_trace_event
         # v2.25.0: durable review decision attempt log. Optional callback; when
         # wired (by the orchestrator) every verify() attempt is persisted.
@@ -148,15 +152,14 @@ class ReviewManager:
             "node_id": "risk_classifier",
         }
 
-        # Persist waiting state — insert BOTH legacy and governed metadata, then
-        # snapshot, BEFORE raising in pause mode (ordering prevents crash-vulnerability).
-        state.status = "waiting_for_review"
-        state.paused_at = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
-        state.metadata["review_request"] = legacy_review_request
-        state.metadata["governed_review_request"] = governed_request.to_dict()
-
-        # Emit review requested event (include governed request reference)
-        self._add_trace_event(TraceEvent(
+        # H0.5 (amendment 3): pause transition. The waiting status, the legacy
+        # and governed request metadata, and the state-asserting
+        # HUMAN_REVIEW_REQUESTED event commit in ONE SQLite transaction; the
+        # event is appended to the live trace only after that commit
+        # succeeds. This remains the durable pause point BEFORE
+        # _get_decision, so pause mode's ReviewPausedException cannot exit
+        # without the waiting state and its event being durable together.
+        pause_event = TraceEvent(
             run_id=state.run_id,
             chain_id=state.chain_id,
             node_id="risk_classifier",
@@ -170,32 +173,37 @@ class ReviewManager:
                 "request_id": governed_request.request_id,
                 "request_digest": governed_request.compute_digest(),
             },
-        ))
-
-        # Durable pause point — snapshot BEFORE _get_decision so pause mode's
-        # ReviewPausedException cannot exit without persisting the waiting
-        # state. This is the single waiting-state snapshot per review request.
-        self._save_snapshot(state)
+        )
+        self._commit_review_transition(
+            state,
+            pause_event,
+            status="waiting_for_review",
+            paused_at=time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
+            metadata={
+                "review_request": legacy_review_request,
+                "governed_review_request": governed_request.to_dict(),
+            },
+        )
 
         # Get decision from adapter (may raise ReviewPausedException in pause mode)
         decision_str = await self._get_decision(risk_output, state.outputs, chain_name)
 
         # In pause mode we never reach here (exception raised above). For all
-        # resolved modes, restore running status — the waiting-state snapshot
-        # above is the durable pause point.
-        # Update state back to running
-        state.status = "running"
-        state.paused_at = None
-
-        # Materialize the governed decision receipt (v2.22.0).
+        # resolved modes, H0.5 (amendment 3): the decision transition commits
+        # decision-specific status, the receipt metadata proposal, and the
+        # review-decision event atomically through the same transition seam.
+        # Nothing mutates the accepted state before that commit: approve and
+        # revision commit running; reject and timeout commit their terminal
+        # failed outcome directly — no intermediate running state.
         receipt_info = self._materialize_decision_receipt(
             decision_str, governed_request, risk_output, state, step_id,
         )
 
         # FAIL-CLOSED GUARD (code-review fix): if _materialize_decision_receipt
-        # triggered governance failure (state.status='failed', no receipt), do NOT
-        # proceed to emit a normal completion event or return the original decision_str.
-        # Return a governance-failure decision instead so the orchestrator cannot
+        # triggered governance failure (status adopted as 'failed' by the
+        # governance transition, no receipt), do NOT proceed to emit a normal
+        # completion event or return the original decision_str. Return a
+        # governance-failure decision instead so the orchestrator cannot
         # treat an unverifiable receipt as chain authority.
         if state.status == "failed" and receipt_info.receipt_id is None:
             return ReviewDecision(
@@ -205,7 +213,8 @@ class ReviewManager:
                 risk_assessment=risk_output,
             )
 
-        # Emit decision event
+        # Decision transition — H0.5 (amendment 3): status is decision-
+        # specific; the materialized receipt rides as a metadata proposal.
         event_type_map = {
             "approve": EventType.HUMAN_REVIEW_COMPLETED,
             "reject": EventType.HUMAN_REVIEW_COMPLETED,
@@ -213,7 +222,7 @@ class ReviewManager:
             "timeout": EventType.HUMAN_REVIEW_TIMEOUT,
         }
         decision_meta = dict(receipt_info.trace_metadata)
-        self._add_trace_event(TraceEvent(
+        decision_event = TraceEvent(
             run_id=state.run_id,
             chain_id=state.chain_id,
             node_id="risk_classifier",
@@ -222,7 +231,18 @@ class ReviewManager:
             actor=Actor.HUMAN,
             decision=decision_str,
             metadata=decision_meta,
-        ))
+        )
+        decision_status = (
+            "failed" if decision_str in ("reject", "timeout") else "running"
+        )
+        decision_metadata = (
+            {"governed_decision_receipt": receipt_info.receipt_dict}
+            if receipt_info.receipt_dict else None
+        )
+        self._commit_review_transition(
+            state, decision_event, status=decision_status, paused_at=None,
+            metadata=decision_metadata,
+        )
 
         return ReviewDecision(
             decision=decision_str,
@@ -362,10 +382,11 @@ class ReviewManager:
     ) -> "_ReceiptInfo":
         """Build + verify an OperatorDecision, returning receipt info.
 
-        On verifier failure: fails closed — emits a governance-failure trace event,
-        sets state.status='failed' with reason_code, returns an empty _ReceiptInfo
-        (no receipt stored). On success: stores the receipt in state.metadata and
-        returns the receipt id/digest/dict + trace metadata.
+        On verifier failure: fails closed — the governance transition commits
+        failed status + reason_code + event atomically and returns an empty
+        _ReceiptInfo (no receipt stored). On success: returns the receipt
+        id/digest/dict + trace metadata; H0.5 leaves storing the receipt in
+        state to the decision transition's metadata proposal.
         """
         from nodechain.sdk.review_workbench import (
             OperatorDecision, ReviewVerifier, chain_review_decision_type,
@@ -425,8 +446,9 @@ class ReviewManager:
         receipt_dict = receipt.to_dict()
         receipt_digest = receipt.compute_receipt_digest()
 
-        # Store the committed receipt in chain state (survives pause/resume).
-        state.metadata["governed_decision_receipt"] = receipt_dict
+        # H0.5: the receipt is NOT written into the accepted state here —
+        # it rides ``info.receipt_dict`` as a metadata proposal that the
+        # decision transition commits (and adopts) atomically.
 
         info.receipt_id = receipt.receipt_id
         info.receipt_digest = receipt_digest
@@ -449,17 +471,14 @@ class ReviewManager:
         rejection_reason: str,
         warnings: list[str] | None = None,
     ) -> None:
-        """Terminal governance failure: set state failed, emit trace, do not store receipt."""
-        state.status = "failed"
-        state.metadata["governed_review_failure"] = {
-            "reason_code": REASON_REVIEW_RECEIPT_VERIFICATION_FAILED,
-            "rejection_reason": rejection_reason,
-            "warnings": warnings or [],
-            "request_id": governed_request.request_id,
-            "subject_id": governed_request.subject.subject_id,
-            "request_digest": governed_request.compute_digest(),
-        }
-        self._add_trace_event(TraceEvent(
+        """Terminal governance failure (H0.5 amendment 3): atomic transition.
+
+        The failed status, the governed_review_failure metadata, and the
+        governance-failure review event commit in ONE transaction through
+        the transition seam; nothing is acknowledged before that commit.
+        No receipt is stored.
+        """
+        failure_event = TraceEvent(
             run_id=state.run_id,
             chain_id=state.chain_id,
             node_id="risk_classifier",
@@ -474,7 +493,22 @@ class ReviewManager:
                 "request_digest": governed_request.compute_digest(),
                 "rejection_reason": rejection_reason,
             },
-        ))
+        )
+        self._commit_review_transition(
+            state,
+            failure_event,
+            status="failed",
+            metadata={
+                "governed_review_failure": {
+                    "reason_code": REASON_REVIEW_RECEIPT_VERIFICATION_FAILED,
+                    "rejection_reason": rejection_reason,
+                    "warnings": warnings or [],
+                    "request_id": governed_request.request_id,
+                    "subject_id": governed_request.subject.subject_id,
+                    "request_digest": governed_request.compute_digest(),
+                },
+            },
+        )
 
     def _record_review_attempt(
         self,

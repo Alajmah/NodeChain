@@ -20,6 +20,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from nodechain.core.state import ChainState, StateManager
+from nodechain.core.trace import TraceEvent
+
+#: Sentinel distinguishing "no output proposal" from an output of None.
+_UNSET = object()
 
 
 @dataclass
@@ -55,6 +59,11 @@ class PersistenceCoordinator:
 
     Enforces the invariant:
     state snapshot + invocation ledger + event log = single SQLite transaction.
+
+    H0.5 accepted-state rule: every authoritative transition constructs a
+    candidate copy (``ChainState.transition_candidate()``), commits it, and
+    only then adopts the proposals into the caller's live state. A failed
+    commit leaves the accepted state untouched — no field, no revision.
     """
 
     def __init__(self, state_manager: StateManager) -> None:
@@ -67,17 +76,32 @@ class PersistenceCoordinator:
         step_id: int,
         node_id: str,
         branch_name: str | None = None,
+        output: Any = _UNSET,
+        cursor: tuple[int, str] | None = None,
+        branch_states: dict[str, str] | None = None,
         event_type: str = "node_completed",
         event_payload: dict[str, Any] | None = None,
         cost_usd: float = 0.0,
     ) -> None:
-        """Atomically commit a successful node invocation.
+        """H0.5 class 1: candidate/adopt invocation transition.
 
-        Single transaction: state snapshot + invocation ledger + event log.
+        Proposals (output, cursor, branch states) and the completed-step
+        entry are applied to a candidate copy, committed through the atomic
+        ``save_with_invocation`` transaction, and only then adopted into the
+        caller's live state. A failed commit leaves the accepted state
+        untouched — no output, completed-step, cursor, branch-state, or
+        revision change (V2, criterion 4).
         """
-        state.completed_steps[step_id] = node_id
+        cand = state.transition_candidate()
+        cand.completed_steps[step_id] = node_id
+        if output is not _UNSET:
+            cand.outputs[node_id] = output
+        if cursor is not None:
+            cand.step, cand.current_node = cursor
+        if branch_states:
+            cand.branch_states.update(branch_states)
         self.state_manager.save_with_invocation(
-            state=state,
+            state=cand,
             step_id=step_id,
             node_id=node_id,
             branch_name=branch_name,
@@ -85,6 +109,80 @@ class PersistenceCoordinator:
             event_payload=event_payload or {"node_id": node_id, "step_id": step_id},
             cost_usd=cost_usd,
         )
+        # Adopt: apply the committed proposals to the accepted live state.
+        state.completed_steps[step_id] = node_id
+        if output is not _UNSET:
+            state.outputs[node_id] = output
+        if cursor is not None:
+            state.step, state.current_node = cursor
+        if branch_states:
+            state.branch_states.update(branch_states)
+        state.revision = cand.revision
+
+    def commit_lifecycle(
+        self,
+        state: ChainState,
+        *,
+        event: TraceEvent,
+        status: str | None = None,
+        completed_at: str | None = None,
+        paused_at: Any = _UNSET,
+        is_resumed: bool | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """H0.5 class 2: state-asserting lifecycle transition.
+
+        The candidate status change and the authoritative ``TraceEvent``
+        commit in ONE SQLite transaction
+        (``StateManager.save_with_trace_event``): the durable trace row and
+        the state it asserts land together or not at all. On success the
+        caller acknowledges by appending the exact same event object to the
+        live trace through the singular authority's already-durable mode.
+        A failed commit leaves the accepted state untouched and the event
+        non-durable (V3, V4, V5, V7).
+        """
+        cand = state.transition_candidate()
+        if status is not None:
+            cand.status = status
+        if completed_at is not None:
+            cand.completed_at = completed_at
+        if paused_at is not _UNSET:
+            cand.paused_at = paused_at
+        if is_resumed is not None:
+            cand.is_resumed = is_resumed
+        if metadata:
+            cand.metadata = {**(cand.metadata or {}), **metadata}
+        self.state_manager.save_with_trace_event(cand, event)
+        # Adopt: apply the committed transition to the accepted live state.
+        if status is not None:
+            state.status = status
+        if completed_at is not None:
+            state.completed_at = completed_at
+        if paused_at is not _UNSET:
+            state.paused_at = paused_at
+        if is_resumed is not None:
+            state.is_resumed = is_resumed
+        if metadata:
+            state.metadata = {**(state.metadata or {}), **metadata}
+        state.revision = cand.revision
+
+    def commit_checkpoint(
+        self,
+        state: ChainState,
+        apply: Any,
+    ) -> None:
+        """H0.5 class 3: state-only checkpoint (no trace event participates).
+
+        ``apply(candidate)`` proposes mutations on a candidate copy; the
+        snapshot-only state write commits it; the same mutations are then
+        adopted into the accepted state. A failed commit leaves the accepted
+        state untouched and consumes no revision (V1).
+        """
+        cand = state.transition_candidate()
+        apply(cand)
+        self.state_manager.save(cand)
+        apply(state)
+        state.revision = cand.revision
 
     def commit_invocation_failure(
         self,
@@ -106,12 +204,21 @@ class PersistenceCoordinator:
         )
 
     def save_snapshot(self, state: ChainState) -> None:
-        """Save state snapshot (non-atomic, for mid-execution checkpoints)."""
-        self.state_manager.save(state)
+        """Snapshot-only state write, candidate-safe (H0.5).
+
+        Persists the accepted content; the revision increment lands on a
+        candidate copy and is adopted only after the write succeeds, so a
+        failed snapshot never consumes a revision on the live object (V1).
+        """
+        cand = state.transition_candidate()
+        self.state_manager.save(cand)
+        state.revision = cand.revision
 
     def save_final(self, state: ChainState) -> None:
-        """Save final state with completed/failed status."""
-        self.state_manager.save(state)
+        """Final snapshot-only save, candidate-safe (H0.5, class 3)."""
+        cand = state.transition_candidate()
+        self.state_manager.save(cand)
+        state.revision = cand.revision
 
     def load_for_recovery(self, run_id: str) -> RecoveryContext | None:
         """Load state and completed steps for resume/review-resume.
