@@ -478,6 +478,146 @@ def main():
 main()
 '''
 
+    def _build_supervised_child_script(
+        self,
+        module_path: str,
+        class_name: str,
+        trust_level: str,
+        package_root: str = "",
+        enable_seccomp: bool = False,
+    ) -> str:
+        """Build the H0.2/T3 supervised form of the node-run script.
+
+        Same bootstrap discipline as the legacy child script, minus every
+        OS-level containment phase. Under the supervised route the
+        supervisor bootstrap (B1) owns kernel containment — PID-namespace
+        topology, requested network/mount namespaces, mount confinement,
+        procfs isolation, and seccomp are applied BEFORE this script is
+        exec'd. This script therefore owns ONLY node-local Python policy:
+
+          Phase 1:  Import trusted NodeChain SDK types
+          Phase 1c: Activate ALL Python enforcement
+          Phase 2:  Import untrusted node module (UNDER all enforcement)
+          Phase 3:  Execute node
+          Phase 4:  Report + deactivate enforcement
+
+        When the supervisor applied mount confinement, the node module is
+        visible at the chrooted path (<prefix>/<basename>, prefix "/package"
+        by the apply_mount_confinement contract); the adapter passes the
+        workload-visible path through the config.
+        """
+        return f'''
+import sys
+import os
+import json
+import traceback
+import asyncio
+import importlib.util
+
+# Pre-import trusted NodeChain code only
+sys.path.insert(0, {repr(str(Path.cwd()))})
+
+from nodechain.core.envelope import InvocationEnvelope
+from nodechain.sdk.trust import TrustLevel as TL
+from nodechain.sdk.import_enforcer import enforce_imports_for_node
+from nodechain.sdk.filesystem_enforcer import enforce_filesystem_for_node
+from nodechain.sdk.subprocess_enforcer import enforce_subprocess_for_node
+from nodechain.sdk.network_enforcer import enforce_network_for_node
+import nodechain.core.port
+import nodechain.core.contract
+import nodechain.core.manifest
+import nodechain.nodes.base_node
+
+def main():
+    try:
+        # Read config + envelope from the workload payload pipe (FD 0,
+        # delivered by the supervisor from the parent's payload channel).
+        input_data = json.loads(sys.stdin.read())
+
+        config = input_data.get("config", {{}})
+        envelope_data = input_data.get("envelope", {{}})
+
+        trust_level = config.get("trust_level", "built_in")
+        package_root = config.get("package_root", "")
+        node_id = config.get("node_id", "unknown")
+        # Workload-visible module path: supervisor-side mount confinement
+        # re-binds the package at the chrooted prefix; the adapter passes
+        # the resolved path explicitly.
+        effective_module_path = config.get(
+            "workload_module_path", {repr(str(module_path))}
+        )
+
+        # Build envelope (trusted code, no node module needed)
+        envelope = InvocationEnvelope(**envelope_data)
+
+        # Create event loop BEFORE enforcement (avoids asyncio lazy imports)
+        loop = asyncio.new_event_loop()
+
+        # Phase 1c: Activate ALL enforcement BEFORE node import.
+        # OS-level controls were applied by the supervisor bootstrap before
+        # this script was exec'd; the phases below are node-local policy.
+        enforcers = []
+        imp = fs = sp = net = None
+        if trust_level != "built_in":
+            tl = TL(trust_level)
+            imp = enforce_imports_for_node(tl, node_id, allow_preloaded=True)
+            fs = enforce_filesystem_for_node(tl, node_id, package_root or None)
+            sp = enforce_subprocess_for_node(tl, node_id)
+            net = enforce_network_for_node(tl, node_id)
+
+            imp_cm = imp.enforce(); imp_cm.__enter__()
+            fs_cm = fs.enforce(); fs_cm.__enter__()
+            sp_cm = sp.enforce(); sp_cm.__enter__()
+            net_cm = net.enforce(); net_cm.__enter__()
+            enforcers = [imp_cm, fs_cm, sp_cm, net_cm]
+
+        # Phase 2: Import untrusted node module
+        # (UNDER import + fs + subprocess + network enforcement)
+        spec = importlib.util.spec_from_file_location(
+            "_node_module", effective_module_path
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        node_cls = getattr(mod, {repr(class_name)})
+
+        # Phase 3: Execute node under all enforcement
+        policy_report = {{}}
+        try:
+            response = loop.run_until_complete(node_cls().execute(envelope))
+        finally:
+            loop.close()
+
+            if trust_level != "built_in":
+                policy_report = {{
+                    "child_policy_enforced": True,
+                    "import_violations": imp.had_violations if imp else False,
+                    "filesystem_violations": fs.had_violations if fs else False,
+                    "subprocess_violations": sp.had_violations if sp else False,
+                    "network_violations": net.had_violations if net else False,
+                }}
+
+            # Phase 4: Deactivate enforcement
+            for cm in reversed(enforcers):
+                try:
+                    cm.__exit__(None, None, None)
+                except Exception:
+                    pass
+
+        # Attach policy report to response metadata
+        resp_dict = response.model_dump(mode="json")
+        if policy_report:
+            resp_dict.setdefault("metadata", {{}}).update(policy_report)
+
+        sys.stdout.write(json.dumps(resp_dict))
+        sys.stdout.flush()
+
+    except Exception as e:
+        sys.stderr.write(traceback.format_exc())
+        sys.exit(1)
+
+main()
+'''
+
     async def run_isolated(
         self,
         envelope: InvocationEnvelope,
@@ -501,33 +641,27 @@ main()
           child_cwd: str
           temp_dir_isolated: bool
         """
-        # ── T3.0 safety fence ────────────────────────────────────────────────
-        # POSIX untrusted execution via the legacy SubprocessRunner path is
-        # disabled until supervised routing (T3) is implemented. The legacy
-        # path cgroup setup may silently return None, execution proceeds
-        # without verified containment, and load-bearing cgroup operations
-        # suppress failures. Refuse before any workload process is spawned,
-        # before temp-env creation, child-script construction, cgroup setup,
-        # or subprocess spawn.
+        # ── T3 (H0.2) supervised routing — production activation ───────────
+        # POSIX untrusted execution routes through the supervised backend
+        # (one spawn/lifecycle authority: exec_supervisor + trusted
+        # bootstrap). This branch RETURNS the translated result and never
+        # falls through into the legacy POSIX spawn body below — there is
+        # no try-supervised-except-legacy fallback under any condition.
+        # Requested containment that cannot be enforced fails closed inside
+        # the supervised stack before the workload starts.
         #
         # Does NOT alter: Windows behavior, built_in, local_trusted, direct
-        # supervisor APIs, or legacy trusted-utility behavior. No env var,
-        # config flag, fallback, or test-only bypass may re-enable it.
+        # supervisor APIs, or legacy trusted-utility behavior.
         if os.name == "posix" and trust_level in ("local_untrusted", "remote_untrusted"):
-            return {
-                "success": False,
-                "error": (
-                    "supervised_backend_required: POSIX untrusted execution "
-                    f"({trust_level}) is disabled on the legacy SubprocessRunner "
-                    "path until supervised routing (T3) is available"
-                ),
-                "exit_code": 126,
-                "isolation_mode": "subprocess",
-                "duration_ms": 0,
-                "child_policy_enforced": False,
-                "child_cwd": "",
-                "temp_dir_isolated": False,
-            }
+            return await self._run_supervised_untrusted(
+                envelope=envelope,
+                module_path=module_path,
+                class_name=class_name,
+                node_id=node_id,
+                trust_level=trust_level,
+                package_root=package_root,
+                enable_seccomp=enable_seccomp,
+            )
 
         import time
         import tempfile
@@ -867,6 +1001,314 @@ main()
                 "temp_dir_isolated": True,
                 **cg_info,
             }
+
+    def _supervised_containment_config(
+        self, package_root: str, temp_dir: str, *, enable_seccomp: bool = False,
+    ) -> dict[str, Any] | None:
+        """T3 (H0.2): build the requested-containment config for the supervisor.
+
+        Returns None when no OS-level control is requested. Per the frozen
+        design, cgroup accounting/limits have no qualified supervised owner:
+        when requested, the adapter itself fails closed with an explicit
+        reason BEFORE any supervisor/workload start (never a weak fallback).
+        PID-namespace topology is structural to the supervised stack and is
+        always present; procfs isolation rides it when requested.
+        """
+        if (self.enable_cgroup or self.cgroup_memory_max_mb > 0
+                or self.cgroup_pids_max > 0 or self.cgroup_cpu_max_quota > 0):
+            return None  # refused upstream — see _run_supervised_untrusted
+        cfg: dict[str, Any] = {}
+        if self.enable_network_namespace:
+            cfg["network_namespace"] = True
+        if self.enable_mount_namespace and not self.enable_mount_confinement:
+            cfg["mount_namespace"] = True
+        if self.enable_mount_confinement:
+            cfg["mount_confinement"] = True
+            cfg["package_root"] = package_root or "/"
+            cfg["temp_dir"] = temp_dir
+        if self.enable_procfs_isolation:
+            cfg["procfs_isolation"] = True
+        if enable_seccomp:
+            cfg["seccomp"] = True
+        return cfg or None
+
+    def _cgroup_requested(self) -> bool:
+        return bool(
+            self.enable_cgroup or self.cgroup_memory_max_mb > 0
+            or self.cgroup_pids_max > 0 or self.cgroup_cpu_max_quota > 0
+        )
+
+    async def _run_supervised_untrusted(
+        self,
+        envelope: InvocationEnvelope,
+        module_path: Path,
+        class_name: str,
+        node_id: str,
+        trust_level: str,
+        package_root: str,
+        enable_seccomp: bool = False,
+    ) -> dict[str, Any]:
+        """T3 (H0.2): route one POSIX untrusted invocation through the
+        supervised backend.
+
+        The supervised stack is the single spawn/lifecycle authority; this
+        adapter owns only preparation resources (temp dir, payload,
+        environment) and truth-preserving result translation. The legacy
+        POSIX spawn body is never reached on this route.
+        """
+        import time
+        import tempfile
+        import shutil
+
+        start = time.monotonic()
+        temp_dir = tempfile.mkdtemp(prefix="nodechain_child_")
+        child_cwd = package_root if package_root else temp_dir
+        workload_module_path = str(module_path)
+        try:
+            # cgroup accounting/limits: no supervised owner — fail closed
+            # BEFORE any start, with an explicit reason (frozen §3).
+            if self._cgroup_requested():
+                return {
+                    "success": False,
+                    "error": (
+                        "supervised_cgroup_unsupported: cgroup "
+                        "accounting/limits were requested but the supervised "
+                        "backend has no qualified cgroup owner; refusing "
+                        "before start"
+                    ),
+                    "exit_code": 126,
+                    "isolation_mode": "subprocess",
+                    "duration_ms": int((time.monotonic() - start) * 1000),
+                    "child_policy_enforced": False,
+                    "child_cwd": child_cwd,
+                    "temp_dir_isolated": True,
+                    "cgroup_limits_requested": True,
+                    "cgroup_limits_enforced": False,
+                }
+
+            config = {
+                "trust_level": trust_level,
+                "package_root": package_root,
+                "node_id": node_id,
+            }
+            # Under supervisor-side mount confinement the package is re-bound
+            # at the chrooted prefix; the workload-visible module path is the
+            # prefix + basename (apply_mount_confinement contract: "/package").
+            if self.enable_mount_confinement:
+                workload_module_path = "/package/" + Path(module_path).name
+            config["workload_module_path"] = workload_module_path
+            payload = json.dumps({
+                "config": config,
+                "envelope": envelope.model_dump(mode="json"),
+            }).encode("utf-8")
+
+            child_script = self._build_supervised_child_script(
+                str(module_path), class_name, trust_level, package_root,
+                enable_seccomp=enable_seccomp,
+            )
+
+            # Workload env: the existing secret-filtered semantics with
+            # TEMP/TMP/TMPDIR isolation (frozen §4).
+            workload_env = self._build_child_env(temp_dir=temp_dir)
+            # Supervisor env: minimal trusted bootstrap — PATH plus the
+            # nodechain root so `-m nodechain.runtime.exec_supervisor` and
+            # the bootstrap's containment imports resolve. No secrets.
+            import nodechain as _nc
+            _nc_root = str(Path(_nc.__file__).resolve().parent.parent)
+            supervisor_env = {
+                "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+                "PYTHONPATH": _nc_root,
+            }
+
+            containment = self._supervised_containment_config(
+                package_root, temp_dir, enable_seccomp=enable_seccomp,
+            )
+
+            from nodechain.runtime.supervised_argv import run_supervised_argv_async
+            sup = await run_supervised_argv_async(
+                argv=[sys.executable, "-c", child_script],
+                workload_stdin=payload,
+                workload_cwd=child_cwd,
+                supervisor_env=supervisor_env,
+                workload_env=workload_env,
+                timeout_seconds=self.timeout_seconds,
+                max_output_bytes=self.max_output_bytes,
+                containment=containment,
+            )
+            elapsed = int((time.monotonic() - start) * 1000)
+            return self._translate_supervised_result(
+                sup, child_cwd=child_cwd, duration_ms=elapsed,
+            )
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def _translate_supervised_result(
+        self,
+        sup: dict[str, Any],
+        *,
+        child_cwd: str,
+        duration_ms: int,
+    ) -> dict[str, Any]:
+        """T3 (H0.2): translate a supervised result into the established
+        SubprocessRunner compatibility shape, preserving supervised truth.
+
+        Frozen outcome matrix (H0.2 design lock §7). The nested
+        ``supervised_execution`` projection carries the trusted evidence on
+        BOTH success and mapped failure; no enforcement boolean is
+        synthesized.
+        """
+        started = bool(sup.get("process_started"))
+        timed_out = bool(sup.get("process_timed_out"))
+        truncated = bool(sup.get("output_truncated"))
+        interp = sup.get("exit_code_interpretation", "error")
+        reason = sup.get("reason", "")
+        exit_code_raw = sup.get("process_exit_code")
+        stdout_data = sup.get("stdout", "") or ""
+        stderr_data = sup.get("stderr", "") or ""
+
+        def _projection() -> dict[str, Any]:
+            return {
+                "backend": sup.get("backend", "native_os_sandbox"),
+                "process_started": started,
+                "process_timed_out": timed_out,
+                "output_truncated": truncated,
+                "exit_code_interpretation": interp,
+                "reason": reason,
+                "process_exit_code": exit_code_raw,
+                "sandbox_metadata": sup.get("sandbox_metadata", {}) or {},
+            }
+
+        def _fail(
+            error: str, exit_code: int, policy_enforced: bool = False,
+            extra: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            result: dict[str, Any] = {
+                "success": False,
+                "error": error,
+                "exit_code": exit_code,
+                "isolation_mode": "subprocess",
+                "duration_ms": duration_ms,
+                "child_policy_enforced": policy_enforced,
+                "child_cwd": child_cwd,
+                "temp_dir_isolated": True,
+                "supervised_execution": _projection(),
+            }
+            if extra:
+                result.update(extra)
+            return result
+
+        # Cancellation is NOT mapped: run_supervised_argv_async re-raises
+        # CancelledError (or a cleanup-incomplete RuntimeError) — this
+        # translator only sees returned results.
+
+        # Setup/supervisor/protocol/config failures → not started.
+        if not started:
+            error = (
+                f"supervised execution failed before workload start "
+                f"({reason or 'unknown'})"
+            )
+            if interp == "timeout" or timed_out:
+                error = f"Timeout after {self.timeout_seconds}s"
+                return _fail(error, 2)
+            return _fail(error, 126)
+
+        # Started: timeout / output cap first (bounded-output truths).
+        if timed_out or interp == "timeout":
+            return _fail(f"Timeout after {self.timeout_seconds}s", 2)
+        if truncated or reason == "output_limit_exceeded":
+            return _fail(
+                f"Output exceeded {self.max_output_bytes} bytes ({reason})",
+                3, policy_enforced=True,
+            )
+
+        # Cleanup/protocol failures dominate any apparent workload result.
+        if interp == "error" and reason in (
+            "cleanup_failed", "streaming_reader_error",
+        ) or (interp == "error" and reason and reason.startswith("protocol")):
+            return _fail(
+                f"supervised infrastructure failure ({reason})",
+                exit_code_raw if isinstance(exit_code_raw, int) else -1,
+            )
+        if interp == "error" and reason and reason not in ("signal_31",):
+            # supervisor-side failure after exec — infrastructure error truth
+            return _fail(
+                f"supervised failure after workload start ({reason})",
+                exit_code_raw if isinstance(exit_code_raw, int) else -1,
+            )
+
+        # Started + non-clean workload outcome: signals / nonzero exit.
+        if interp == "fail":
+            if reason == "seccomp_sigsys_kill":
+                return _fail(
+                    "workload terminated by SIGSYS (seccomp policy kill)",
+                    -(31), policy_enforced=True,
+                )
+            if reason and reason.startswith("signal_"):
+                try:
+                    sig = int(reason[len("signal_"):])
+                except ValueError:
+                    sig = 0
+                return _fail(
+                    f"workload terminated by signal {sig}",
+                    -(sig) if sig else -1,
+                )
+            # plain nonzero exit
+            rc = exit_code_raw if isinstance(exit_code_raw, int) else -1
+            error_msg = stderr_data[:2000] if stderr_data else ""
+            policy = False
+            if rc == 10:
+                policy = True
+            return _fail(error_msg or f"workload exited {rc}", rc,
+                         policy_enforced=policy)
+
+        # interp == "pass": exit 0 — parse the EnvelopeResponse JSON.
+        try:
+            response_data = json.loads(stdout_data)
+        except (json.JSONDecodeError, ValueError) as e:
+            # Execution occurred (exit 0) but response invalid.
+            out = _fail(
+                f"Invalid JSON response: {e}",
+                exit_code_raw if isinstance(exit_code_raw, int) else 1,
+            )
+            out["supervised_execution"]["process_exit_code"] = exit_code_raw
+            return out
+
+        child_policy_enforced = bool(
+            response_data.get("metadata", {})
+            .get("child_policy_enforced", False)
+        )
+        result: dict[str, Any] = {
+            "success": True,
+            "response": response_data,
+            "exit_code": exit_code_raw if isinstance(exit_code_raw, int) else 0,
+            "isolation_mode": "subprocess",
+            "duration_ms": duration_ms,
+            "child_policy_enforced": child_policy_enforced,
+            "child_cwd": child_cwd,
+            "temp_dir_isolated": True,
+            "supervised_execution": _projection(),
+        }
+        # Truthful enforcement fields: propagate only what trusted evidence
+        # or the workload itself reported. Absent controls stay False/empty.
+        ev_meta = (sup.get("sandbox_metadata", {}) or {})
+        for flag in (
+            "network_namespace_enforced", "mount_namespace_enforced",
+            "mount_confinement_enforced", "procfs_namespace_view_enforced",
+        ):
+            result[flag] = bool(ev_meta.get(flag, False))
+        # The PID namespace is structural to the supervised topology and is
+        # proven by the bootstrap's trusted verification record — derived
+        # from evidence, never synthesized.
+        result["pid_namespace_enforced"] = bool(
+            ev_meta.get("enforcement") == "pid_namespace_verified"
+        )
+        child_meta = response_data.get("metadata", {}) or {}
+        # Seccomp truth on the supervised route comes from the supervisor's
+        # trusted enforcement evidence — the supervised child script does
+        # not (and must not) apply a second profile.
+        result["seccomp_enforced"] = bool(ev_meta.get("seccomp_enforced", False))
+        result["seccomp_available"] = bool(ev_meta.get("seccomp_available", False))
+        return result
 
     def should_use_subprocess(self, trust_level: TrustLevel) -> bool:
         """Determine if a node should run in a subprocess based on trust level."""

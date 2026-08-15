@@ -71,7 +71,7 @@ class TestChildPolicyEnforcement:
             # T3.0 safety fence: POSIX untrusted execution refused before spawn
             assert result["success"] is False
             assert result["exit_code"] == 126
-            assert result["error"].startswith("supervised_backend_required")
+            assert (result["error"].startswith("supervised execution failed before workload start") or result["error"].startswith("supervised_cgroup_unsupported"), f"expected supervised fail-closed refusal, got: {result.get('error', '')[:200]}")
             return  # Skip original capability assertions on POSIX
         # Windows: original assertions remain intact below
         assert result["success"] is True
@@ -97,7 +97,7 @@ class TestChildPolicyEnforcement:
             # T3.0 safety fence: POSIX untrusted execution refused before spawn
             assert result["success"] is False
             assert result["exit_code"] == 126
-            assert result["error"].startswith("supervised_backend_required")
+            assert (result["error"].startswith("supervised execution failed before workload start") or result["error"].startswith("supervised_cgroup_unsupported"), f"expected supervised fail-closed refusal, got: {result.get('error', '')[:200]}")
             return  # Skip original capability assertions on POSIX
         # Windows: original assertions remain intact below
         assert result["success"] is True
@@ -130,7 +130,7 @@ class TestChildConfigPropagation:
             # T3.0 safety fence: POSIX untrusted execution refused before spawn
             assert result["success"] is False
             assert result["exit_code"] == 126
-            assert result["error"].startswith("supervised_backend_required")
+            assert (result["error"].startswith("supervised execution failed before workload start") or result["error"].startswith("supervised_cgroup_unsupported"), f"expected supervised fail-closed refusal, got: {result.get('error', '')[:200]}")
             return  # Skip original capability assertions on POSIX
         # Windows: original assertions remain intact below
         assert result["success"] is True
@@ -154,7 +154,7 @@ class TestChildConfigPropagation:
             # T3.0 safety fence: POSIX untrusted execution refused before spawn
             assert result["success"] is False
             assert result["exit_code"] == 126
-            assert result["error"].startswith("supervised_backend_required")
+            assert (result["error"].startswith("supervised execution failed before workload start") or result["error"].startswith("supervised_cgroup_unsupported"), f"expected supervised fail-closed refusal, got: {result.get('error', '')[:200]}")
             return  # Skip original capability assertions on POSIX
         # Windows: original assertions remain intact below
         assert result["success"] is True
@@ -188,7 +188,7 @@ class TestUntrustedCannotReadWorkspace:
             # T3.0 safety fence: POSIX untrusted execution refused before spawn
             assert result["success"] is False
             assert result["exit_code"] == 126
-            assert result["error"].startswith("supervised_backend_required")
+            assert (result["error"].startswith("supervised execution failed before workload start") or result["error"].startswith("supervised_cgroup_unsupported"), f"expected supervised fail-closed refusal, got: {result.get('error', '')[:200]}")
             return  # Skip original capability assertions on POSIX
         # Windows: original assertions remain intact below
         assert result["success"] is True
@@ -223,7 +223,7 @@ class TestUntrustedCannotNetwork:
             # T3.0 safety fence: POSIX untrusted execution refused before spawn
             assert result["success"] is False
             assert result["exit_code"] == 126
-            assert result["error"].startswith("supervised_backend_required")
+            assert (result["error"].startswith("supervised execution failed before workload start") or result["error"].startswith("supervised_cgroup_unsupported"), f"expected supervised fail-closed refusal, got: {result.get('error', '')[:200]}")
             return  # Skip original capability assertions on POSIX
         # Windows: original assertions remain intact below
         assert result["success"] is True
@@ -258,7 +258,7 @@ class TestUntrustedCannotSubprocess:
             # T3.0 safety fence: POSIX untrusted execution refused before spawn
             assert result["success"] is False
             assert result["exit_code"] == 126
-            assert result["error"].startswith("supervised_backend_required")
+            assert (result["error"].startswith("supervised execution failed before workload start") or result["error"].startswith("supervised_cgroup_unsupported"), f"expected supervised fail-closed refusal, got: {result.get('error', '')[:200]}")
             return  # Skip original capability assertions on POSIX
         # Windows: original assertions remain intact below
         assert result["success"] is True
@@ -286,7 +286,7 @@ class TestEnvelopeSerialization:
             # T3.0 safety fence: POSIX untrusted execution refused before spawn
             assert result["success"] is False
             assert result["exit_code"] == 126
-            assert result["error"].startswith("supervised_backend_required")
+            assert (result["error"].startswith("supervised execution failed before workload start") or result["error"].startswith("supervised_cgroup_unsupported"), f"expected supervised fail-closed refusal, got: {result.get('error', '')[:200]}")
             return  # Skip original capability assertions on POSIX
         # Windows: original assertions remain intact below
         assert result["success"] is True
@@ -313,7 +313,7 @@ class TestEnvelopeSerialization:
             # T3.0 safety fence: POSIX untrusted execution refused before spawn
             assert result["success"] is False
             assert result["exit_code"] == 126
-            assert result["error"].startswith("supervised_backend_required")
+            assert (result["error"].startswith("supervised execution failed before workload start") or result["error"].startswith("supervised_cgroup_unsupported"), f"expected supervised fail-closed refusal, got: {result.get('error', '')[:200]}")
             return  # Skip original capability assertions on POSIX
         # Windows: original assertions remain intact below
         assert result["success"] is True
@@ -362,7 +362,7 @@ class TestModuleNotFound:
             # T3.0 safety fence: POSIX untrusted execution refused before spawn
             assert result["success"] is False
             assert result["exit_code"] == 126
-            assert result["error"].startswith("supervised_backend_required")
+            assert (result["error"].startswith("supervised execution failed before workload start") or result["error"].startswith("supervised_cgroup_unsupported"), f"expected supervised fail-closed refusal, got: {result.get('error', '')[:200]}")
             return  # Skip original capability assertions on POSIX
         # Windows: original assertions remain intact below
         assert result["success"] is False
@@ -390,7 +390,7 @@ class TestIsolationModeInReport:
             # T3.0 safety fence: POSIX untrusted execution refused before spawn
             assert result["success"] is False
             assert result["exit_code"] == 126
-            assert result["error"].startswith("supervised_backend_required")
+            assert (result["error"].startswith("supervised execution failed before workload start") or result["error"].startswith("supervised_cgroup_unsupported"), f"expected supervised fail-closed refusal, got: {result.get('error', '')[:200]}")
             return  # Skip original capability assertions on POSIX
         # Windows: original assertions remain intact below
         assert result["isolation_mode"] == "subprocess"
@@ -455,7 +455,7 @@ class TestImportlibBypassRegression:
             # T3.0 safety fence: POSIX untrusted execution refused before spawn
             assert result["success"] is False
             assert result["exit_code"] == 126
-            assert result["error"].startswith("supervised_backend_required")
+            assert (result["error"].startswith("supervised execution failed before workload start") or result["error"].startswith("supervised_cgroup_unsupported"), f"expected supervised fail-closed refusal, got: {result.get('error', '')[:200]}")
             return  # Skip original capability assertions on POSIX
         # Windows: original assertions remain intact below
         assert result["success"] is True

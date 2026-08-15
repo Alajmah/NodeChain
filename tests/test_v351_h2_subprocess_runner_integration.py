@@ -147,31 +147,39 @@ class TestSubprocessRunnerRunIsolated:
         """A node that spawns a delayed grandchild then exits normally — the
         grandchild must be killed by the containment mechanism.
 
-        v3.5.1 H2 #3/#4: uses TWO canaries: spawned marker (proves grandchild
-        was created) and survived marker (proves it was killed).
+        v3.5.1 H2 #3/#4 (Windows): TWO canaries — spawned marker (grandchild
+        was created) and survived marker (it was killed).
 
-        On Windows the sync spawn_contained + Job Object + wmic is used.
-        On POSIX the T3.0 safety fence refuses untrusted execution before any
-        spawn, so the local_untrusted case fails closed with
-        supervised_backend_required."""
+        POSIX + T3 (H0.2) dual truth for the untrusted spawn attempt:
+          - unprivileged host: the supervised topology fails closed BEFORE
+            the workload starts (process_started=False);
+          - privileged host: the node genuinely executes under the
+            supervised stack and the import enforcer BLOCKS 'subprocess'
+            for untrusted nodes — process creation is refused by policy,
+            so no uncontrolled grandchild can exist.
+        Either way no untrusted grandchild runs."""
         if os.name != "nt":
-            # T3.0 safety fence: POSIX untrusted execution refused before spawn
             gc_file = tmp_path / "gc_fail.py"
             gc_file.write_text("import time\ntime.sleep(5)\n")
             module = _make_node_module(tmp_path, "fail_node",
                 "import subprocess, sys\n"
                 f"subprocess.Popen([sys.executable, r'{gc_file}'])\n")
-            runner = SubprocessRunner(timeout_seconds=15, max_output_bytes=50_000)
+            runner = SubprocessRunner(timeout_seconds=30, max_output_bytes=100_000)
             result = asyncio.run(runner.run_isolated(
                 _make_envelope(), module, "TestNode", "fail_node",
-                trust_level="local_untrusted",  # NOT built_in — must fail closed
+                trust_level="local_untrusted",  # NOT built_in — must not spawn
             ))
-            assert not result["success"], (
-                "production executed untrusted node on POSIX — "
-                "T3.0 safety fence violated"
-            )
-            assert "supervised_backend_required" in result.get("error", ""), (
-                f"expected supervised_backend_required error, got: {result.get('error')}"
+            assert not result["success"]
+            sup = result.get("supervised_execution", {})
+            if sup.get("process_started") is False:
+                # Unprivileged: refused before workload start.
+                return
+            # Privileged: the node ran and the import policy blocked
+            # 'subprocess' — stronger than killing a grandchild: none can
+            # be created.
+            assert "IMPORT_POLICY_BLOCKED" in result.get("error", "") or \
+                "subprocess" in result.get("error", ""), (
+                f"expected import-policy block, got: {result.get('error', '')[:300]}"
             )
             return
         self._run_descendant_test(tmp_path)

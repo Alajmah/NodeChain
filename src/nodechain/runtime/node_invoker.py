@@ -145,8 +145,24 @@ class NodeInvoker:
                         response.metadata["pid_namespace_enforced"] = result.get("pid_namespace_enforced", False)
                         # v1.5.1: procfs namespace view
                         response.metadata["procfs_namespace_view_enforced"] = result.get("procfs_namespace_view_enforced", False)
+                        # T3 (H0.2): trusted supervised evidence projection —
+                        # start/containment truth rides on success too.
+                        if "supervised_execution" in result:
+                            response.metadata["supervised_execution"] = result["supervised_execution"]
                         return response, elapsed_ms
                     else:
+                        failure_metadata = {
+                            "isolation_mode": "subprocess",
+                            "exit_code": result.get("exit_code", -1),
+                        }
+                        # T3 (H0.2): prevent evidence collapse on failure —
+                        # the supervised projection distinguishes
+                        # never-started from started-but-failed with trusted
+                        # containment truth. Cancellation is NOT consumed
+                        # here: CancelledError is BaseException and bypasses
+                        # this handler entirely.
+                        if "supervised_execution" in result:
+                            failure_metadata["supervised_execution"] = result["supervised_execution"]
                         response = EnvelopeResponse(
                             request_envelope_id=envelope.envelope_id,
                             run_id=envelope.run_id,
@@ -158,10 +174,7 @@ class NodeInvoker:
                             success=False,
                             error=result.get("error", "subprocess failed"),
                             latency_ms=elapsed_ms,
-                            metadata={
-                                "isolation_mode": "subprocess",
-                                "exit_code": result.get("exit_code", -1),
-                            },
+                            metadata=failure_metadata,
                         )
                         return response, elapsed_ms
 

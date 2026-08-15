@@ -39,6 +39,7 @@ async def run_supervised_argv_async(
     workload_env: Mapping[str, str],
     timeout_seconds: float,
     max_output_bytes: int,
+    containment: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Public parent-side supervised execution API.
 
@@ -126,6 +127,10 @@ async def run_supervised_argv_async(
             supervisor_config["workload_cwd"] = workload_cwd
         if workload_stdin is not None:
             supervisor_config["has_workload_input"] = True
+        # T3 (H0.2): requested OS containment — forwarded to the trusted
+        # bootstrap, applied fail-closed before workload exec.
+        if containment is not None:
+            supervisor_config["containment"] = dict(containment)
         config_payload = json.dumps(supervisor_config).encode("utf-8")
     except Exception as e:
         return _attach_workload_input_metadata(

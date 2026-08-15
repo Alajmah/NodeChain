@@ -1438,6 +1438,24 @@ async def read_bounded_protocol_async(
 # Bootstrap script template
 # ---------------------------------------------------------------------------
 
+def _nodechain_root() -> str:
+    """T3 (H0.2): the nodechain package parent directory for B1 imports.
+
+    The bootstrap child (B1) execve's with a minimal PATH-only environment;
+    to import the trusted containment primitives (namespace_profile,
+    seccomp_profile) it needs the nodechain source root on sys.path. The
+    supervisor process itself was launched via ``-m nodechain...`` so the
+    package location is resolvable here and embedded into the generated
+    bootstrap script.
+    """
+    try:
+        from pathlib import Path as _P
+        import nodechain as _nc
+        return str(_P(_nc.__file__).resolve().parent.parent)
+    except Exception:
+        return ""
+
+
 def _build_bootstrap_script() -> str:
     """Generate the Python bootstrap script.
 
@@ -1701,8 +1719,120 @@ def main():
             _sys.stderr.write(f"bootstrap: PTRACE_TRACEME failed errno={{_errno}}\\n")
             _os._exit(126)
 
-        # --- Seccomp application (S3 scope — stubbed for S2) ---
-        # S2 does not apply seccomp. S3 will add the real profile here.
+        # --- T3 (H0.2): requested OS containment — fail-closed (S3 slot) ---
+        # Every control requested for this invocation is applied HERE, in
+        # the trusted bootstrap, BEFORE workload exec. Ordering: namespaces
+        # first, confinement next, seccomp LAST (the profile denies
+        # unshare/mount). Any requested control that cannot be enforced
+        # aborts before the workload can start — never a weak fallback.
+        _containment = cfg.get("containment", {{}})
+        _enf = {{}}
+        _failed = []
+
+        _nc_root = {repr(_nodechain_root())}
+        if _nc_root:
+            if _nc_root not in _sys.path:
+                _sys.path.insert(0, _nc_root)
+
+        if _containment.get("network_namespace"):
+            try:
+                from nodechain.sdk.namespace_profile import apply_network_namespace as _ann
+                if _ann():
+                    _enf["network_namespace_enforced"] = True
+                else:
+                    _failed.append("network_namespace")
+            except Exception as _e:
+                _enf["network_namespace_error"] = str(_e)
+                _failed.append("network_namespace")
+
+        if _containment.get("mount_namespace") and not _containment.get("mount_confinement"):
+            try:
+                from nodechain.sdk.namespace_profile import apply_mount_namespace as _amn
+                if _amn():
+                    _enf["mount_namespace_enforced"] = True
+                else:
+                    _failed.append("mount_namespace")
+            except Exception as _e:
+                _enf["mount_namespace_error"] = str(_e)
+                _failed.append("mount_namespace")
+
+        if _containment.get("procfs_isolation"):
+            try:
+                from nodechain.sdk.namespace_profile import (
+                    remount_procfs_for_pid_namespace as _rproc,
+                )
+                _pr = _rproc()
+                if isinstance(_pr, dict):
+                    for _k, _v in _pr.items():
+                        _enf[_k] = _v
+                    if not _pr.get("procfs_namespace_view_enforced"):
+                        _failed.append("procfs_isolation")
+                else:
+                    _failed.append("procfs_isolation")
+            except Exception as _e:
+                _enf["procfs_error"] = str(_e)
+                _failed.append("procfs_isolation")
+
+        if _containment.get("mount_confinement"):
+            try:
+                from nodechain.sdk.namespace_profile import (
+                    apply_mount_confinement as _amc,
+                )
+                _interp = _sys.executable or "/usr/bin/python3"
+                _extra = []
+                for _d in ("/usr", "/lib", "/lib64"):
+                    if _os.path.isdir(_d):
+                        _extra.append((_d, _d))
+                if "/.venv/" in _interp or "/venv/" in _interp:
+                    _parts = _interp.split("/")
+                    if "bin" in _parts:
+                        _vr = "/".join(_parts[:_parts.index("bin")])
+                        if _vr and _os.path.isdir(_vr):
+                            _extra.append((_vr, _vr))
+                _cr = _amc(
+                    package_root=_containment.get("package_root", "/"),
+                    temp_dir=_containment.get("temp_dir", "/tmp"),
+                    extra_mounts=_extra,
+                )
+                if isinstance(_cr, dict) and _cr.get("mount_confinement_enforced"):
+                    _enf["mount_confinement_enforced"] = True
+                    _enf["allowed_mounts"] = _cr.get("allowed_mounts", [])
+                else:
+                    _failed.append("mount_confinement")
+            except Exception as _e:
+                _enf["mount_confinement_error"] = str(_e)
+                _failed.append("mount_confinement")
+
+        if _containment.get("seccomp"):
+            try:
+                from nodechain.sdk.seccomp_profile import (
+                    SeccompBackend as _SB, SeccompProfile as _SP,
+                )
+                _sb = _SB()
+                if not _sb.available:
+                    _failed.append("seccomp")
+                    _enf["seccomp_available"] = False
+                elif not _sb.apply_profile(_SP()):
+                    _failed.append("seccomp")
+                    _enf["seccomp_available"] = True
+                else:
+                    _enf["seccomp_enforced"] = True
+                    _enf["seccomp_available"] = True
+            except Exception as _e:
+                _enf["seccomp_error"] = str(_e)
+                _failed.append("seccomp")
+
+        if _failed:
+            _emit_meta(metadata_fd, {{
+                "type": _META_ENFORCEMENT_FAILED,
+                "failed_primitives": _failed,
+            }})
+            _sys.stderr.write(
+                "bootstrap: containment unavailable: " + ", ".join(_failed)
+                + " — workload NOT started\\n")
+            _os._exit(126)
+
+        enforcement_meta.update(_enf)
 
         # Set FD_CLOEXEC on metadata_fd so it closes at workload exec (B2).
         # Fix #10: failure to establish the locked B2 inheritance rule MUST
@@ -1887,6 +2017,9 @@ def supervisor_main(
             # bootstrap config for B1 → B2.
             "workload_input_rfd": pipes.workload_input_rfd,
             "workload_cwd": config.get("workload_cwd"),
+            # T3 (H0.2): requested OS containment — applied fail-closed by
+            # the trusted bootstrap before workload exec.
+            "containment": config.get("containment", {}),
         }
         config_payload = json.dumps(bootstrap_config).encode("utf-8")
 
