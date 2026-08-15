@@ -816,3 +816,93 @@ class TestRequestedContainment:
                 or result.get("error", "").startswith(
                     "supervised execution failed before workload start")
             ), f"unexpected fail-closed reason: {reason}"
+
+
+# ---------------------------------------------------------------------------
+# 9. Review-finding regressions (Codex P1x2 + P2x2 at 9ad1d78)
+# ---------------------------------------------------------------------------
+
+
+class TestReviewRegressions:
+    def test_confinement_root_never_host_root(self, tmp_path):
+        """P1-1: mount confinement with no explicit package_root must derive
+        the confinement root from the module's parent — never "/" (which
+        would bind the host root at /package and defeat confinement)."""
+        r = SubprocessRunner(enable_mount_confinement=True)
+        cfg = r._supervised_containment_config(
+            "", "/tmp/t9", module_parent=str(tmp_path),
+        )
+        assert cfg["mount_confinement"] is True
+        assert cfg["package_root"] == str(tmp_path)
+        assert cfg["package_root"] != "/"
+
+    def test_confinement_root_explicit_package_root_wins(self, tmp_path):
+        r = SubprocessRunner(enable_mount_confinement=True)
+        cfg = r._supervised_containment_config(
+            "/pkg/explicit", "/tmp/t9", module_parent=str(tmp_path),
+        )
+        assert cfg["package_root"] == "/pkg/explicit"
+
+    def test_supervised_script_uses_workload_fs_root(self):
+        """P1-2: the child enforcers must receive the workload-visible root
+        (config workload_fs_root), not the host path."""
+        r = SubprocessRunner()
+        script = r._build_supervised_child_script(
+            "/m/path.py", "TNode", "local_untrusted", "/host/pkg",
+        )
+        assert "workload_fs_root" in script
+        assert "fs_policy_root or None" in script
+
+    def test_adapter_resolves_relative_module_path(self, tmp_path):
+        """P2-1: a relative module path is resolved at the adapter before
+        the workload cwd changes; missing modules fail with the legacy
+        module-not-found shape."""
+        import asyncio
+        async def _no_spawn(**kw):
+            raise AssertionError("spawned for missing module")
+        import nodechain.runtime.supervised_argv as sa
+        rel = tmp_path / "rel_node.py"
+        rel.write_text("class T:\n    pass\n", encoding="utf-8")
+        r = SubprocessRunner(timeout_seconds=5, max_output_bytes=1000)
+        captured = {}
+        async def capture(**kw):
+            captured.update(kw)
+            return _sup_result(stdout=_ok_stdout())
+        with patch.object(sa, "run_supervised_argv_async", capture):
+            out = asyncio.run(r._run_supervised_untrusted(
+                _envelope(), rel, "T", "relnode", "local_untrusted", "",
+            ))
+        assert out["success"] is True
+        payload = json.loads(captured["workload_stdin"].decode())
+        resolved = str(rel.resolve())
+        got = payload["config"]["workload_module_path"]
+        assert Path(got).is_absolute(), f"module path not resolved: {got}"
+        assert Path(got) == Path(resolved), f"{got} != {resolved}"
+
+    def test_missing_module_fails_without_spawn(self, tmp_path):
+        import asyncio
+        import nodechain.runtime.supervised_argv as sa
+        r = SubprocessRunner(timeout_seconds=5, max_output_bytes=1000)
+        async def explode(**kw):
+            raise AssertionError("spawned for missing module")
+        missing = tmp_path / "does_not_exist.py"
+        with patch.object(sa, "run_supervised_argv_async", explode):
+            out = asyncio.run(r._run_supervised_untrusted(
+                _envelope(), missing, "T", "mnode", "local_untrusted", "",
+            ))
+        assert out["success"] is False
+        assert "Module not found" in out["error"]
+        assert out["exit_code"] == -1
+
+    def test_bootstrap_confinement_precedes_procfs(self):
+        """P2-2: in the generated bootstrap, the mount-confinement block
+        must appear BEFORE the procfs-isolation block (confinement creates
+        a fresh mount ns + chroot that would discard an earlier remount)."""
+        from nodechain.runtime.exec_supervisor import _build_bootstrap_script
+        src = _build_bootstrap_script()
+        confine_idx = src.index('if _containment.get("mount_confinement"):')
+        procfs_idx = src.index('if _containment.get("procfs_isolation"):')
+        assert confine_idx < procfs_idx, (
+            "procfs isolation runs before mount confinement — an earlier "
+            "procfs remount would be discarded by the confinement chroot"
+        )

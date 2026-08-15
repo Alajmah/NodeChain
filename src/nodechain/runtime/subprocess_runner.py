@@ -312,6 +312,10 @@ def main():
         trust_level = config.get("trust_level", "built_in")
         package_root = config.get("package_root", "")
         node_id = config.get("node_id", "unknown")
+        # Filesystem-policy root as the WORKLOAD sees it: under supervisor-
+        # side mount confinement this is the chrooted /package prefix, not
+        # the host path (which is unreachable inside the chroot).
+        fs_policy_root = config.get("workload_fs_root") or package_root
 
         # Build envelope (trusted code, no node module needed)
         envelope = InvocationEnvelope(**envelope_data)
@@ -409,7 +413,7 @@ def main():
         if trust_level != "built_in":
             tl = TL(trust_level)
             imp = enforce_imports_for_node(tl, node_id, allow_preloaded=True)
-            fs = enforce_filesystem_for_node(tl, node_id, package_root or None)
+            fs = enforce_filesystem_for_node(tl, node_id, fs_policy_root or None)
             sp = enforce_subprocess_for_node(tl, node_id)
             net = enforce_network_for_node(tl, node_id)
 
@@ -540,6 +544,10 @@ def main():
         trust_level = config.get("trust_level", "built_in")
         package_root = config.get("package_root", "")
         node_id = config.get("node_id", "unknown")
+        # Filesystem-policy root as the WORKLOAD sees it: under supervisor-
+        # side mount confinement this is the chrooted /package prefix, not
+        # the host path (which is unreachable inside the chroot).
+        fs_policy_root = config.get("workload_fs_root") or package_root
         # Workload-visible module path: supervisor-side mount confinement
         # re-binds the package at the chrooted prefix; the adapter passes
         # the resolved path explicitly.
@@ -561,7 +569,7 @@ def main():
         if trust_level != "built_in":
             tl = TL(trust_level)
             imp = enforce_imports_for_node(tl, node_id, allow_preloaded=True)
-            fs = enforce_filesystem_for_node(tl, node_id, package_root or None)
+            fs = enforce_filesystem_for_node(tl, node_id, fs_policy_root or None)
             sp = enforce_subprocess_for_node(tl, node_id)
             net = enforce_network_for_node(tl, node_id)
 
@@ -1003,7 +1011,8 @@ main()
             }
 
     def _supervised_containment_config(
-        self, package_root: str, temp_dir: str, *, enable_seccomp: bool = False,
+        self, package_root: str, temp_dir: str, *,
+        module_parent: str = "", enable_seccomp: bool = False,
     ) -> dict[str, Any] | None:
         """T3 (H0.2): build the requested-containment config for the supervisor.
 
@@ -1024,7 +1033,10 @@ main()
             cfg["mount_namespace"] = True
         if self.enable_mount_confinement:
             cfg["mount_confinement"] = True
-            cfg["package_root"] = package_root or "/"
+            # Confinement root: explicit package_root, else the resolved
+            # module's parent (legacy semantics). NEVER "/" — binding the
+            # host root at /package would defeat confinement entirely.
+            cfg["package_root"] = package_root or module_parent or "/"
             cfg["temp_dir"] = temp_dir
         if self.enable_procfs_isolation:
             cfg["procfs_isolation"] = True
@@ -1062,8 +1074,30 @@ main()
 
         start = time.monotonic()
         temp_dir = tempfile.mkdtemp(prefix="nodechain_child_")
+        # Resolve the module path BEFORE computing the workload cwd: the
+        # child runs with cwd = package_root or the isolated temp dir, so a
+        # relative module path would resolve against the wrong directory
+        # (the legacy route resolved before changing cwd too).
+        module_path = Path(module_path).resolve()
+        if not module_path.exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            return {
+                "success": False,
+                "error": f"Module not found: {module_path}",
+                "exit_code": -1,
+                "isolation_mode": "subprocess",
+                "duration_ms": int((time.monotonic() - start) * 1000),
+                "child_policy_enforced": False,
+                "child_cwd": package_root if package_root else "",
+                "temp_dir_isolated": False,
+            }
         child_cwd = package_root if package_root else temp_dir
         workload_module_path = str(module_path)
+        # Filesystem-policy root for the child enforcers: under supervisor-
+        # side mount confinement the workload sees the package at the
+        # chrooted prefix, so the child policy must use the workload-visible
+        # root — the host path is only for the bootstrap's bind mount.
+        workload_fs_root = package_root
         try:
             # cgroup accounting/limits: no supervised owner — fail closed
             # BEFORE any start, with an explicit reason (frozen §3).
@@ -1092,11 +1126,18 @@ main()
                 "node_id": node_id,
             }
             # Under supervisor-side mount confinement the package is re-bound
-            # at the chrooted prefix; the workload-visible module path is the
-            # prefix + basename (apply_mount_confinement contract: "/package").
+            # at the chrooted prefix; the workload-visible module path AND
+            # the child filesystem-policy root are the prefix forms (the
+            # apply_mount_confinement contract binds the confinement root at
+            # "/package"). The confinement root itself derives from the
+            # resolved module's parent when no explicit package_root was
+            # supplied — NEVER "/" (that would bind the host root into the
+            # chroot and defeat confinement).
             if self.enable_mount_confinement:
                 workload_module_path = "/package/" + Path(module_path).name
+                workload_fs_root = "/package"
             config["workload_module_path"] = workload_module_path
+            config["workload_fs_root"] = workload_fs_root or None
             payload = json.dumps({
                 "config": config,
                 "envelope": envelope.model_dump(mode="json"),
@@ -1121,7 +1162,9 @@ main()
             }
 
             containment = self._supervised_containment_config(
-                package_root, temp_dir, enable_seccomp=enable_seccomp,
+                package_root, temp_dir,
+                module_parent=str(module_path.parent),
+                enable_seccomp=enable_seccomp,
             )
 
             from nodechain.runtime.supervised_argv import run_supervised_argv_async

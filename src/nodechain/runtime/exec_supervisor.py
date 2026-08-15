@@ -1756,23 +1756,6 @@ def main():
                 _enf["mount_namespace_error"] = str(_e)
                 _failed.append("mount_namespace")
 
-        if _containment.get("procfs_isolation"):
-            try:
-                from nodechain.sdk.namespace_profile import (
-                    remount_procfs_for_pid_namespace as _rproc,
-                )
-                _pr = _rproc()
-                if isinstance(_pr, dict):
-                    for _k, _v in _pr.items():
-                        _enf[_k] = _v
-                    if not _pr.get("procfs_namespace_view_enforced"):
-                        _failed.append("procfs_isolation")
-                else:
-                    _failed.append("procfs_isolation")
-            except Exception as _e:
-                _enf["procfs_error"] = str(_e)
-                _failed.append("procfs_isolation")
-
         if _containment.get("mount_confinement"):
             try:
                 from nodechain.sdk.namespace_profile import (
@@ -1802,6 +1785,28 @@ def main():
             except Exception as _e:
                 _enf["mount_confinement_error"] = str(_e)
                 _failed.append("mount_confinement")
+
+        # Procfs isolation runs AFTER mount confinement: confinement
+        # creates a fresh mount namespace and chroot, so an earlier procfs
+        # remount would be discarded (and the enforced flag would lie).
+        # Inside the confinement root the namespace-local /proc is mounted
+        # where the workload can actually observe it.
+        if _containment.get("procfs_isolation"):
+            try:
+                from nodechain.sdk.namespace_profile import (
+                    remount_procfs_for_pid_namespace as _rproc,
+                )
+                _pr = _rproc()
+                if isinstance(_pr, dict):
+                    for _k, _v in _pr.items():
+                        _enf[_k] = _v
+                    if not _pr.get("procfs_namespace_view_enforced"):
+                        _failed.append("procfs_isolation")
+                else:
+                    _failed.append("procfs_isolation")
+            except Exception as _e:
+                _enf["procfs_error"] = str(_e)
+                _failed.append("procfs_isolation")
 
         if _containment.get("seccomp"):
             try:
