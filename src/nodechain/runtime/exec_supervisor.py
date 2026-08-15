@@ -144,7 +144,7 @@ _PROTO_ALLOWED_TYPES = frozenset({
 _PROTO_ALLOWED_FIELDS: dict[str, frozenset[str]] = {
     PROTO_SUPERVISOR_STARTED: frozenset({"version", "type"}),
     PROTO_BOOTSTRAP_SPAWNED: frozenset({"version", "type", "pid"}),
-    PROTO_ENFORCEMENT_VERIFIED: frozenset({"version", "type"}),
+    PROTO_ENFORCEMENT_VERIFIED: frozenset({"version", "type", "metadata"}),
     PROTO_EXEC_MONITOR_ARMED: frozenset({"version", "type"}),
     PROTO_EXEC_CONFIRMED: frozenset({"version", "type"}),
     PROTO_WORKLOAD_EXITED: frozenset({"version", "type", "started", "exit_code",
@@ -1766,6 +1766,16 @@ def main():
                 for _d in ("/usr", "/lib", "/lib64"):
                     if _os.path.isdir(_d):
                         _extra.append((_d, _d))
+                # T3 privileged-qualification fix: the chroot has no
+                # ld.so.cache, so the interpreter's lib dir (e.g.
+                # /usr/local/lib on official python images — where
+                # libpythonX.Y.so lives) must be bound explicitly; the
+                # adapter names it in LD_LIBRARY_PATH for the loader.
+                _ilib = _containment.get("interpreter_libdir")
+                if isinstance(_ilib, str) and _ilib and _os.path.isdir(_ilib):
+                    _pair = (_ilib, _ilib)
+                    if _pair not in _extra:
+                        _extra.append(_pair)
                 if "/.venv/" in _interp or "/venv/" in _interp:
                     _parts = _interp.split("/")
                     if "bin" in _parts:
@@ -1786,27 +1796,60 @@ def main():
                 _enf["mount_confinement_error"] = str(_e)
                 _failed.append("mount_confinement")
 
+        # T3 (H0.2 review fix): confinement chroots into temp_root and
+        # chdir("/")s, discarding the earlier workload_cwd. Re-establish the
+        # WORKLOAD-VISIBLE cwd before exec authority is crossed: /package
+        # when a confinement package root exists (the bind the workload's
+        # module and fs-policy root live at), else /tmp (the isolated temp
+        # the confinement primitive also creates inside the root). Host
+        # paths are never restored inside the chroot.
+        if _containment.get("mount_confinement") and _enf.get("mount_confinement_enforced"):
+            _visible_cwd = "/package" if _containment.get("package_root") else "/tmp"
+            try:
+                _os.chdir(_visible_cwd)
+                _enf["workload_cwd_visible"] = _visible_cwd
+            except OSError as _cwd_err:
+                _emit_meta(metadata_fd, {{
+                    "type": _META_BOOTSTRAP_FAILED,
+                    "stage": "containment",
+                    "reason": f"workload_cwd_reestablish_failed: {{_cwd_err}}",
+                }})
+                _sys.stderr.write(
+                    f"bootstrap: chdir({{_visible_cwd}}) after confinement failed: {{_cwd_err}}\\n")
+                _os._exit(126)
+
         # Procfs isolation runs AFTER mount confinement: confinement
         # creates a fresh mount namespace and chroot, so an earlier procfs
         # remount would be discarded (and the enforced flag would lie).
-        # Inside the confinement root the namespace-local /proc is mounted
-        # where the workload can actually observe it.
+        # The confinement root does not contain a /proc mountpoint, so it
+        # must be created inside the root before the remount helper runs —
+        # otherwise the composition fails closed instead of producing the
+        # requested verified procfs view.
         if _containment.get("procfs_isolation"):
-            try:
-                from nodechain.sdk.namespace_profile import (
-                    remount_procfs_for_pid_namespace as _rproc,
-                )
-                _pr = _rproc()
-                if isinstance(_pr, dict):
-                    for _k, _v in _pr.items():
-                        _enf[_k] = _v
-                    if not _pr.get("procfs_namespace_view_enforced"):
-                        _failed.append("procfs_isolation")
-                else:
+            if _containment.get("mount_confinement") and _enf.get("mount_confinement_enforced"):
+                try:
+                    _os.mkdir("/proc", 0o755)
+                except FileExistsError:
+                    pass
+                except OSError as _procdir_err:
+                    _enf["procfs_error"] = f"proc_mountpoint_failed: {{_procdir_err}}"
                     _failed.append("procfs_isolation")
-            except Exception as _e:
-                _enf["procfs_error"] = str(_e)
-                _failed.append("procfs_isolation")
+            if "procfs_isolation" not in _failed:
+                try:
+                    from nodechain.sdk.namespace_profile import (
+                        remount_procfs_for_pid_namespace as _rproc,
+                    )
+                    _pr = _rproc()
+                    if isinstance(_pr, dict):
+                        for _k, _v in _pr.items():
+                            _enf[_k] = _v
+                        if not _pr.get("procfs_namespace_view_enforced"):
+                            _failed.append("procfs_isolation")
+                    else:
+                        _failed.append("procfs_isolation")
+                except Exception as _e:
+                    _enf["procfs_error"] = str(_e)
+                    _failed.append("procfs_isolation")
 
         if _containment.get("seccomp"):
             try:
@@ -2081,7 +2124,16 @@ def supervisor_main(
     if not meta_result.ok:
         return _fail_and_cleanup(f"metadata: {meta_result.reason}")
 
-    if not _emit_mandatory({"type": PROTO_ENFORCEMENT_VERIFIED}):
+    # T3 (H0.2): forward the trusted containment evidence (namespace/
+    # confinement/seccomp enforcement flags) from the bootstrap's
+    # enforcement_verified metadata record into the protocol stream — the
+    # evidence extractor reads rec["metadata"] and the result mapper
+    # projects it into sandbox_metadata for the caller.
+    _enf_meta = meta_result.metadata.get("metadata")
+    _enf_rec = {"type": PROTO_ENFORCEMENT_VERIFIED}
+    if isinstance(_enf_meta, dict):
+        _enf_rec["metadata"] = _enf_meta
+    if not _emit_mandatory(_enf_rec):
         return _fail_and_cleanup("protocol_emit_enforcement_verified_failed")
 
     try:

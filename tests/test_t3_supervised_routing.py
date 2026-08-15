@@ -906,3 +906,265 @@ class TestReviewRegressions:
             "procfs isolation runs before mount confinement — an earlier "
             "procfs remount would be discarded by the confinement chroot"
         )
+
+
+# ---------------------------------------------------------------------------
+# 10. Second review round (852bf6d blockers) — frozen-contract exactness
+# ---------------------------------------------------------------------------
+
+
+class TestNotStartedMatrixExact:
+    """Frozen matrix: parent/setup failures → -1; supervisor-existed but
+    exec never confirmed → 126. No either-or assertion."""
+
+    def test_setup_family_minus_one_exactly(self):
+        for reason in (
+            "supervisor_spawn_failed: boom",
+            "pipe_creation_failed: x",
+            "config_serialize_failed: y",
+            "config_oversized",
+            "workload_input_oversized",
+            "supervisor_env_failed: z",
+        ):
+            key = reason.split(":")[0].strip()
+            out = _R._translate_supervised_result(
+                _sup_result(process_started=False,
+                            exit_code_interpretation="error",
+                            reason=reason, process_exit_code=None),
+                child_cwd="/w", duration_ms=2,
+            )
+            assert out["exit_code"] == -1, f"{key}: {out['exit_code']}"
+            assert out["success"] is False
+            assert out["supervised_execution"]["process_started"] is False
+
+    def test_bootstrap_family_126_exactly(self):
+        for reason in (
+            "enforcement_failed", "bootstrap_failed",
+            "unshare_failed: unshare_clone_newpid_failed: errno=1",
+            "protocol_eof_before_terminal",
+        ):
+            key = reason.split(":")[0].strip()
+            out = _R._translate_supervised_result(
+                _sup_result(process_started=False,
+                            exit_code_interpretation="error",
+                            reason=reason, process_exit_code=None),
+                child_cwd="/w", duration_ms=2,
+            )
+            assert out["exit_code"] == 126, f"{key}: {out['exit_code']}"
+            assert out["success"] is False
+
+    def test_prestart_timeout_is_bootstrap_126_not_workload_2(self):
+        out = _R._translate_supervised_result(
+            _sup_result(process_started=False, process_timed_out=True,
+                        exit_code_interpretation="timeout",
+                        reason="bootstrap_timeout", process_exit_code=None),
+            child_cwd="/w", duration_ms=2,
+        )
+        assert out["exit_code"] == 126
+        assert "bootstrap timeout" in out["error"]
+
+
+class TestNoSynthesizedPolicyFlag:
+    def test_output_cap_does_not_invent_policy_flag(self):
+        out = _R._translate_supervised_result(
+            _sup_result(output_truncated=True,
+                        exit_code_interpretation="fail",
+                        reason="output_limit_exceeded"),
+            child_cwd="/w", duration_ms=9,
+        )
+        assert out["success"] is False
+        assert out["exit_code"] == 3
+        assert out["child_policy_enforced"] is False, (
+            "output truncation proves nothing about Python enforcers"
+        )
+
+    def test_sigsys_does_not_invent_policy_flag(self):
+        out = _R._translate_supervised_result(
+            _sup_result(exit_code_interpretation="fail",
+                        reason="seccomp_sigsys_kill", process_exit_code=-31),
+            child_cwd="/w", duration_ms=9,
+        )
+        assert out["success"] is False
+        assert out["exit_code"] == -31
+        assert out["child_policy_enforced"] is False, (
+            "SIGSYS proves supervisor seccomp only — not the node-local "
+            "Python enforcers"
+        )
+
+    def test_exit10_convention_preserved(self):
+        out = _R._translate_supervised_result(
+            _sup_result(exit_code_interpretation="fail", reason=None,
+                        process_exit_code=10, stderr=""),
+            child_cwd="/w", duration_ms=5,
+        )
+        assert out["child_policy_enforced"] is True
+
+
+class TestTempCleanupVisibility:
+    @pytest.mark.asyncio
+    async def test_cleanup_failure_converts_success(self, tmp_path):
+        import asyncio
+        import shutil as _sh
+        mod = _make_module(tmp_path)
+
+        async def ok_supervised(**kw):
+            return _sup_result(stdout=_ok_stdout())
+
+        import nodechain.runtime.supervised_argv as sa
+        real_rmtree = _sh.rmtree
+        def failing_rmtree(path, *a, **k):
+            raise OSError("disk full during rmtree")
+        with patch.object(sa, "run_supervised_argv_async", ok_supervised), \
+             patch.object(_sh, "rmtree", failing_rmtree):
+            r = SubprocessRunner()
+            out = await r._run_supervised_untrusted(
+                _envelope(), mod, "TNode", "t3n", "local_untrusted", "",
+            )
+        assert out["success"] is False
+        assert "temp_cleanup_failed" in out["error"]
+        assert out["exit_code"] == -1
+
+    @pytest.mark.asyncio
+    async def test_cleanup_failure_notes_but_preserves_supervisor_failure(
+        self, tmp_path,
+    ):
+        import asyncio
+        import shutil as _sh
+        mod = _make_module(tmp_path)
+
+        async def fail_supervised(**kw):
+            return _sup_result(process_started=False,
+                               exit_code_interpretation="error",
+                               reason="enforcement_failed",
+                               process_exit_code=None)
+
+        import nodechain.runtime.supervised_argv as sa
+        def failing_rmtree(path, *a, **k):
+            raise OSError("rmtree failed")
+        with patch.object(sa, "run_supervised_argv_async", fail_supervised), \
+             patch.object(_sh, "rmtree", failing_rmtree):
+            r = SubprocessRunner()
+            out = await r._run_supervised_untrusted(
+                _envelope(), mod, "TNode", "t3n", "local_untrusted", "",
+            )
+        # The stronger supervisor failure stays primary...
+        assert out["exit_code"] == 126
+        assert "before workload start" in out["error"]
+        # ...with the cleanup failure noted, not swallowed.
+        assert "temp_cleanup_failed" in out["error"]
+
+    @pytest.mark.asyncio
+    async def test_confinement_reports_workload_visible_cwd(self, tmp_path):
+        import asyncio
+        import nodechain.runtime.supervised_argv as sa
+        mod = _make_module(tmp_path)
+        captured = {}
+
+        async def ok_supervised(**kw):
+            captured.update(kw)
+            return _sup_result(stdout=_ok_stdout())
+
+        with patch.object(sa, "run_supervised_argv_async", ok_supervised):
+            r = SubprocessRunner(enable_mount_confinement=True)
+            out = await r._run_supervised_untrusted(
+                _envelope(), mod, "TNode", "t3n", "local_untrusted",
+                str(tmp_path),
+            )
+        # The host cwd is delivered for the bootstrap chdir/bind, but the
+        # RESULT metadata reports the workload-visible post-chroot cwd.
+        assert captured["workload_cwd"] == str(tmp_path)
+        assert out["child_cwd"] == "/package"
+
+
+class TestBootstrapConfinementCwdAndProcfs:
+    def test_visible_cwd_reestablish_present(self):
+        from nodechain.runtime.exec_supervisor import _build_bootstrap_script
+        src = _build_bootstrap_script()
+        assert "workload_cwd_visible" in src
+        assert '"/package" if _containment.get("package_root")' in src
+
+    def test_proc_mountpoint_created_inside_chroot(self):
+        from nodechain.runtime.exec_supervisor import _build_bootstrap_script
+        src = _build_bootstrap_script()
+        assert '_os.mkdir("/proc", 0o755)' in src
+
+
+# ---------------------------------------------------------------------------
+# 11. Privileged confinement proofs (dual-truth: skip where unavailable)
+# ---------------------------------------------------------------------------
+
+
+def _make_cwd_module(tmp_path: Path) -> Path:
+    mod = tmp_path / "cwd_node.py"
+    mod.write_text(
+        "import os\n"
+        "from nodechain.core.envelope import EnvelopeResponse\n"
+        "class TNode:\n"
+        "    async def execute(self, envelope):\n"
+        "        return EnvelopeResponse(\n"
+        "            request_envelope_id=envelope.envelope_id,\n"
+        "            run_id=envelope.run_id, chain_id=envelope.chain_id,\n"
+        "            node_id=envelope.node_id, step_id=envelope.step_id,\n"
+        '            output={"cwd": os.getcwd()},\n'
+        '            output_type="result",\n'
+        "        )\n",
+        encoding="utf-8",
+    )
+    return mod
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX containment behavior")
+class TestPrivilegedConfinementProofs:
+    @pytest.mark.asyncio
+    async def test_confinement_workload_reports_visible_cwd(self, tmp_path):
+        """Real privileged proof: under mount confinement the node observes
+        its own cwd from inside the chroot — must be the workload-visible
+        /package (or /tmp), never a host path. Skips where the topology
+        cannot run."""
+        if not _can_unshare_pid_ns():
+            pytest.skip("host cannot unshare PID ns")
+        mod = _make_cwd_module(tmp_path)
+        r = SubprocessRunner(timeout_seconds=60, max_output_bytes=100_000,
+                             enable_mount_confinement=True)
+        result = await r.run_isolated(
+            _envelope(), mod, "TNode", "cwd_node",
+            trust_level="local_untrusted", package_root=str(tmp_path),
+        )
+        if not result["success"]:
+            sup = result.get("supervised_execution", {})
+            assert sup.get("process_started") is False, result
+            pytest.skip(f"containment unavailable on this host: "
+                        f"{(sup.get('reason') or '')[:120]}")
+        observed = result["response"]["output"].get("cwd", "")
+        assert observed in ("/package", "/tmp"), (
+            f"workload cwd is not confinement-visible: {observed}"
+        )
+        assert not str(tmp_path) in observed, (
+            "host path leaked as workload cwd inside the chroot"
+        )
+        assert result["child_cwd"] == observed
+
+    @pytest.mark.asyncio
+    async def test_confinement_plus_procfs_enforced_or_refused(self, tmp_path):
+        """Combined mount-confinement + procfs isolation: on a privileged
+        host both must be enforced together (the /proc mountpoint is
+        created inside the confinement root); elsewhere the run must fail
+        closed BEFORE the workload starts. Never a partial claim."""
+        if not _can_unshare_pid_ns():
+            pytest.skip("host cannot unshare PID ns")
+        mod = _make_cwd_module(tmp_path)
+        r = SubprocessRunner(timeout_seconds=60, max_output_bytes=100_000,
+                             enable_mount_confinement=True,
+                             enable_procfs_isolation=True)
+        result = await r.run_isolated(
+            _envelope(), mod, "TNode", "cp_node",
+            trust_level="local_untrusted", package_root=str(tmp_path),
+        )
+        if result["success"]:
+            assert result["mount_confinement_enforced"] is True
+            assert result["procfs_namespace_view_enforced"] is True, (
+                "success claimed without the requested procfs view"
+            )
+        else:
+            sup = result.get("supervised_execution", {})
+            assert sup.get("process_started") is False, result

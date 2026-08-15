@@ -1012,7 +1012,8 @@ main()
 
     def _supervised_containment_config(
         self, package_root: str, temp_dir: str, *,
-        module_parent: str = "", enable_seccomp: bool = False,
+        module_parent: str = "", interpreter_libdir: str = "",
+        enable_seccomp: bool = False,
     ) -> dict[str, Any] | None:
         """T3 (H0.2): build the requested-containment config for the supervisor.
 
@@ -1038,6 +1039,8 @@ main()
             # host root at /package would defeat confinement entirely.
             cfg["package_root"] = package_root or module_parent or "/"
             cfg["temp_dir"] = temp_dir
+            if interpreter_libdir:
+                cfg["interpreter_libdir"] = interpreter_libdir
         if self.enable_procfs_isolation:
             cfg["procfs_isolation"] = True
         if enable_seccomp:
@@ -1049,6 +1052,31 @@ main()
             self.enable_cgroup or self.cgroup_memory_max_mb > 0
             or self.cgroup_pids_max > 0 or self.cgroup_cpu_max_quota > 0
         )
+
+    @staticmethod
+    def _interpreter_libdir() -> str:
+        """The host interpreter's library directory (e.g. /usr/local/lib).
+
+        Used only under supervisor-side mount confinement: the chroot has
+        no ld.so.cache, so the interpreter's shared library is invisible to
+        the loader unless its directory is both bound inside the root and
+        named in LD_LIBRARY_PATH. Derived from the running interpreter;
+        returns "" when nothing sensible can be derived.
+        """
+        try:
+            import sysconfig as _sc
+            _ld = _sc.get_config_var("LIBDIR")
+            if _ld and Path(_ld).is_dir():
+                return str(_ld)
+        except Exception:
+            pass
+        try:
+            _cand = Path(sys.executable).resolve().parent.parent / "lib"
+            if _cand.is_dir():
+                return str(_cand)
+        except Exception:
+            pass
+        return ""
 
     async def _run_supervised_untrusted(
         self,
@@ -1072,6 +1100,7 @@ main()
         import tempfile
         import shutil
 
+        result: dict[str, Any] | None = None
         start = time.monotonic()
         temp_dir = tempfile.mkdtemp(prefix="nodechain_child_")
         # Resolve the module path BEFORE computing the workload cwd: the
@@ -1151,6 +1180,19 @@ main()
             # Workload env: the existing secret-filtered semantics with
             # TEMP/TMP/TMPDIR isolation (frozen §4).
             workload_env = self._build_child_env(temp_dir=temp_dir)
+            # Interpreter library visibility under confinement: the chroot
+            # has no ld.so.cache, so the loader never searches non-default
+            # dirs like /usr/local/lib where the runtime keeps libpython.
+            # Bind the interpreter's lib dir inside the root (via the
+            # containment config) AND name it in LD_LIBRARY_PATH — both
+            # derived from the host interpreter, nothing inherited.
+            interpreter_libdir = self._interpreter_libdir()
+            if self.enable_mount_confinement and interpreter_libdir:
+                workload_env["LD_LIBRARY_PATH"] = ":".join(
+                    p for p in (interpreter_libdir,
+                                workload_env.get("LD_LIBRARY_PATH", ""))
+                    if p
+                )
             # Supervisor env: minimal trusted bootstrap — PATH plus the
             # nodechain root so `-m nodechain.runtime.exec_supervisor` and
             # the bootstrap's containment imports resolve. No secrets.
@@ -1164,6 +1206,7 @@ main()
             containment = self._supervised_containment_config(
                 package_root, temp_dir,
                 module_parent=str(module_path.parent),
+                interpreter_libdir=interpreter_libdir,
                 enable_seccomp=enable_seccomp,
             )
 
@@ -1179,11 +1222,63 @@ main()
                 containment=containment,
             )
             elapsed = int((time.monotonic() - start) * 1000)
-            return self._translate_supervised_result(
-                sup, child_cwd=child_cwd, duration_ms=elapsed,
+            # Under confinement the bootstrap re-establishes the
+            # workload-visible cwd after the chroot — child_cwd metadata
+            # must report where the workload ACTUALLY runs, not the host
+            # path it can no longer see.
+            result_cwd = child_cwd
+            if self.enable_mount_confinement:
+                result_cwd = "/package" if package_root else "/tmp"
+            result = self._translate_supervised_result(
+                sup, child_cwd=result_cwd, duration_ms=elapsed,
             )
         finally:
-            shutil.rmtree(temp_dir, ignore_errors=True)
+            # Preparation cleanup truth (frozen §4): a failed temp-dir
+            # cleanup is never silently swallowed. If a result exists it
+            # wins when the supervisor already failed (the stronger truth,
+            # with the cleanup failure noted); otherwise the cleanup
+            # failure converts an apparent success into an honest failure.
+            # On the exception path (incl. cancellation) the in-flight
+            # exception is the stronger truth and propagates unchanged.
+            # NOTE: return happens AFTER this finally (not inside the try)
+            # so cleanup mutations to `result` reach the caller.
+            cleanup_error: OSError | None = None
+            try:
+                shutil.rmtree(temp_dir)
+            except OSError as _e:
+                cleanup_error = _e
+            if cleanup_error is not None and result is not None:
+                _note = f" [temp_cleanup_failed: {cleanup_error}]"
+                if result.get("success"):
+                    result = {
+                        "success": False,
+                        "error": f"temp_cleanup_failed: {cleanup_error}",
+                        "exit_code": -1,
+                        "isolation_mode": "subprocess",
+                        "duration_ms": result.get("duration_ms", 0),
+                        "child_policy_enforced": False,
+                        "child_cwd": result.get("child_cwd", ""),
+                        "temp_dir_isolated": True,
+                        "supervised_execution": result.get(
+                            "supervised_execution", {}),
+                    }
+                else:
+                    result["error"] = f"{result.get('error', '')}{_note}"
+        return result
+
+    #: Not-started reasons produced by the PARENT before the supervisor
+    #: process exists (run_supervised_argv_async pre-spawn returns). These
+    #: map to compatibility exit -1. Every other not-started reason comes
+    #: from a supervisor that existed but never confirmed workload exec —
+    #: compatibility exit 126 per the frozen matrix.
+    _SETUP_FAILURE_REASONS = frozenset({
+        "workload_input_oversized",
+        "config_serialize_failed",
+        "config_oversized",
+        "pipe_creation_failed",
+        "supervisor_env_failed",
+        "supervisor_spawn_failed",
+    })
 
     def _translate_supervised_result(
         self,
@@ -1244,24 +1339,40 @@ main()
         # CancelledError (or a cleanup-incomplete RuntimeError) — this
         # translator only sees returned results.
 
-        # Setup/supervisor/protocol/config failures → not started.
+        # Not-started results split into the two frozen families:
+        #   parent/setup failures (payload/config/pipe/env/spawn) → -1
+        #   supervisor existed but workload exec never confirmed   → 126
+        # A pre-start timeout is a bootstrap timeout (126), not a workload
+        # timeout: the workload never ran, so no workload timeout exists.
         if not started:
-            error = (
+            reason_key = (reason or "").split(":")[0].strip()
+            if reason_key in self._SETUP_FAILURE_REASONS:
+                return _fail(
+                    f"supervised setup failure ({reason})",
+                    -1,
+                )
+            if timed_out or interp == "timeout":
+                return _fail(
+                    f"supervised bootstrap timeout before workload start "
+                    f"({reason or 'bootstrap_timeout'})",
+                    126,
+                )
+            return _fail(
                 f"supervised execution failed before workload start "
-                f"({reason or 'unknown'})"
+                f"({reason or 'unknown'})",
+                126,
             )
-            if interp == "timeout" or timed_out:
-                error = f"Timeout after {self.timeout_seconds}s"
-                return _fail(error, 2)
-            return _fail(error, 126)
 
         # Started: timeout / output cap first (bounded-output truths).
         if timed_out or interp == "timeout":
             return _fail(f"Timeout after {self.timeout_seconds}s", 2)
         if truncated or reason == "output_limit_exceeded":
+            # Output truncation proves nothing about Python-policy enforcement
+            # — child_policy_enforced stays False (trusted seccomp truth, if
+            # any, rides the evidence projection, not this compat flag).
             return _fail(
                 f"Output exceeded {self.max_output_bytes} bytes ({reason})",
-                3, policy_enforced=True,
+                3,
             )
 
         # Cleanup/protocol failures dominate any apparent workload result.
@@ -1282,9 +1393,13 @@ main()
         # Started + non-clean workload outcome: signals / nonzero exit.
         if interp == "fail":
             if reason == "seccomp_sigsys_kill":
+                # SIGSYS proves SUPERVISOR-side seccomp enforcement only — it
+                # says nothing about the node-local Python enforcers, so
+                # child_policy_enforced stays False; the trusted seccomp
+                # truth lives in the evidence projection's sandbox_metadata.
                 return _fail(
                     "workload terminated by SIGSYS (seccomp policy kill)",
-                    -(31), policy_enforced=True,
+                    -(31),
                 )
             if reason and reason.startswith("signal_"):
                 try:
