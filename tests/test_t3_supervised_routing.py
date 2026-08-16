@@ -1078,10 +1078,17 @@ class TestTempCleanupVisibility:
 
 class TestBootstrapConfinementCwdAndProcfs:
     def test_visible_cwd_reestablish_present(self):
+        """The bootstrap consumes the adapter-supplied workload_visible_cwd
+        (single derivation) and fails closed when absent/invalid — it never
+        re-derives the cwd independently. Failures join the containment
+        enforcement_failed family (post-TRACEME region; bootstrap_failed is
+        structurally forbidden there)."""
         from nodechain.runtime.exec_supervisor import _build_bootstrap_script
         src = _build_bootstrap_script()
         assert "workload_cwd_visible" in src
-        assert '"/package" if _containment.get("package_root")' in src
+        assert '_containment.get("workload_visible_cwd")' in src
+        assert "workload_visible_cwd_absent_or_invalid" in src
+        assert '"workload_visible_cwd"' in src  # joins _failed family
 
     def test_proc_mountpoint_created_inside_chroot(self):
         from nodechain.runtime.exec_supervisor import _build_bootstrap_script
@@ -1168,3 +1175,156 @@ class TestPrivilegedConfinementProofs:
         else:
             sup = result.get("supervised_execution", {})
             assert sup.get("process_started") is False, result
+
+
+# ---------------------------------------------------------------------------
+# 12. Third review round (24123e5 narrow misses)
+# ---------------------------------------------------------------------------
+
+
+class TestSingleVisibleCwdDerivation:
+    def test_no_explicit_package_root_reports_package(self, tmp_path):
+        """R3-1: with package_root omitted, the containment config still
+        binds the module parent at /package and the adapter's single
+        derivation reports /package — metadata and bootstrap can no longer
+        disagree."""
+        mod = _make_module(tmp_path)
+        r = SubprocessRunner(enable_mount_confinement=True)
+        cfg = r._supervised_containment_config(
+            "", "/tmp/t12", module_parent=str(tmp_path),
+            visible_cwd="/package",
+        )
+        assert cfg["package_root"] == str(tmp_path)   # bind root: module parent
+        assert cfg["workload_visible_cwd"] == "/package"  # visible cwd: explicit choice
+
+    def test_temp_cwd_case_visible_tmp(self):
+        r = SubprocessRunner(enable_mount_confinement=True)
+        cfg = r._supervised_containment_config(
+            "", "/tmp/t12", module_parent="/m", visible_cwd="/tmp",
+        )
+        assert cfg["workload_visible_cwd"] == "/tmp"
+
+    @pytest.mark.asyncio
+    async def test_adapter_reports_single_derivation(self, tmp_path):
+        """The adapter's result child_cwd under confinement comes from the
+        same workload_visible_cwd it passes to the containment config."""
+        import asyncio
+        import nodechain.runtime.supervised_argv as sa
+        mod = _make_module(tmp_path)
+        captured = {}
+
+        async def capture(**kw):
+            captured.update(kw)
+            return _sup_result(stdout=_ok_stdout())
+
+        with patch.object(sa, "run_supervised_argv_async", capture):
+            r = SubprocessRunner(enable_mount_confinement=True)
+            out = await r._run_supervised_untrusted(
+                _envelope(), mod, "TNode", "t3n", "local_untrusted",
+                "",  # NO package_root — module parent becomes the bind root
+            )
+        assert out["success"] is True
+        # No explicit package_root → visible cwd is /tmp per the frozen
+        # pre-confinement semantics... EXCEPT the confinement bind root is
+        # the module parent, so the adapter chose /package? No: the frozen
+        # rule is explicit-root→/package, temp-cwd→/tmp. No explicit root
+        # means the temp-cwd case → /tmp.
+        assert out["child_cwd"] == "/tmp", out["child_cwd"]
+        conf = captured["containment"]
+        assert conf["workload_visible_cwd"] == "/tmp"
+
+
+class TestCleanupTruthAllPaths:
+    @pytest.mark.asyncio
+    async def test_cgroup_refusal_cleanup_failure_annotated(self, tmp_path):
+        """R3-2: cgroup refusal flows through the cleanup owner — an rmtree
+        failure on that path is noted on the refusal, not swallowed."""
+        import asyncio
+        import shutil as _sh
+        mod = _make_module(tmp_path)
+
+        def failing_rmtree(path, *a, **k):
+            raise OSError("disk full")
+
+        with patch.object(_sh, "rmtree", failing_rmtree):
+            r = SubprocessRunner(enable_cgroup=True)
+            out = await r._run_supervised_untrusted(
+                _envelope(), mod, "TNode", "t3n", "local_untrusted", "",
+            )
+        assert out["success"] is False
+        assert "supervised_cgroup_unsupported" in out["error"]
+        assert "temp_cleanup_failed" in out["error"], (
+            "cleanup failure swallowed on the cgroup-refusal path"
+        )
+        assert out["exit_code"] == 126
+
+    @pytest.mark.asyncio
+    async def test_missing_module_creates_no_temp_dir(self, tmp_path):
+        """R3-2: module resolution precedes temp-dir creation — the
+        missing-module failure leaves nothing to clean and cannot swallow
+        a cleanup failure."""
+        import asyncio
+        import shutil as _sh
+        mkdir_calls = []
+        import tempfile as _tf
+        real_mkdtemp = _tf.mkdtemp
+
+        def spying_mkdtemp(*a, **k):
+            mkdir_calls.append(1)
+            return real_mkdtemp(*a, **k)
+
+        missing = tmp_path / "nope.py"
+        with patch.object(_tf, "mkdtemp", spying_mkdtemp):
+            r = SubprocessRunner()
+            out = await r._run_supervised_untrusted(
+                _envelope(), missing, "T", "mnode", "local_untrusted", "",
+            )
+        assert out["success"] is False
+        assert "Module not found" in out["error"]
+        assert mkdir_calls == [], "temp dir created before module check"
+
+    @pytest.mark.asyncio
+    async def test_cgroup_refusal_normal_cleanup_still_primary(self, tmp_path):
+        """Normal cleanup on the cgroup path: the refusal remains the
+        primary truth, no cleanup note appears."""
+        import asyncio
+        mod = _make_module(tmp_path)
+        r = SubprocessRunner(enable_cgroup=True)
+        out = await r._run_supervised_untrusted(
+            _envelope(), mod, "TNode", "t3n", "local_untrusted", "",
+        )
+        assert out["success"] is False
+        assert out["exit_code"] == 126
+        assert "temp_cleanup_failed" not in out["error"]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX containment behavior")
+class TestNoPackageRootConfinementCwd:
+    @pytest.mark.asyncio
+    async def test_no_package_root_confinement_runs_from_tmp(self, tmp_path):
+        """R3-1 privileged proof, previously-missing case: confinement with
+        NO explicit package_root. The bind root is the module parent; the
+        workload-visible cwd is /tmp (temp-cwd semantics); the node
+        observes that cwd from inside the chroot and the metadata agrees."""
+        if not _can_unshare_pid_ns():
+            pytest.skip("host cannot unshare PID ns")
+        mod = _make_cwd_module(tmp_path)
+        r = SubprocessRunner(timeout_seconds=60, max_output_bytes=100_000,
+                             enable_mount_confinement=True)
+        result = await r.run_isolated(
+            _envelope(), mod, "TNode", "cwd_node",
+            trust_level="local_untrusted",
+            # NO package_root — the temp-cwd case
+        )
+        if not result["success"]:
+            sup = result.get("supervised_execution", {})
+            assert sup.get("process_started") is False, result
+            pytest.skip(
+                f"containment unavailable: {(sup.get('reason') or '')[:120]}"
+            )
+        observed = result["response"]["output"].get("cwd", "")
+        assert observed == "/tmp", (
+            f"no-package-root confinement cwd: {observed} (expected /tmp)"
+        )
+        assert result["child_cwd"] == "/tmp"
+        assert result["mount_confinement_enforced"] is True

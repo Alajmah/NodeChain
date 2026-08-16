@@ -1798,25 +1798,31 @@ def main():
 
         # T3 (H0.2 review fix): confinement chroots into temp_root and
         # chdir("/")s, discarding the earlier workload_cwd. Re-establish the
-        # WORKLOAD-VISIBLE cwd before exec authority is crossed: /package
-        # when a confinement package root exists (the bind the workload's
-        # module and fs-policy root live at), else /tmp (the isolated temp
-        # the confinement primitive also creates inside the root). Host
-        # paths are never restored inside the chroot.
+        # WORKLOAD-VISIBLE cwd before exec authority is crossed. The value
+        # comes from the containment config's workload_visible_cwd — the
+        # SAME single derivation the adapter reports as child_cwd metadata
+        # (explicit package root → /package; temp-cwd case → /tmp; the
+        # confinement primitive creates both inside the root). Host paths
+        # are never restored inside the chroot; a missing value fails
+        # closed rather than guessing. Failures join the containment
+        # enforcement_failed family (this block runs in the post-TRACEME
+        # region, where bootstrap_failed is structurally forbidden).
         if _containment.get("mount_confinement") and _enf.get("mount_confinement_enforced"):
-            _visible_cwd = "/package" if _containment.get("package_root") else "/tmp"
-            try:
-                _os.chdir(_visible_cwd)
-                _enf["workload_cwd_visible"] = _visible_cwd
-            except OSError as _cwd_err:
-                _emit_meta(metadata_fd, {{
-                    "type": _META_BOOTSTRAP_FAILED,
-                    "stage": "containment",
-                    "reason": f"workload_cwd_reestablish_failed: {{_cwd_err}}",
-                }})
-                _sys.stderr.write(
-                    f"bootstrap: chdir({{_visible_cwd}}) after confinement failed: {{_cwd_err}}\\n")
-                _os._exit(126)
+            _visible_cwd = _containment.get("workload_visible_cwd")
+            if not isinstance(_visible_cwd, str) or _visible_cwd not in ("/package", "/tmp"):
+                _enf["workload_visible_cwd_error"] = (
+                    "workload_visible_cwd_absent_or_invalid"
+                )
+                _failed.append("workload_visible_cwd")
+            else:
+                try:
+                    _os.chdir(_visible_cwd)
+                    _enf["workload_cwd_visible"] = _visible_cwd
+                except OSError as _cwd_err:
+                    _enf["workload_visible_cwd_error"] = (
+                        f"workload_cwd_reestablish_failed: {{_cwd_err}}"
+                    )
+                    _failed.append("workload_visible_cwd")
 
         # Procfs isolation runs AFTER mount confinement: confinement
         # creates a fresh mount namespace and chroot, so an earlier procfs

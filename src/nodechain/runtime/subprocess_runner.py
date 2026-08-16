@@ -1013,6 +1013,7 @@ main()
     def _supervised_containment_config(
         self, package_root: str, temp_dir: str, *,
         module_parent: str = "", interpreter_libdir: str = "",
+        visible_cwd: str = "",
         enable_seccomp: bool = False,
     ) -> dict[str, Any] | None:
         """T3 (H0.2): build the requested-containment config for the supervisor.
@@ -1041,6 +1042,11 @@ main()
             cfg["temp_dir"] = temp_dir
             if interpreter_libdir:
                 cfg["interpreter_libdir"] = interpreter_libdir
+            # The workload-visible post-chroot cwd the bootstrap chdirs
+            # to — the SAME value the adapter reports as child_cwd, so
+            # execution truth and metadata can never disagree.
+            if visible_cwd:
+                cfg["workload_visible_cwd"] = visible_cwd
         if self.enable_procfs_isolation:
             cfg["procfs_isolation"] = True
         if enable_seccomp:
@@ -1102,14 +1108,12 @@ main()
 
         result: dict[str, Any] | None = None
         start = time.monotonic()
-        temp_dir = tempfile.mkdtemp(prefix="nodechain_child_")
-        # Resolve the module path BEFORE computing the workload cwd: the
-        # child runs with cwd = package_root or the isolated temp dir, so a
-        # relative module path would resolve against the wrong directory
-        # (the legacy route resolved before changing cwd too).
+        # Resolve and check the module BEFORE creating any preparation
+        # resource (legacy pre-spawn behavior): a missing module fails with
+        # no temp directory to clean up, so the cleanup-truth owner below
+        # has nothing to swallow.
         module_path = Path(module_path).resolve()
         if not module_path.exists():
-            shutil.rmtree(temp_dir, ignore_errors=True)
             return {
                 "success": False,
                 "error": f"Module not found: {module_path}",
@@ -1120,6 +1124,7 @@ main()
                 "child_cwd": package_root if package_root else "",
                 "temp_dir_isolated": False,
             }
+        temp_dir = tempfile.mkdtemp(prefix="nodechain_child_")
         child_cwd = package_root if package_root else temp_dir
         workload_module_path = str(module_path)
         # Filesystem-policy root for the child enforcers: under supervisor-
@@ -1127,11 +1132,20 @@ main()
         # chrooted prefix, so the child policy must use the workload-visible
         # root — the host path is only for the bootstrap's bind mount.
         workload_fs_root = package_root
+        # ONE derivation of the workload-visible post-confinement cwd,
+        # consumed by BOTH the bootstrap chdir and the returned child_cwd
+        # metadata (they can never disagree). Original pre-confinement
+        # semantics: explicit package root → /package; temp-cwd case → /tmp.
+        workload_visible_cwd = ""
+        if self.enable_mount_confinement:
+            workload_visible_cwd = "/package" if package_root else "/tmp"
         try:
             # cgroup accounting/limits: no supervised owner — fail closed
             # BEFORE any start, with an explicit reason (frozen §3).
+            # Assigned into `result` (NOT returned from inside the try) so
+            # the cleanup-truth finally can annotate a cleanup failure.
             if self._cgroup_requested():
-                return {
+                result = {
                     "success": False,
                     "error": (
                         "supervised_cgroup_unsupported: cgroup "
@@ -1148,6 +1162,7 @@ main()
                     "cgroup_limits_requested": True,
                     "cgroup_limits_enforced": False,
                 }
+                return result
 
             config = {
                 "trust_level": trust_level,
@@ -1207,6 +1222,7 @@ main()
                 package_root, temp_dir,
                 module_parent=str(module_path.parent),
                 interpreter_libdir=interpreter_libdir,
+                visible_cwd=workload_visible_cwd,
                 enable_seccomp=enable_seccomp,
             )
 
@@ -1222,15 +1238,14 @@ main()
                 containment=containment,
             )
             elapsed = int((time.monotonic() - start) * 1000)
-            # Under confinement the bootstrap re-establishes the
-            # workload-visible cwd after the chroot — child_cwd metadata
-            # must report where the workload ACTUALLY runs, not the host
-            # path it can no longer see.
-            result_cwd = child_cwd
-            if self.enable_mount_confinement:
-                result_cwd = "/package" if package_root else "/tmp"
+            # Under confinement the bootstrap chdirs to the SAME
+            # workload_visible_cwd derived above — child_cwd metadata
+            # reports where the workload ACTUALLY runs, never a value the
+            # bootstrap disagrees with.
             result = self._translate_supervised_result(
-                sup, child_cwd=result_cwd, duration_ms=elapsed,
+                sup,
+                child_cwd=(workload_visible_cwd or child_cwd),
+                duration_ms=elapsed,
             )
         finally:
             # Preparation cleanup truth (frozen §4): a failed temp-dir
