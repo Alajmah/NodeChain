@@ -1782,14 +1782,24 @@ def main():
                         _vr = "/".join(_parts[:_parts.index("bin")])
                         if _vr and _os.path.isdir(_vr):
                             _extra.append((_vr, _vr))
+                # T3 read-only containment contract: the package bind and
+                # every runtime extra mount are remounted read-only inside
+                # the primitive; /tmp stays writable. Any required remount
+                # that cannot be established makes the primitive return
+                # not-enforced → this block fails confinement (fail closed
+                # before workload exec).
+                _ro = ["/package"]
+                _ro.extend(_t for _s, _t in _extra)
                 _cr = _amc(
                     package_root=_containment.get("package_root", "/"),
                     temp_dir=_containment.get("temp_dir", "/tmp"),
                     extra_mounts=_extra,
+                    read_only_targets=_ro,
                 )
                 if isinstance(_cr, dict) and _cr.get("mount_confinement_enforced"):
                     _enf["mount_confinement_enforced"] = True
                     _enf["allowed_mounts"] = _cr.get("allowed_mounts", [])
+                    _enf["read_only_mounts"] = _cr.get("read_only_mounts", [])
                 else:
                     _failed.append("mount_confinement")
             except Exception as _e:

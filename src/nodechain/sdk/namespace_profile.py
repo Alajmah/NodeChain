@@ -289,6 +289,7 @@ def apply_mount_confinement(
     workspace_src: str | None = None,
     workspace_target: str = "/workspace",
     extra_mounts: list[tuple[str, str]] | None = None,
+    read_only_targets: list[str] | set[str] | None = None,
 ) -> dict:
     """Create mount namespace with chroot-based filesystem confinement.
 
@@ -296,6 +297,10 @@ def apply_mount_confinement(
     v1.6.0 (v2.76): optional workspace bind mount for command-execution path.
     v1.6.1 (v2.77): optional extra_mounts for argv-binary visibility (e.g.
                     /usr, /lib so the python interpreter is reachable in chroot).
+    v1.6.2 (H0.2/T3): optional read_only_targets — in-chroot mount names
+                    that MUST be bind-remounted read-only before chroot.
+                    A requested name that was not mounted, or a remount the
+                    kernel refuses, aborts confinement (fail closed).
 
     This is stronger than apply_mount_namespace() — it restricts the
     child's filesystem view to only allowed directories.
@@ -312,6 +317,10 @@ def apply_mount_confinement(
       7. (v2.77) For each (src, target) in extra_mounts, bind-mount
          src → temp_root/target BEFORE chroot. Used to make argv binaries
          (e.g. /usr/bin/python3) and their shared libs reachable post-chroot.
+      7b. (v1.6.2) For each name in read_only_targets, remount that bind
+         MS_REMOUNT|MS_BIND|MS_RDONLY BEFORE chroot. /tmp stays writable
+         unless explicitly listed. A read-only requirement that cannot be
+         established makes the whole confinement fail closed.
       8. chroot to temp_root
       9. chdir("/")
 
@@ -338,6 +347,7 @@ def apply_mount_confinement(
       allowed_mounts: list[str]
       chrooted_module_prefix: str (e.g. "/package")
       chrooted_workspace_prefix: str (e.g. "/workspace", empty unless workspace_src given)
+      read_only_mounts: list[str] (in-chroot names remounted read-only)
       mount_confinement_error: str
     """
     result = {
@@ -347,6 +357,7 @@ def apply_mount_confinement(
         "allowed_mounts": [],
         "chrooted_module_prefix": "",
         "chrooted_workspace_prefix": "",
+        "read_only_mounts": [],
         "mount_confinement_error": "",
     }
 
@@ -356,6 +367,8 @@ def apply_mount_confinement(
 
     try:
         MS_BIND = 0x1000
+        MS_RDONLY = 0x1
+        MS_REMOUNT = 0x20
         MS_PRIVATE = 0x40000
         MS_REC = 0x40000
 
@@ -380,6 +393,8 @@ def apply_mount_confinement(
         os.makedirs(tmp_mnt, exist_ok=True)
         result["temp_root_created"] = True
         result["temp_root_path"] = temp_root
+        # In-chroot name → pre-chroot mountpoint, for read-only remounts.
+        mount_points: dict[str, str] = {}
 
         # Step 3: Bind-mount package root
         pkg_abs = os.path.abspath(package_root)
@@ -389,6 +404,7 @@ def apply_mount_confinement(
             result["mount_confinement_error"] = f"bind mount package failed: errno={errno}"
             return result
         result["allowed_mounts"].append("/package")
+        mount_points["/package"] = pkg_mnt
 
         # Step 4: Bind-mount temp dir
         ret = libc.mount(os.path.abspath(temp_dir).encode(), tmp_mnt.encode(), None, MS_BIND, None)
@@ -396,6 +412,7 @@ def apply_mount_confinement(
             result["mount_confinement_error"] = "bind mount temp failed"
             return result
         result["allowed_mounts"].append("/tmp")
+        mount_points["/tmp"] = tmp_mnt
 
         # Step 5 (v2.76): Bind-mount workspace BEFORE chroot, if requested.
         # The mount source must be resolved against the pre-chroot root, so this
@@ -414,6 +431,7 @@ def apply_mount_confinement(
                 )
                 return result
             result["allowed_mounts"].append(f"/{ws_target_name}")
+            mount_points[f"/{ws_target_name}"] = ws_mnt
 
         # Step 5b (v2.77): extra bind mounts BEFORE chroot, if requested.
         # Used to make argv binaries (python interpreter) and their shared
@@ -437,6 +455,32 @@ def apply_mount_confinement(
                     )
                     return result
                 result["allowed_mounts"].append(f"/{tgt_name}")
+                mount_points[f"/{tgt_name}"] = mnt
+
+        # Step 5c (v1.6.2): required read-only bind remounts BEFORE chroot.
+        # A read-only requirement is a containment contract, not a
+        # preference: a requested name that was never mounted, or a remount
+        # the kernel refuses, aborts confinement entirely (enforced stays
+        # False — the caller fails closed before workload exec).
+        if read_only_targets:
+            ro_done: list[str] = []
+            for t in dict.fromkeys(str(x) for x in read_only_targets):
+                name = "/" + t.strip("/")
+                if not name.strip("/") or name not in mount_points:
+                    result["mount_confinement_error"] = (
+                        f"read_only target not mounted: {t}"
+                    )
+                    return result
+                ret = libc.mount(None, mount_points[name].encode(), None,
+                                 MS_BIND | MS_REMOUNT | MS_RDONLY, None)
+                if ret != 0:
+                    errno = ctypes.get_errno()
+                    result["mount_confinement_error"] = (
+                        f"read-only remount failed for {name}: errno={errno}"
+                    )
+                    return result
+                ro_done.append(name)
+            result["read_only_mounts"] = sorted(ro_done)
 
         # Step 6: chroot to temp root
         ret = libc.chroot(temp_root.encode())

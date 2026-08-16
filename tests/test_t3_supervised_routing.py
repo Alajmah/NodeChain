@@ -711,16 +711,23 @@ class _FakeRunner:
 def _can_unshare_pid_ns() -> bool:
     if os.name != "posix":
         return False
+    # Probe in a SUBPROCESS: an in-process unshare(CLONE_NEWPID) moves the
+    # pytest process into a new PID ns for future children, after which the
+    # supervised launcher's outer-/proc topology proof can no longer resolve
+    # the launcher's own pid (it lives only in the invisible child ns). The
+    # sacrificial probe process keeps the test process unpoisoned.
+    import subprocess as _sp
+    probe = (
+        "import ctypes, sys\n"
+        "libc = ctypes.CDLL(None, use_errno=True)\n"
+        "rc = libc.unshare(0x20000000)\n"
+        "sys.exit(0 if rc == 0 else 1)\n"
+    )
     try:
-        import ctypes
-        libc = ctypes.CDLL(None, use_errno=True)
-        rc = libc.unshare(0x20000000)  # CLONE_NEWPID
-        if rc == 0:
-            # We now live in a new PID ns inside the test process — harmless
-            # for a short-lived probe but disorienting; fork a probe instead
-            # is cleaner. Accept the current behavior: the probe succeeded.
-            return True
-        return False
+        return _sp.run(
+            [sys.executable, "-c", probe],
+            capture_output=True, timeout=30,
+        ).returncode == 0
     except Exception:
         return False
 
@@ -1328,3 +1335,239 @@ class TestNoPackageRootConfinementCwd:
         )
         assert result["child_cwd"] == "/tmp"
         assert result["mount_confinement_enforced"] is True
+
+
+# ---------------------------------------------------------------------------
+# 13. Fourth review round (exact-head Codex findings) — read-only T3 bind
+#     mounts + parent-resolved package_root
+# ---------------------------------------------------------------------------
+
+
+class TestReadOnlyConfinementWiring:
+    """R4-1: the T3 confinement contract requires /package and every runtime
+    extra mount to be bind-remounted read-only; /tmp stays writable; a
+    remount that cannot be established fails confinement closed."""
+
+    def test_mount_confinement_signature_has_read_only_targets(self):
+        import inspect
+        from nodechain.sdk.namespace_profile import apply_mount_confinement
+        sig = inspect.signature(apply_mount_confinement)
+        assert "read_only_targets" in sig.parameters
+        assert sig.parameters["read_only_targets"].default is None
+
+    def test_bootstrap_requests_read_only_package_and_extras(self):
+        from nodechain.runtime.exec_supervisor import _build_bootstrap_script
+        src = _build_bootstrap_script()
+        # The RO list starts at /package and covers exactly the extras;
+        # /tmp is never added (it stays writable by contract).
+        assert '_ro = ["/package"]' in src
+        assert "_ro.extend(_t for _s, _t in _extra)" in src
+        assert "read_only_targets=_ro" in src
+        # Enforcement evidence carries the remounted list.
+        assert '_enf["read_only_mounts"]' in src
+
+    def test_translator_propagates_read_only_evidence(self):
+        out = _R._translate_supervised_result(
+            _sup_result(
+                stdout=_ok_stdout(),
+                sandbox_metadata={
+                    "mount_confinement_enforced": True,
+                    "read_only_mounts": ["/package", "/usr"],
+                },
+            ),
+            child_cwd="/package", duration_ms=2,
+        )
+        assert out["success"] is True
+        assert out["mount_confinement_enforced"] is True
+        assert out["read_only_mounts"] == ["/package", "/usr"]
+        # Absent evidence stays empty — never synthesized.
+        out2 = _R._translate_supervised_result(
+            _sup_result(stdout=_ok_stdout()), child_cwd="/w", duration_ms=2,
+        )
+        assert out2["read_only_mounts"] == []
+
+    @pytest.mark.asyncio
+    async def test_adapter_resolves_relative_package_root(self, tmp_path,
+                                                           monkeypatch):
+        """R4-2: a relative package_root is resolved ONCE in the parent
+        (legacy subprocess-cwd semantics); workload cwd, containment config
+        and metadata all use that single absolute host value."""
+        pkg = tmp_path / "rel_pkg"
+        pkg.mkdir()
+        mod = _make_module(pkg)
+        monkeypatch.chdir(tmp_path)
+        captured = {}
+
+        async def capture(**kw):
+            captured.update(kw)
+            return _sup_result(stdout=_ok_stdout())
+
+        import nodechain.runtime.supervised_argv as sa
+        with patch.object(sa, "run_supervised_argv_async", capture):
+            r = SubprocessRunner(enable_mount_confinement=True)
+            out = await r._run_supervised_untrusted(
+                _envelope(), mod, "TNode", "rel_root", "local_untrusted",
+                "rel_pkg",
+            )
+        expected = str(pkg.resolve())
+        assert out["success"] is True
+        assert captured["workload_cwd"] == expected, (
+            "relative package_root reached the workload cwd unresolved"
+        )
+        conf = captured["containment"]
+        assert conf["package_root"] == expected
+        assert conf["workload_visible_cwd"] == "/package"
+        assert out["child_cwd"] == "/package"
+
+
+def _make_ro_probe_module(tmp_path: Path) -> Path:
+    """A plain confined node for the e2e read-only proof. Untrusted nodes
+    run under FilesystemPolicy.NONE (deny-all file I/O at the policy
+    layer), so in-node write probes prove nothing about the kernel mount —
+    the kernel-level EROFS/writable-tmp proofs live in the sacrificial
+    primitive test. What this node proves by SUCCEEDING: the read-only
+    confinement configuration still executes a real workload, and the
+    host package files are untouched."""
+    return _make_module(tmp_path)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX containment behavior")
+class TestPrivilegedReadOnlyProofs:
+    @pytest.mark.asyncio
+    async def test_package_read_only_tmp_writable(self, tmp_path):
+        """R4-1 privileged e2e proof: a real confined run with the T3
+        read-only contract EXECUTES a workload successfully, reports
+        truthful read-only evidence, and leaves the host package files
+        untouched. (Kernel-level EROFS + writable-/tmp proofs against
+        private fixtures are in the primitive test below — untrusted nodes
+        are deny-all at the policy layer, so in-node probes see only the
+        policy, never the mount.)"""
+        if not _can_unshare_pid_ns():
+            pytest.skip("host cannot unshare PID ns")
+        mod = _make_ro_probe_module(tmp_path)
+        before = mod.read_bytes()
+        r = SubprocessRunner(timeout_seconds=60, max_output_bytes=100_000,
+                             enable_mount_confinement=True)
+        result = await r.run_isolated(
+            _envelope(), mod, "TNode", "ro_node",
+            trust_level="local_untrusted", package_root=str(tmp_path),
+        )
+        if not result["success"]:
+            sup = result.get("supervised_execution", {})
+            if sup.get("process_started"):
+                pytest.fail(f"node failed under confinement: {result}")
+            pytest.skip(
+                f"containment unavailable: {(sup.get('reason') or '')[:120]}"
+            )
+        assert result["response"]["output"] == {"ran": True}
+        assert result["mount_confinement_enforced"] is True
+        assert "/package" in result["read_only_mounts"], result
+        assert mod.read_bytes() == before, "host package file was modified"
+
+    def test_ro_extra_mount_cannot_modify_host_source(self, tmp_path):
+        """R4-1 primitive proof in a sacrificial subprocess (the call
+        chroots its caller): a read-only extra bind denies writes with
+        EROFS and the host source stays untouched; a required-RO target
+        that was never mounted fails confinement closed."""
+        if not _can_unshare_pid_ns():
+            pytest.skip("host cannot unshare PID ns")
+        pkg = tmp_path / "probe_pkg"
+        pkg.mkdir()
+        (pkg / "mod.py").write_text("x = 1\n", encoding="utf-8")
+        fixture = tmp_path / "ro_fixture"
+        fixture.mkdir()
+        sentinel = fixture / "sentinel.txt"
+        sentinel.write_text("original\n", encoding="utf-8")
+        fixname = fixture.name
+
+        child = (
+            "import json, os, sys, tempfile\n"
+            "from nodechain.sdk.namespace_profile import apply_mount_confinement\n"
+            "out = {}\n"
+            "tmpa = tempfile.mkdtemp(prefix='ro_a_')\n"
+            "a = apply_mount_confinement(package_root=sys.argv[1], temp_dir=tmpa,\n"
+            "                            read_only_targets=['/never_mounted'])\n"
+            "out['fail_closed'] = (\n"
+            "    not a.get('mount_confinement_enforced')\n"
+            "    and 'read_only target not mounted' in a.get('mount_confinement_error', ''))\n"
+            "if not out['fail_closed']:\n"
+            "    print(json.dumps(out)); sys.exit(0)\n"
+            "tmpb = tempfile.mkdtemp(prefix='ro_b_')\n"
+            "b = apply_mount_confinement(package_root=sys.argv[1], temp_dir=tmpb,\n"
+            "                            extra_mounts=[(sys.argv[2], sys.argv[3])],\n"
+            "                            read_only_targets=['/package', '/' + sys.argv[3]])\n"
+            "if not b.get('mount_confinement_enforced'):\n"
+            "    out['enforced'] = False\n"
+            "    out['error'] = b.get('mount_confinement_error', '')\n"
+            "    print(json.dumps(out)); sys.exit(0)\n"
+            "out['enforced'] = True\n"
+            "out['ro_mounts'] = b.get('read_only_mounts', [])\n"
+            "try:\n"
+            "    fd = os.open('/' + sys.argv[3] + '/sentinel.txt', os.O_WRONLY)\n"
+            "    os.write(fd, b'X'); os.close(fd)\n"
+            "    out['write'] = 'ALLOWED'\n"
+            "except OSError as e:\n"
+            "    out['write'] = 'DENIED'\n"
+            "    out['errno'] = e.errno\n"
+            "try:\n"
+            "    fd = os.open('/tmp/ro_probe_w.txt',\n"
+            "                 os.O_WRONLY | os.O_CREAT, 0o600)\n"
+            "    os.write(fd, b'w'); os.close(fd)\n"
+            "    out['tmp_write'] = 'ALLOWED'\n"
+            "except OSError as e:\n"
+            "    out['tmp_write'] = 'DENIED'\n"
+            "    out['tmp_errno'] = e.errno\n"
+            "print(json.dumps(out))\n"
+        )
+        import subprocess as _sp
+        proc = _sp.run(
+            [sys.executable, "-c", child,
+             str(pkg), str(fixture), fixname],
+            capture_output=True, text=True, timeout=60,
+        )
+        import json as _json
+        report = _json.loads(proc.stdout.strip().splitlines()[-1])
+        assert report.get("fail_closed") is True, (
+            "required-RO target missing did not fail confinement closed"
+        )
+        assert report.get("enforced") is True, report
+        assert report.get("write") == "DENIED", report
+        import errno as _errno
+        assert report.get("errno") == _errno.EROFS, report
+        assert report.get("tmp_write") == "ALLOWED", (
+            f"/tmp is not writable inside the confinement: {report}"
+        )
+        assert sorted(report.get("ro_mounts", [])) == \
+            sorted(["/package", f"/{fixname}"]), report
+        assert sentinel.read_text(encoding="utf-8") == "original\n", (
+            "host fixture source was modified through the read-only bind"
+        )
+
+    @pytest.mark.asyncio
+    async def test_relative_package_root_runs_confined(self, tmp_path,
+                                                       monkeypatch):
+        """R4-2 privileged proof: a REAL run with a relative package_root
+        executes successfully, the workload cwd is /package, and the
+        confinement evidence (including the read-only list) is truthful."""
+        if not _can_unshare_pid_ns():
+            pytest.skip("host cannot unshare PID ns")
+        pkg = tmp_path / "rel_pkg"
+        pkg.mkdir()
+        mod = _make_module(pkg)
+        monkeypatch.chdir(tmp_path)
+        r = SubprocessRunner(timeout_seconds=60, max_output_bytes=100_000,
+                             enable_mount_confinement=True)
+        result = await r.run_isolated(
+            _envelope(), mod, "TNode", "rel_root_node",
+            trust_level="local_untrusted", package_root="rel_pkg",
+        )
+        if not result["success"]:
+            sup = result.get("supervised_execution", {})
+            assert sup.get("process_started") is False, result
+            pytest.skip(
+                f"containment unavailable: {(sup.get('reason') or '')[:120]}"
+            )
+        assert result["response"]["output"] == {"ran": True}
+        assert result["child_cwd"] == "/package"
+        assert result["mount_confinement_enforced"] is True
+        assert "/package" in result["read_only_mounts"], result

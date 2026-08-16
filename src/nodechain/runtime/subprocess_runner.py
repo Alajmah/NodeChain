@@ -1113,6 +1113,15 @@ main()
         # no temp directory to clean up, so the cleanup-truth owner below
         # has nothing to swallow.
         module_path = Path(module_path).resolve()
+        # Resolve package_root ONCE in the parent, against the parent's cwd
+        # (legacy subprocess-cwd semantics). Every supervised consumer —
+        # workload cwd, payload/config, containment configuration — uses
+        # this single absolute host value; the confinement primitive later
+        # runs abspath() in the child AFTER chdir, so a relative value
+        # would resolve against the wrong directory there. The
+        # workload-visible confined form remains /package.
+        if package_root:
+            package_root = str(Path(package_root).resolve())
         if not module_path.exists():
             return {
                 "success": False,
@@ -1469,6 +1478,14 @@ main()
             "mount_confinement_enforced", "procfs_namespace_view_enforced",
         ):
             result[flag] = bool(ev_meta.get(flag, False))
+        # Read-only bind evidence rides the same trusted channel: the list
+        # of in-chroot mounts the confinement primitive remounted read-only.
+        # Empty when confinement was not requested or not enforced — never
+        # synthesized.
+        _ro_mounts = ev_meta.get("read_only_mounts")
+        result["read_only_mounts"] = (
+            list(_ro_mounts) if isinstance(_ro_mounts, list) else []
+        )
         # The PID namespace is structural to the supervised topology and is
         # proven by the bootstrap's trusted verification record — derived
         # from evidence, never synthesized.
