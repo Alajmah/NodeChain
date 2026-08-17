@@ -326,9 +326,12 @@ class TestAdapter:
                 _envelope(), mod, "TNode", "t3n", "local_untrusted", "",
             )
         assert out["success"] is True
-        # argv: python -c <script>
+        # argv: python -I -c <script> — isolated startup: no cwd on
+        # sys.path, PYTHON* env ignored, no user site (R7 startup
+        # boundary), then the trusted child script.
         assert captured["argv"][0] == sys.executable
-        assert captured["argv"][1] == "-c"
+        assert captured["argv"][1] == "-I"
+        assert captured["argv"][2] == "-c"
         # payload: {config, envelope}
         payload = json.loads(captured["workload_stdin"].decode())
         assert payload["config"]["trust_level"] == "local_untrusted"
@@ -1894,3 +1897,236 @@ class TestPrivilegedR5Proofs:
         # projection's sandbox_metadata (top-level flags are success-path
         # only by design).
         assert sup["sandbox_metadata"].get("seccomp_enforced") is True, sup
+
+
+# ---------------------------------------------------------------------------
+# 16. R7 security proofs — durable capability boundary + startup isolation
+# ---------------------------------------------------------------------------
+
+
+def _make_escape_probe_module(tmp_path: Path) -> Path:
+    """A sacrificial workload attempting the classic second-chroot escape:
+    chroot to a fresh directory then chdir("..") to walk out of the
+    original root. Reports the raw syscall results (os.chroot is outside
+    every Python enforcer — only the kernel capability boundary can stop
+    it)."""
+    mod = tmp_path / "escape_probe_node.py"
+    mod.write_text(
+        "import os\n"
+        "from nodechain.core.envelope import EnvelopeResponse\n"
+        "class TNode:\n"
+        "    async def execute(self, envelope):\n"
+        "        probes = {}\n"
+        "        try:\n"
+        "            os.mkdir('/tmp/escape_cell')\n"
+        "            os.chroot('/tmp/escape_cell')\n"
+        "            for _ in range(64):\n"
+        "                os.chdir('..')\n"
+        "            probes['chroot_escape'] = os.getcwd()\n"
+        "        except OSError as e:\n"
+        "            probes['chroot_escape'] = 'DENIED:%s' % (e.errno,)\n"
+        "        except BaseException as e:\n"
+        "            probes['chroot_escape'] = 'DENIED:%s' % type(e).__name__\n"
+        "        return EnvelopeResponse(\n"
+        "            request_envelope_id=envelope.envelope_id,\n"
+        "            run_id=envelope.run_id, chain_id=envelope.chain_id,\n"
+        "            node_id=envelope.node_id, step_id=envelope.step_id,\n"
+        "            output=probes,\n"
+        "            output_type='dict',\n"
+        "            metadata={'child_policy_enforced': True},\n"
+        "        )\n",
+        encoding="utf-8",
+    )
+    return mod
+
+
+def _make_sitecustomize_module(pkg: Path) -> Path:
+    """A node package whose root also contains an adversarial
+    sitecustomize.py (the pre-enforcement startup injection vector). The
+    node reports whether the hook ran (env marker + marker file)."""
+    (pkg / "sitecustomize.py").write_text(
+        "import os\n"
+        "os.environ['T3_PWNED_SITECUSTOMIZE'] = '1'\n"
+        "try:\n"
+        "    with open('/tmp/t3_pwned_marker', 'w') as f:\n"
+        "        f.write('x')\n"
+        "except OSError:\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
+    mod = pkg / "startup_node.py"
+    mod.write_text(
+        "import os\n"
+        "from nodechain.core.envelope import EnvelopeResponse\n"
+        "class TNode:\n"
+        "    async def execute(self, envelope):\n"
+        "        marker_file = False\n"
+        "        try:\n"
+        "            marker_file = os.path.exists('/tmp/t3_pwned_marker')\n"
+        "        except OSError:\n"
+        "            pass\n"
+        "        return EnvelopeResponse(\n"
+        "            request_envelope_id=envelope.envelope_id,\n"
+        "            run_id=envelope.run_id, chain_id=envelope.chain_id,\n"
+        "            node_id=envelope.node_id, step_id=envelope.step_id,\n"
+        "            output={\n"
+        "                'ran': True,\n"
+        "                'pwned_env': os.environ.get(\n"
+        "                    'T3_PWNED_SITECUSTOMIZE', ''),\n"
+        "                'pwned_env2': os.environ.get(\n"
+        "                    'T3_PWNED_PYTHONPATH', ''),\n"
+        "                'pwned_marker_file': marker_file,\n"
+        "            },\n"
+        "            output_type='dict',\n"
+        "            metadata={'child_policy_enforced': True},\n"
+        "        )\n",
+        encoding="utf-8",
+    )
+    return mod
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX containment behavior")
+class TestPrivilegedR7Proofs:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("with_seccomp", [True, False])
+    async def test_second_chroot_escape_kernel_denied(self, tmp_path,
+                                                      with_seccomp):
+        """R7 proof: the classic double-chroot escape is kernel-denied —
+        os.chroot requires CAP_SYS_CHROOT, which the bounding-set drop
+        removed irreversibly across exec. Proven BOTH with requested
+        seccomp and with mount confinement alone (the boundary must not
+        depend on the optional filter)."""
+        if not _can_unshare_pid_ns():
+            pytest.skip("host cannot unshare PID ns")
+        if with_seccomp and not _seccomp_available():
+            pytest.skip("seccomp filter library unavailable")
+        mod = _make_escape_probe_module(tmp_path)
+        r = SubprocessRunner(
+            timeout_seconds=60, max_output_bytes=100_000,
+            enable_mount_confinement=True,
+        )
+        result = await r.run_isolated(
+            _envelope(), mod, "TNode", "escape_node",
+            trust_level="local_untrusted", package_root=str(tmp_path),
+            enable_seccomp=with_seccomp,
+        )
+        if not result["success"]:
+            sup = result.get("supervised_execution", {})
+            assert sup.get("process_started") is False, result
+            pytest.skip(
+                f"containment unavailable: {(sup.get('reason') or '')[:120]}"
+            )
+        out = result["response"]["output"]
+        escape = out.get("chroot_escape", "MISSING")
+        assert escape.startswith("DENIED"), (
+            f"chroot escape was NOT denied: {escape}"
+        )
+        # Trusted boundary evidence from the bootstrap — the capability
+        # drop is what makes the denial kernel-durable (the kernel-level
+        # EPERM is proven directly in the sacrificial probe below).
+        md = result["supervised_execution"]["sandbox_metadata"]
+        assert md.get("capability_boundary_dropped") is True, md
+        assert 18 in md.get("capability_boundary_caps", []), md   # SYS_CHROOT
+        assert 21 in md.get("capability_boundary_caps", []), md   # SYS_ADMIN
+
+    def test_kernel_chroot_denied_after_capdrop(self, tmp_path):
+        """R7 kernel-level proof in a sacrificial subprocess: confinement
+        plus the bootstrap's bounding-set capability drop, then an EXEC
+        (the workload transition), then a raw libc chroot attempt in the
+        post-exec process — refused with EPERM. The bounding set is the
+        regain boundary ACROSS exec (a same-process drop intentionally
+        leaves effective caps in place for the trusted bootstrap's
+        remaining work), so the exec is the load-bearing step."""
+        if not _can_unshare_pid_ns():
+            pytest.skip("host cannot unshare PID ns")
+        pkg = tmp_path / "cap_pkg"
+        pkg.mkdir()
+        (pkg / "m.py").write_text("x = 1\n", encoding="utf-8")
+        stage2 = (
+            "import ctypes, sys\n"
+            "libc = ctypes.CDLL(None, use_errno=True)\n"
+            "ctypes.set_errno(0)\n"
+            "rc = libc.chroot(b'/tmp')\n"
+            "err = ctypes.get_errno()\n"
+            "print('chroot rc=%d errno=%d' % (rc, err))\n"
+            "sys.exit(0 if rc != 0 else 7)\n"
+        )
+        child = (
+            "import ctypes, os, sys, tempfile\n"
+            "from nodechain.sdk.namespace_profile import apply_mount_confinement\n"
+            "tmpd = tempfile.mkdtemp(prefix='cap_')\n"
+            "r = apply_mount_confinement(package_root=sys.argv[1], temp_dir=tmpd,\n"
+            "                            extra_mounts=[(d, d) for d in ('/usr','/lib','/lib64') if os.path.isdir(d)],\n"
+            "                            read_only_targets=['/package','/usr','/lib','/lib64'])\n"
+            "if not r.get('mount_confinement_enforced'):\n"
+            "    print('confinement_failed'); sys.exit(3)\n"
+            "libc = ctypes.CDLL(None, use_errno=True)\n"
+            "dropped = []\n"
+            "for cap in (8, 16, 17, 18, 19, 21, 22, 25, 26, 27, 31, 34, 38, 39, 40):\n"
+            "    ctypes.set_errno(0)\n"
+            "    rc = libc.prctl(24, cap, 0, 0, 0)  # PR_CAPBSET_DROP\n"
+            "    if rc == 0:\n"
+            "        dropped.append(cap)\n"
+            "    elif ctypes.get_errno() != 22:\n"
+            "        print('capdrop_failed'); sys.exit(4)\n"
+            "ok = 18 in dropped and 21 in dropped\n"
+            "import sysconfig\n"
+            "_ld = sysconfig.get_config_var('LIBDIR') or ''\n"
+            "os.execve(sys.executable,\n"
+            "          [sys.executable, '-c', sys.argv[2]],\n"
+            "          {'PATH': '/usr/bin:/bin', 'CAPS_DROPPED': str(ok),\n"
+            "           'LD_LIBRARY_PATH': _ld})\n"
+        )
+        import subprocess as _sp
+        proc = _sp.run(
+            [sys.executable, "-c", child, str(pkg), stage2],
+            capture_output=True, text=True, timeout=60,
+        )
+        assert proc.returncode == 0, (
+            f"sacrificial probe failed: rc={proc.returncode} "
+            f"{proc.stdout.strip()[-200:]}"
+        )
+        out = proc.stdout.strip().splitlines()[-1]
+        assert "errno=1" in out, out        # EPERM from the kernel
+
+    @pytest.mark.asyncio
+    async def test_adversarial_sitecustomize_inert(self, tmp_path,
+                                                   monkeypatch):
+        """R7 proof: an adversarial sitecustomize.py in the untrusted
+        package root AND a malicious startup hook on inherited PYTHONPATH
+        both stay inert (isolated -I startup), while the intended node
+        still executes under the four enforcers."""
+        if not _can_unshare_pid_ns():
+            pytest.skip("host cannot unshare PID ns")
+        pkg = tmp_path / "startup_pkg"
+        pkg.mkdir()
+        mod = _make_sitecustomize_module(pkg)
+        evil_dir = tmp_path / "evil_py"
+        evil_dir.mkdir()
+        (evil_dir / "sitecustomize.py").write_text(
+            "import os\n"
+            "os.environ['T3_PWNED_PYTHONPATH'] = '1'\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("PYTHONPATH", str(evil_dir))
+        r = SubprocessRunner(timeout_seconds=60, max_output_bytes=100_000)
+        result = await r.run_isolated(
+            _envelope(), mod, "TNode", "startup_node",
+            trust_level="local_untrusted", package_root=str(pkg),
+        )
+        if not result["success"]:
+            sup = result.get("supervised_execution", {})
+            assert sup.get("process_started") is False, result
+            pytest.skip(
+                f"supervised topology unavailable: "
+                f"{(sup.get('reason') or '')[:120]}"
+            )
+        out = result["response"]["output"]
+        assert out.get("ran") is True, out
+        assert out.get("pwned_env") == "", (
+            f"package-root sitecustomize executed before enforcement: {out}"
+        )
+        assert out.get("pwned_env2") == "", (
+            f"PYTHONPATH startup hook executed before enforcement: {out}"
+        )
+        assert out.get("pwned_marker_file") is False, out

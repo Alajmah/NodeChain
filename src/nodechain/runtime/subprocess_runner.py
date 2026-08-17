@@ -1275,8 +1275,14 @@ main()
             )
 
             from nodechain.runtime.supervised_argv import run_supervised_argv_async
+            # -I (isolated startup): no cwd/user-site on sys.path and
+            # PYTHON* env vars ignored, so neither an untrusted package's
+            # sitecustomize nor an inherited PYTHONPATH hook can execute
+            # before the trusted child script activates the enforcers.
+            # The child script's own sys.path insertion (for the trusted
+            # SDK) is runtime code and unaffected.
             sup = await run_supervised_argv_async(
-                argv=[sys.executable, "-c", child_script],
+                argv=[sys.executable, "-I", "-c", child_script],
                 workload_stdin=payload,
                 workload_cwd=child_cwd,
                 supervisor_env=supervisor_env,

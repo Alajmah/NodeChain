@@ -1781,6 +1781,22 @@ def main():
                 _enf["mount_namespace_error"] = str(_e)
                 _failed.append("mount_namespace")
 
+        # T3 (H0.2 R7): preload the seccomp binding while the filesystem
+        # view is still the host's. The binding resolves libseccomp via
+        # ctypes.util.find_library, whose ldconfig probe cannot resolve
+        # inside the confinement chroot; once dlopen has mapped the
+        # library, the post-chroot enforcement block reuses the cached
+        # module without re-resolving. Unavailability is still reported
+        # by the enforcement block itself (fail closed).
+        if _containment.get("seccomp"):
+            try:
+                import seccomp as _pre_sec  # noqa: F401
+            except ImportError:
+                try:
+                    import pyseccomp as _pre_sec  # noqa: F401
+                except ImportError:
+                    pass
+
         if _containment.get("mount_confinement"):
             try:
                 from nodechain.sdk.namespace_profile import (
@@ -1910,6 +1926,40 @@ def main():
             except Exception as _e:
                 _enf["seccomp_error"] = str(_e)
                 _failed.append("seccomp")
+
+        # T3 (H0.2 R7): durable capability boundary — all privileged
+        # namespace/mount/procfs transitions are complete. Drop the
+        # boundary-undoing capabilities from the bounding set: for a root
+        # process, post-exec permitted capabilities derive from the
+        # bounding set, so the workload cannot hold or regain them across
+        # exec (second chroot(), remounts, setns). EINVAL means the
+        # capability is already absent from the bounding set (nothing to
+        # drop); any other refusal fails containment closed. The ptrace
+        # exec authority lives in the supervisor process and is not
+        # affected by the workload's capability state.
+        try:
+            import ctypes as _ct
+            _pr_bset_drop = 24
+            _libc_caps = _ct.CDLL(None, use_errno=True)
+            _dropped_caps = []
+            for _cap in (8, 16, 17, 18, 19, 21, 22, 25, 26, 27, 31,
+                         34, 38, 39, 40):
+                _ct.set_errno(0)
+                _rc = _libc_caps.prctl(_pr_bset_drop, _cap, 0, 0, 0)
+                if _rc == 0:
+                    _dropped_caps.append(_cap)
+                elif _ct.get_errno() != 22:
+                    _enf["capability_boundary_error"] = (
+                        "prctl PR_CAPBSET_DROP %d errno=%d"
+                        % (_cap, _ct.get_errno()))
+                    _failed.append("capability_boundary")
+                    break
+            if "capability_boundary" not in _failed:
+                _enf["capability_boundary_dropped"] = True
+                _enf["capability_boundary_caps"] = _dropped_caps
+        except Exception as _e:
+            _enf["capability_boundary_error"] = str(_e)
+            _failed.append("capability_boundary")
 
         if _failed:
             _emit_meta(metadata_fd, {{
