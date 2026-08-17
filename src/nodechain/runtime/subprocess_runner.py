@@ -1133,6 +1133,32 @@ main()
                 "child_cwd": package_root if package_root else "",
                 "temp_dir_isolated": False,
             }
+        # Confinement-root containment check (setup/configuration truth,
+        # BEFORE any preparation resource): under mount confinement the
+        # workload sees the confinement root at /package, so the module
+        # must live inside the root that will be bound. An explicit
+        # package_root that does not contain the resolved module is a
+        # configuration error — fail closed in the parent with no temp
+        # dir to clean, never a ../ workload path, never a widened bind.
+        module_rel: Path | None = None
+        if self.enable_mount_confinement:
+            _conf_root = Path(package_root) if package_root else module_path.parent
+            try:
+                module_rel = module_path.relative_to(_conf_root)
+            except ValueError:
+                return {
+                    "success": False,
+                    "error": (
+                        f"Module outside confinement root: {module_path} "
+                        f"is not under {_conf_root}"
+                    ),
+                    "exit_code": -1,
+                    "isolation_mode": "subprocess",
+                    "duration_ms": int((time.monotonic() - start) * 1000),
+                    "child_policy_enforced": False,
+                    "child_cwd": "",
+                    "temp_dir_isolated": False,
+                }
         temp_dir = tempfile.mkdtemp(prefix="nodechain_child_")
         child_cwd = package_root if package_root else temp_dir
         workload_module_path = str(module_path)
@@ -1187,7 +1213,11 @@ main()
             # supplied — NEVER "/" (that would bind the host root into the
             # chroot and defeat confinement).
             if self.enable_mount_confinement:
-                workload_module_path = "/package/" + Path(module_path).name
+                # module_rel is guaranteed here: the containment check ran
+                # before temp-dir creation. The subtree under the
+                # confinement root is preserved — /pkg/impls/node.py bound
+                # from /pkg is visible as /package/impls/node.py.
+                workload_module_path = "/package/" + module_rel.as_posix()
                 workload_fs_root = "/package"
             config["workload_module_path"] = workload_module_path
             config["workload_fs_root"] = workload_fs_root or None
@@ -1204,6 +1234,15 @@ main()
             # Workload env: the existing secret-filtered semantics with
             # TEMP/TMP/TMPDIR isolation (frozen §4).
             workload_env = self._build_child_env(temp_dir=temp_dir)
+            # Filesystem boundary (T3): under confinement the workload sees
+            # the temp dir only as /tmp (the bind target), so the env must
+            # advertise the workload-visible path. The HOST temp_dir remains
+            # the trusted bootstrap's bind source via the containment
+            # config. Non-confined invocations keep the host-form contract.
+            if self.enable_mount_confinement:
+                workload_env["TEMP"] = "/tmp"
+                workload_env["TMP"] = "/tmp"
+                workload_env["TMPDIR"] = "/tmp"
             # Interpreter library visibility under confinement: the chroot
             # has no ld.so.cache, so the loader never searches non-default
             # dirs like /usr/local/lib where the runtime keeps libpython.

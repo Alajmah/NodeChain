@@ -149,6 +149,14 @@ class NodeInvoker:
                         # start/containment truth rides on success too.
                         if "supervised_execution" in result:
                             response.metadata["supervised_execution"] = result["supervised_execution"]
+                        # T3 (H0.2): supervised seccomp truth — the trusted
+                        # translator owns these on the supervised route (the
+                        # workload deliberately does not). Projected from the
+                        # translated result when present; the legacy
+                        # child-metadata handling above is untouched.
+                        for _sk in ("seccomp_enforced", "seccomp_available"):
+                            if _sk in result:
+                                response.metadata[_sk] = result[_sk]
                         return response, elapsed_ms
                     else:
                         failure_metadata = {
