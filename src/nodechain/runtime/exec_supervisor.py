@@ -717,7 +717,20 @@ def _probe_child_exit(child_pid: int) -> ChildProbeResult:
         result = os.waitid(os.P_PID, child_pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
         if result is None:
             return ChildProbeResult(running=True, exited=False, error=False)
-        return ChildProbeResult(running=False, exited=True, error=False)
+        # A waitid-visible state on a TRACED child may be a ptrace stop,
+        # not death: CLD_TRAPPED/CLD_STOPPED/CLD_CONTINUED mean the
+        # tracee is alive and merely stopped. Only the terminal codes
+        # count as an exit — mistaking a stop for death would abort a
+        # healthy bootstrap before enforcement_verified (the H0.2
+        # seccomp/ptrace failure mode). If the tracee is genuinely stuck
+        # stopped, the bounded reader's deadline stays the honest
+        # arbiter. si_code values are kernel-stable and not exported by
+        # Python's signal module: 1=CLD_EXITED, 2=CLD_KILLED,
+        # 3=CLD_DUMPED, 4=CLD_TRAPPED, 5=CLD_STOPPED, 6=CLD_CONTINUED.
+        _si_code = getattr(result, "si_code", 0)
+        if _si_code in (1, 2, 3):
+            return ChildProbeResult(running=False, exited=True, error=False)
+        return ChildProbeResult(running=False, exited=False, error=False)
     except ChildProcessError:
         return ChildProbeResult(running=False, exited=False, error=True)
     except OSError:
@@ -1570,6 +1583,18 @@ def main():
     metadata_fd = None
     stage = "init"
 
+    # H0.2 seccomp/ptrace fix: transient helper children exit during
+    # containment setup (importing the seccomp binding itself vforks) and
+    # their kernel SIGCHLD would stop this traced process in a ptrace
+    # signal-delivery-stop before enforcement_verified. SIGCHLD is pure
+    # noise to a bootstrap that waits on no children, so block it for the
+    # whole bootstrap and restore the original mask right before the
+    # workload exec — the workload inherits unchanged signal semantics,
+    # and a pending SIGCHLD flushed at restore is forwarded by the
+    # supervisor's stop loop and ignored by default.
+    _orig_sigmask = _signal.pthread_sigmask(
+        _signal.SIG_BLOCK, {{_signal.SIGCHLD}})
+
     try:
         # Read configuration.
         cfg = _read_bounded_config(config_fd, deadline=_time.monotonic() + 30.0)
@@ -1922,6 +1947,10 @@ def main():
 
         # Stop for the supervisor to arm PTRACE_O_TRACEEXEC.
         _os.kill(_os.getpid(), _signal.SIGSTOP)
+
+        # Restore the workload's inherited signal semantics before exec
+        # (SIGCHLD was blocked for bootstrap-noise suppression above).
+        _signal.pthread_sigmask(_signal.SIG_SETMASK, _orig_sigmask)
 
         # Exec the workload (B2).
         argv0 = workload_argv[0] if workload_env else ""

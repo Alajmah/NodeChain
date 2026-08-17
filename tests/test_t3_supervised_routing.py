@@ -1797,20 +1797,12 @@ class TestPrivilegedR5Proofs:
 
     @pytest.mark.asyncio
     async def test_real_seccomp_metadata_reaches_response(self, tmp_path):
-        """R5-3 privileged proof: a REAL seccomp-enabled supervised
-        invocation delivers trusted seccomp truth into
-        EnvelopeResponse.metadata (not inferred, from actual evidence).
-
-        KNOWN LATENT DEFECT (documented, outside H0.2/R5 scope — the
-        bootstrap seccomp block is byte-identical to master's): when a
-        seccomp filter library is actually installed, the supervised
-        bootstrap exits before enforcement_verified (ptrace stop reported
-        as CLD_TRAPPED/si_status SIGCHLD race). No prior qualification
-        environment ever had the library, so this path was never
-        exercisable. Until that topology defect is fixed, the real-run
-        branch here records the fail-closed truth and the metadata
-        contract is proven by the unit test; it must never fake a green
-        enforcement claim."""
+        """R5-3/R6 privileged proof: a REAL seccomp-enabled supervised
+        invocation delivers the full chain — seccomp_available=True →
+        seccomp_enforced=True → enforcement_verified → exec_confirmed →
+        valid response — with the trusted seccomp truth projected into
+        EnvelopeResponse.metadata (never inferred, never from workload
+        JSON)."""
         if not _can_unshare_pid_ns():
             pytest.skip("host cannot unshare PID ns")
         if not _seccomp_available():
@@ -1840,20 +1832,65 @@ class TestPrivilegedR5Proofs:
                               "class_name": "TNode",
                               "enable_seccomp": True},
         )
-        sup = resp.metadata.get("supervised_execution", {})
-        if resp.success is not False:
-            assert resp.metadata.get("seccomp_enforced") is True, (
-                f"trusted seccomp truth absent from response metadata: {sup}"
-            )
-            assert resp.metadata.get("seccomp_available") is True
-            assert sup.get("process_started") is True
-            return
-        # Fail-closed before workload start: the documented latent
-        # topology defect. Started-but-failed would be a NEW anomaly and
-        # fails the test.
-        assert sup.get("process_started") is False, sup
-        pytest.skip(
-            "supervised seccomp enforcement unavailable (latent bootstrap "
-            "topology defect with a loadable filter — see docstring); "
-            "metadata contract proven by the unit test"
+        assert resp.success is not False, resp.metadata
+        assert resp.metadata.get("seccomp_enforced") is True, (
+            f"trusted seccomp truth absent from response metadata: "
+            f"{resp.metadata.get('supervised_execution')}"
         )
+        assert resp.metadata.get("seccomp_available") is True
+        sup = resp.metadata["supervised_execution"]
+        assert sup["process_started"] is True
+        assert sup["sandbox_metadata"].get("seccomp_enforced") is True
+
+    @pytest.mark.asyncio
+    async def test_real_seccomp_denial_kills_fork_node(self, tmp_path):
+        """R6 denial proof: a workload that performs a syscall denied by
+        the REAL installed profile (os.fork — explicitly NOT covered by
+        the Python subprocess enforcer, so only the kernel filter can
+        stop it) terminates through the filter and produces the truthful
+        SIGSYS / seccomp_sigsys_kill classification. Not a mocked
+        result."""
+        if not _can_unshare_pid_ns():
+            pytest.skip("host cannot unshare PID ns")
+        if not _seccomp_available():
+            pytest.skip("seccomp filter library unavailable")
+        mod = tmp_path / "fork_node.py"
+        mod.write_text(
+            "import os\n"
+            "from nodechain.core.envelope import EnvelopeResponse\n"
+            "class TNode:\n"
+            "    async def execute(self, envelope):\n"
+            "        pid = os.fork()  # denied syscall: kernel SIGSYS\n"
+            "        if pid == 0:\n"
+            "            os._exit(0)\n"
+            "        os.waitpid(pid, 0)\n"
+            "        return EnvelopeResponse(\n"
+            "            request_envelope_id=envelope.envelope_id,\n"
+            "            run_id=envelope.run_id, chain_id=envelope.chain_id,\n"
+            "            node_id=envelope.node_id, step_id=envelope.step_id,\n"
+            "            output={'forked': True},\n"
+            "            output_type='dict',\n"
+            "            metadata={'child_policy_enforced': True},\n"
+            "        )\n",
+            encoding="utf-8",
+        )
+        r = SubprocessRunner(timeout_seconds=60, max_output_bytes=100_000)
+        result = await r.run_isolated(
+            _envelope(), mod, "TNode", "fork_node",
+            trust_level="local_untrusted", enable_seccomp=True,
+        )
+        assert result["success"] is False, (
+            f"denied syscall did not terminate the workload: {result}"
+        )
+        assert result["exit_code"] == -31, result
+        assert "SIGSYS" in result["error"], result
+        sup = result["supervised_execution"]
+        assert sup["process_started"] is True, (
+            "the workload must have started (and then been killed by the "
+            f"filter), not failed before start: {sup}"
+        )
+        assert sup["exit_code_interpretation"] == "fail"
+        # On failure rows the trusted seccomp truth lives in the evidence
+        # projection's sandbox_metadata (top-level flags are success-path
+        # only by design).
+        assert sup["sandbox_metadata"].get("seccomp_enforced") is True, sup
