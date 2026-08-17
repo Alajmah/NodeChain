@@ -259,10 +259,17 @@ class TestMountNSEndToEnd:
             package_root=str(Path(echo_path).parent), enable_seccomp=True,
         ))
 
-        # T3.0 safety fence: POSIX untrusted execution refused before spawn
-        assert result["success"] is False
-        assert result["exit_code"] == 126
-        assert result["error"].startswith("supervised_backend_required")
+        # Dual truth (T3 routing): on a host where the supervised topology
+        # runs, mount namespace + requested seccomp are enforced and the
+        # workload executes; elsewhere the run fails closed BEFORE start.
+        if result["success"]:
+            assert result["mount_namespace_enforced"] is True, result
+            assert result["seccomp_enforced"] is True, result
+        else:
+            sup = result.get("supervised_execution", {})
+            assert sup.get("process_started") is False, result
+            assert result["exit_code"] == 126
+            assert result["error"].startswith("supervised execution failed before workload start"), f"expected supervised fail-closed refusal, got: {result.get('error', '')[:200]}"
         return  # Skip original capability assertions on POSIX
 
     @pytest.mark.skipif(platform.system() != "Linux", reason="Linux only")
@@ -291,10 +298,18 @@ class TestMountNSEndToEnd:
             package_root=str(Path(echo_path).parent), enable_seccomp=True,
         ))
 
-        # T3.0 safety fence: POSIX untrusted execution refused before spawn
-        assert result["success"] is False
-        assert result["exit_code"] == 126
-        assert result["error"].startswith("supervised_backend_required")
+        # Dual truth (T3 routing): on a capable host both namespaces plus
+        # requested seccomp are enforced and the workload executes;
+        # elsewhere the run fails closed BEFORE start.
+        if result["success"]:
+            assert result["network_namespace_enforced"] is True, result
+            assert result["mount_namespace_enforced"] is True, result
+            assert result["seccomp_enforced"] is True, result
+        else:
+            sup = result.get("supervised_execution", {})
+            assert sup.get("process_started") is False, result
+            assert result["exit_code"] == 126
+            assert result["error"].startswith("supervised execution failed before workload start"), f"expected supervised fail-closed refusal, got: {result.get('error', '')[:200]}"
         return  # Skip original capability assertions on POSIX
 
 

@@ -144,7 +144,7 @@ _PROTO_ALLOWED_TYPES = frozenset({
 _PROTO_ALLOWED_FIELDS: dict[str, frozenset[str]] = {
     PROTO_SUPERVISOR_STARTED: frozenset({"version", "type"}),
     PROTO_BOOTSTRAP_SPAWNED: frozenset({"version", "type", "pid"}),
-    PROTO_ENFORCEMENT_VERIFIED: frozenset({"version", "type"}),
+    PROTO_ENFORCEMENT_VERIFIED: frozenset({"version", "type", "metadata"}),
     PROTO_EXEC_MONITOR_ARMED: frozenset({"version", "type"}),
     PROTO_EXEC_CONFIRMED: frozenset({"version", "type"}),
     PROTO_WORKLOAD_EXITED: frozenset({"version", "type", "started", "exit_code",
@@ -717,7 +717,20 @@ def _probe_child_exit(child_pid: int) -> ChildProbeResult:
         result = os.waitid(os.P_PID, child_pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
         if result is None:
             return ChildProbeResult(running=True, exited=False, error=False)
-        return ChildProbeResult(running=False, exited=True, error=False)
+        # A waitid-visible state on a TRACED child may be a ptrace stop,
+        # not death: CLD_TRAPPED/CLD_STOPPED/CLD_CONTINUED mean the
+        # tracee is alive and merely stopped. Only the terminal codes
+        # count as an exit — mistaking a stop for death would abort a
+        # healthy bootstrap before enforcement_verified (the H0.2
+        # seccomp/ptrace failure mode). If the tracee is genuinely stuck
+        # stopped, the bounded reader's deadline stays the honest
+        # arbiter. si_code values are kernel-stable and not exported by
+        # Python's signal module: 1=CLD_EXITED, 2=CLD_KILLED,
+        # 3=CLD_DUMPED, 4=CLD_TRAPPED, 5=CLD_STOPPED, 6=CLD_CONTINUED.
+        _si_code = getattr(result, "si_code", 0)
+        if _si_code in (1, 2, 3):
+            return ChildProbeResult(running=False, exited=True, error=False)
+        return ChildProbeResult(running=False, exited=False, error=False)
     except ChildProcessError:
         return ChildProbeResult(running=False, exited=False, error=True)
     except OSError:
@@ -1438,6 +1451,24 @@ async def read_bounded_protocol_async(
 # Bootstrap script template
 # ---------------------------------------------------------------------------
 
+def _nodechain_root() -> str:
+    """T3 (H0.2): the nodechain package parent directory for B1 imports.
+
+    The bootstrap child (B1) execve's with a minimal PATH-only environment;
+    to import the trusted containment primitives (namespace_profile,
+    seccomp_profile) it needs the nodechain source root on sys.path. The
+    supervisor process itself was launched via ``-m nodechain...`` so the
+    package location is resolvable here and embedded into the generated
+    bootstrap script.
+    """
+    try:
+        from pathlib import Path as _P
+        import nodechain as _nc
+        return str(_P(_nc.__file__).resolve().parent.parent)
+    except Exception:
+        return ""
+
+
 def _build_bootstrap_script() -> str:
     """Generate the Python bootstrap script.
 
@@ -1551,6 +1582,18 @@ def main():
     config_fd = 0
     metadata_fd = None
     stage = "init"
+
+    # H0.2 seccomp/ptrace fix: transient helper children exit during
+    # containment setup (importing the seccomp binding itself vforks) and
+    # their kernel SIGCHLD would stop this traced process in a ptrace
+    # signal-delivery-stop before enforcement_verified. SIGCHLD is pure
+    # noise to a bootstrap that waits on no children, so block it for the
+    # whole bootstrap and restore the original mask right before the
+    # workload exec — the workload inherits unchanged signal semantics,
+    # and a pending SIGCHLD flushed at restore is forwarded by the
+    # supervisor's stop loop and ignored by default.
+    _orig_sigmask = _signal.pthread_sigmask(
+        _signal.SIG_BLOCK, {{_signal.SIGCHLD}})
 
     try:
         # Read configuration.
@@ -1701,8 +1744,324 @@ def main():
             _sys.stderr.write(f"bootstrap: PTRACE_TRACEME failed errno={{_errno}}\\n")
             _os._exit(126)
 
-        # --- Seccomp application (S3 scope — stubbed for S2) ---
-        # S2 does not apply seccomp. S3 will add the real profile here.
+        # --- T3 (H0.2): requested OS containment — fail-closed (S3 slot) ---
+        # Every control requested for this invocation is applied HERE, in
+        # the trusted bootstrap, BEFORE workload exec. Ordering: namespaces
+        # first, confinement next, seccomp LAST (the profile denies
+        # unshare/mount). Any requested control that cannot be enforced
+        # aborts before the workload can start — never a weak fallback.
+        _containment = cfg.get("containment", {{}})
+        _enf = {{}}
+        _failed = []
+
+        _nc_root = {repr(_nodechain_root())}
+        if _nc_root:
+            if _nc_root not in _sys.path:
+                _sys.path.insert(0, _nc_root)
+
+        if _containment.get("network_namespace"):
+            try:
+                from nodechain.sdk.namespace_profile import apply_network_namespace as _ann
+                if _ann():
+                    _enf["network_namespace_enforced"] = True
+                else:
+                    _failed.append("network_namespace")
+            except Exception as _e:
+                _enf["network_namespace_error"] = str(_e)
+                _failed.append("network_namespace")
+
+        if _containment.get("mount_namespace") and not _containment.get("mount_confinement"):
+            try:
+                from nodechain.sdk.namespace_profile import apply_mount_namespace as _amn
+                if _amn():
+                    _enf["mount_namespace_enforced"] = True
+                else:
+                    _failed.append("mount_namespace")
+            except Exception as _e:
+                _enf["mount_namespace_error"] = str(_e)
+                _failed.append("mount_namespace")
+
+        # T3 (H0.2 R7): preload the seccomp binding while the filesystem
+        # view is still the host's. The binding resolves libseccomp via
+        # ctypes.util.find_library, whose ldconfig probe cannot resolve
+        # inside the confinement chroot; once dlopen has mapped the
+        # library, the post-chroot enforcement block reuses the cached
+        # module without re-resolving. Unavailability is still reported
+        # by the enforcement block itself (fail closed).
+        if _containment.get("seccomp"):
+            try:
+                import seccomp as _pre_sec  # noqa: F401
+            except ImportError:
+                try:
+                    import pyseccomp as _pre_sec  # noqa: F401
+                except ImportError:
+                    pass
+
+        if _containment.get("mount_confinement"):
+            try:
+                from nodechain.sdk.namespace_profile import (
+                    apply_mount_confinement as _amc,
+                )
+                _interp = _sys.executable or "/usr/bin/python3"
+                _extra = []
+                for _d in ("/usr", "/lib", "/lib64"):
+                    if _os.path.isdir(_d):
+                        _extra.append((_d, _d))
+                # T3 privileged-qualification fix: the chroot has no
+                # ld.so.cache, so the interpreter's lib dir (e.g.
+                # /usr/local/lib on official python images — where
+                # libpythonX.Y.so lives) must be bound explicitly; the
+                # adapter names it in LD_LIBRARY_PATH for the loader.
+                _ilib = _containment.get("interpreter_libdir")
+                if isinstance(_ilib, str) and _ilib and _os.path.isdir(_ilib):
+                    _pair = (_ilib, _ilib)
+                    if _pair not in _extra:
+                        _extra.append(_pair)
+                if "/.venv/" in _interp or "/venv/" in _interp:
+                    _parts = _interp.split("/")
+                    if "bin" in _parts:
+                        _vr = "/".join(_parts[:_parts.index("bin")])
+                        if _vr and _os.path.isdir(_vr):
+                            _extra.append((_vr, _vr))
+                # T3 read-only containment contract: the package bind and
+                # every runtime extra mount are remounted read-only inside
+                # the primitive; /tmp stays writable. Any required remount
+                # that cannot be established makes the primitive return
+                # not-enforced → this block fails confinement (fail closed
+                # before workload exec).
+                _ro = ["/package"]
+                _ro.extend(_t for _s, _t in _extra)
+                _cr = _amc(
+                    package_root=_containment.get("package_root", "/"),
+                    temp_dir=_containment.get("temp_dir", "/tmp"),
+                    extra_mounts=_extra,
+                    read_only_targets=_ro,
+                )
+                if isinstance(_cr, dict) and _cr.get("mount_confinement_enforced"):
+                    _enf["mount_confinement_enforced"] = True
+                    _enf["allowed_mounts"] = _cr.get("allowed_mounts", [])
+                    _enf["read_only_mounts"] = _cr.get("read_only_mounts", [])
+                else:
+                    _failed.append("mount_confinement")
+            except Exception as _e:
+                _enf["mount_confinement_error"] = str(_e)
+                _failed.append("mount_confinement")
+
+        # T3 (H0.2 review fix): confinement chroots into temp_root and
+        # chdir("/")s, discarding the earlier workload_cwd. Re-establish the
+        # WORKLOAD-VISIBLE cwd before exec authority is crossed. The value
+        # comes from the containment config's workload_visible_cwd — the
+        # SAME single derivation the adapter reports as child_cwd metadata
+        # (explicit package root → /package; temp-cwd case → /tmp; the
+        # confinement primitive creates both inside the root). Host paths
+        # are never restored inside the chroot; a missing value fails
+        # closed rather than guessing. Failures join the containment
+        # enforcement_failed family (this block runs in the post-TRACEME
+        # region, where bootstrap_failed is structurally forbidden).
+        if _containment.get("mount_confinement") and _enf.get("mount_confinement_enforced"):
+            _visible_cwd = _containment.get("workload_visible_cwd")
+            if not isinstance(_visible_cwd, str) or _visible_cwd not in ("/package", "/tmp"):
+                _enf["workload_visible_cwd_error"] = (
+                    "workload_visible_cwd_absent_or_invalid"
+                )
+                _failed.append("workload_visible_cwd")
+            else:
+                try:
+                    _os.chdir(_visible_cwd)
+                    _enf["workload_cwd_visible"] = _visible_cwd
+                except OSError as _cwd_err:
+                    _enf["workload_visible_cwd_error"] = (
+                        f"workload_cwd_reestablish_failed: {{_cwd_err}}"
+                    )
+                    _failed.append("workload_visible_cwd")
+
+        # Procfs isolation runs AFTER mount confinement: confinement
+        # creates a fresh mount namespace and chroot, so an earlier procfs
+        # remount would be discarded (and the enforced flag would lie).
+        # The confinement root does not contain a /proc mountpoint, so it
+        # must be created inside the root before the remount helper runs —
+        # otherwise the composition fails closed instead of producing the
+        # requested verified procfs view.
+        if _containment.get("procfs_isolation"):
+            if _containment.get("mount_confinement") and _enf.get("mount_confinement_enforced"):
+                try:
+                    _os.mkdir("/proc", 0o755)
+                except FileExistsError:
+                    pass
+                except OSError as _procdir_err:
+                    _enf["procfs_error"] = f"proc_mountpoint_failed: {{_procdir_err}}"
+                    _failed.append("procfs_isolation")
+            if "procfs_isolation" not in _failed:
+                try:
+                    from nodechain.sdk.namespace_profile import (
+                        remount_procfs_for_pid_namespace as _rproc,
+                    )
+                    _pr = _rproc()
+                    if isinstance(_pr, dict):
+                        for _k, _v in _pr.items():
+                            _enf[_k] = _v
+                        if not _pr.get("procfs_namespace_view_enforced"):
+                            _failed.append("procfs_isolation")
+                    else:
+                        _failed.append("procfs_isolation")
+                except Exception as _e:
+                    _enf["procfs_error"] = str(_e)
+                    _failed.append("procfs_isolation")
+
+        if _containment.get("seccomp"):
+            try:
+                from nodechain.sdk.seccomp_profile import (
+                    SeccompBackend as _SB, SeccompProfile as _SP,
+                )
+                _sb = _SB()
+                if not _sb.available:
+                    _failed.append("seccomp")
+                    _enf["seccomp_available"] = False
+                elif not _sb.apply_profile(_SP()):
+                    _failed.append("seccomp")
+                    _enf["seccomp_available"] = True
+                else:
+                    _enf["seccomp_enforced"] = True
+                    _enf["seccomp_available"] = True
+            except Exception as _e:
+                _enf["seccomp_error"] = str(_e)
+                _failed.append("seccomp")
+
+        # T3 (H0.2 R7/R8): durable capability boundary — all privileged
+        # namespace/mount/procfs transitions are complete. Establish the
+        # boundary across EVERY relevant capability set, in the order the
+        # kernel requires:
+        #   1. BOUNDING SET first (PR_CAPBSET_DROP needs CAP_SETPCAP in
+        #      the effective set, still intact): removes the regain path
+        #      across exec — for a root process post-exec permitted caps
+        #      derive from the bounding set.
+        #   2. AMBIENT set cleared entirely (PR_CAP_AMBIENT_CLEAR_ALL):
+        #      ambient capabilities feed post-exec permitted/effective
+        #      independently of the file's capabilities and are NOT pruned
+        #      by a bounding-set drop alone.
+        #   3. INHERITABLE/PERMITTED/EFFECTIVE cleared via libcap's empty
+        #      capability state (cap_set_proc): a dangerous capability
+        #      surviving in inheritable survives the exec calculation even
+        #      after a bounding drop, so the sets themselves are emptied —
+        #      the trusted bootstrap needs no capability after this point
+        #      (metadata writes, signal handling, execve only).
+        #   4. VERIFIED, not merely attempted: the dangerous bits are read
+        #      back and proven absent from all five sets before
+        #      enforcement_verified. Any gap or inability to establish or
+        #      verify the state fails containment closed. EINVAL from a
+        #      bounding drop means the capability is already absent
+        #      (nothing to drop). The ptrace exec authority lives in the
+        #      supervisor process and is not affected.
+        try:
+            import ctypes as _ct
+            _pr_bset_drop = 24
+            _pr_cap_ambient = 39
+            _amb_clear_all = 4
+            _cap_list = (8, 16, 17, 18, 19, 21, 22, 25, 26, 27, 31,
+                         34, 38, 39, 40)
+            _libc_caps = _ct.CDLL(None, use_errno=True)
+            _dropped_caps = []
+            for _cap in _cap_list:
+                _ct.set_errno(0)
+                _rc = _libc_caps.prctl(_pr_bset_drop, _cap, 0, 0, 0)
+                if _rc == 0:
+                    _dropped_caps.append(_cap)
+                elif _ct.get_errno() != 22:
+                    _enf["capability_boundary_error"] = (
+                        "prctl PR_CAPBSET_DROP %d errno=%d"
+                        % (_cap, _ct.get_errno()))
+                    _failed.append("capability_boundary")
+                    break
+            if "capability_boundary" not in _failed:
+                _ct.set_errno(0)
+                if _libc_caps.prctl(_pr_cap_ambient, _amb_clear_all,
+                                    0, 0, 0) != 0 \
+                        and _ct.get_errno() != 22:
+                    # EINVAL: the kernel refuses CLEAR_ALL e.g. when the
+                    # ambient set is already empty — the per-capability
+                    # verification below is the authoritative gate.
+                    _enf["capability_boundary_error"] = (
+                        "prctl PR_CAP_AMBIENT_CLEAR_ALL errno=%d"
+                        % _ct.get_errno())
+                    _failed.append("capability_boundary")
+            if "capability_boundary" not in _failed:
+                _libcap = _ct.CDLL("libcap.so.2", use_errno=True)
+                _libcap.cap_init.restype = _ct.c_void_p
+                _libcap.cap_set_proc.argtypes = [_ct.c_void_p]
+                _libcap.cap_set_proc.restype = _ct.c_int
+                _libcap.cap_free.argtypes = [_ct.c_void_p
+                                             ]
+                _empty = _libcap.cap_init()
+                if not _empty:
+                    _enf["capability_boundary_error"] = "cap_init failed"
+                    _failed.append("capability_boundary")
+                else:
+                    try:
+                        if _libcap.cap_set_proc(_empty) != 0:
+                            _enf["capability_boundary_error"] = (
+                                "cap_set_proc empty errno=%d"
+                                % _ct.get_errno())
+                            _failed.append("capability_boundary")
+                    finally:
+                        _libcap.cap_free(_empty)
+            if "capability_boundary" not in _failed:
+                # Verification: read all five sets back and prove every
+                # dangerous bit absent. cap_get_flag reads
+                # effective/permitted/inheritable (flags 0/1/2),
+                # cap_get_ambient the ambient set, cap_get_bound the
+                # bounding set — none need /proc inside the chroot.
+                _libcap.cap_get_proc.restype = _ct.c_void_p
+                _libcap.cap_get_flag.argtypes = [
+                    _ct.c_void_p, _ct.c_uint, _ct.c_uint,
+                    _ct.POINTER(_ct.c_uint)]
+                _libcap.cap_get_bound.argtypes = [_ct.c_int]
+                _libcap.cap_get_bound.restype = _ct.c_int
+                _libcap.cap_get_ambient.argtypes = [_ct.c_int]
+                _libcap.cap_get_ambient.restype = _ct.c_int
+                _proc_caps = _libcap.cap_get_proc()
+                _flag_out = _ct.c_uint(1)
+                for _cap in _cap_list:
+                    _in_bnd = _libcap.cap_get_bound(_cap)
+                    _in_amb = _libcap.cap_get_ambient(_cap)
+                    _in_sets = 0
+                    for _fl in (0, 1, 2):
+                        _flag_out = _ct.c_uint(1)
+                        if _libcap.cap_get_flag(
+                                _proc_caps, _cap, _fl,
+                                _ct.byref(_flag_out)) != 0:
+                            _in_sets = -1
+                            break
+                        if _flag_out.value:
+                            _in_sets = 1
+                    if (_in_bnd != 0 or _in_amb != 0 or _in_sets != 0):
+                        _enf["capability_boundary_error"] = (
+                            "verification failed cap=%d bnd=%d amb=%d"
+                            " sets=%d" % (_cap, _in_bnd, _in_amb,
+                                          _in_sets))
+                        _failed.append("capability_boundary")
+                        break
+                _libcap.cap_free(_proc_caps)
+            if "capability_boundary" not in _failed:
+                _enf["capability_boundary_dropped"] = True
+                _enf["capability_boundary_caps"] = _dropped_caps
+                _enf["capability_boundary_verified"] = True
+                _enf["capability_boundary_sets"] = (
+                    "eff/prm/inh empty; amb cleared; bnd cleared")
+        except Exception as _e:
+            _enf["capability_boundary_error"] = str(_e)
+            _failed.append("capability_boundary")
+
+        if _failed:
+            _emit_meta(metadata_fd, {{
+                "type": _META_ENFORCEMENT_FAILED,
+                "failed_primitives": _failed,
+            }})
+            _sys.stderr.write(
+                "bootstrap: containment unavailable: " + ", ".join(_failed)
+                + " — workload NOT started\\n")
+            _os._exit(126)
+
+        enforcement_meta.update(_enf)
 
         # Set FD_CLOEXEC on metadata_fd so it closes at workload exec (B2).
         # Fix #10: failure to establish the locked B2 inheritance rule MUST
@@ -1728,6 +2087,10 @@ def main():
 
         # Stop for the supervisor to arm PTRACE_O_TRACEEXEC.
         _os.kill(_os.getpid(), _signal.SIGSTOP)
+
+        # Restore the workload's inherited signal semantics before exec
+        # (SIGCHLD was blocked for bootstrap-noise suppression above).
+        _signal.pthread_sigmask(_signal.SIG_SETMASK, _orig_sigmask)
 
         # Exec the workload (B2).
         argv0 = workload_argv[0] if workload_env else ""
@@ -1887,6 +2250,9 @@ def supervisor_main(
             # bootstrap config for B1 → B2.
             "workload_input_rfd": pipes.workload_input_rfd,
             "workload_cwd": config.get("workload_cwd"),
+            # T3 (H0.2): requested OS containment — applied fail-closed by
+            # the trusted bootstrap before workload exec.
+            "containment": config.get("containment", {}),
         }
         config_payload = json.dumps(bootstrap_config).encode("utf-8")
 
@@ -1943,7 +2309,16 @@ def supervisor_main(
     if not meta_result.ok:
         return _fail_and_cleanup(f"metadata: {meta_result.reason}")
 
-    if not _emit_mandatory({"type": PROTO_ENFORCEMENT_VERIFIED}):
+    # T3 (H0.2): forward the trusted containment evidence (namespace/
+    # confinement/seccomp enforcement flags) from the bootstrap's
+    # enforcement_verified metadata record into the protocol stream — the
+    # evidence extractor reads rec["metadata"] and the result mapper
+    # projects it into sandbox_metadata for the caller.
+    _enf_meta = meta_result.metadata.get("metadata")
+    _enf_rec = {"type": PROTO_ENFORCEMENT_VERIFIED}
+    if isinstance(_enf_meta, dict):
+        _enf_rec["metadata"] = _enf_meta
+    if not _emit_mandatory(_enf_rec):
         return _fail_and_cleanup("protocol_emit_enforcement_verified_failed")
 
     try:
@@ -2142,7 +2517,11 @@ def _run_bootstrap_child(pipes: SupervisorPipeSet) -> None:
 
     # Exec the Python bootstrap.
     bootstrap_script = _build_bootstrap_script()
-    os.execve(sys.executable, [sys.executable, "-c", bootstrap_script],
+    # -P: never prepend the inherited cwd to sys.path — the bootstrap is
+    # trusted infrastructure importing nodechain.sdk from the trusted
+    # installation, never from a checkout cwd carrying a fake nodechain
+    # package (R9 startup boundary).
+    os.execve(sys.executable, [sys.executable, "-P", "-c", bootstrap_script],
               {"PATH": "/usr/bin:/bin"})
 
 

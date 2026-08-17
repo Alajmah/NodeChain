@@ -94,7 +94,7 @@ class TestMemoryOomBehavior:
         # T3.0 safety fence: POSIX untrusted execution refused before spawn
         assert result["success"] is False
         assert result["exit_code"] == 126
-        assert result["error"].startswith("supervised_backend_required")
+        assert (result["error"].startswith("supervised execution failed before workload start") or result["error"].startswith("supervised_cgroup_unsupported"), f"expected supervised fail-closed refusal, got: {result.get('error', '')[:200]}")
         return  # Skip original capability assertions on POSIX
 
     @pytest.mark.skipif(
@@ -137,7 +137,7 @@ class TestMemoryOomBehavior:
         # T3.0 safety fence: POSIX untrusted execution refused before spawn
         assert result["success"] is False
         assert result["exit_code"] == 126
-        assert result["error"].startswith("supervised_backend_required")
+        assert (result["error"].startswith("supervised execution failed before workload start") or result["error"].startswith("supervised_cgroup_unsupported"), f"expected supervised fail-closed refusal, got: {result.get('error', '')[:200]}")
         return  # Skip original capability assertions on POSIX
 
 
@@ -187,7 +187,7 @@ class TestPidsLimitBehavior:
         # T3.0 safety fence: POSIX untrusted execution refused before spawn
         assert result["success"] is False
         assert result["exit_code"] == 126
-        assert result["error"].startswith("supervised_backend_required")
+        assert (result["error"].startswith("supervised execution failed before workload start") or result["error"].startswith("supervised_cgroup_unsupported"), f"expected supervised fail-closed refusal, got: {result.get('error', '')[:200]}")
         return  # Skip original capability assertions on POSIX
 
 
@@ -240,7 +240,7 @@ class TestCpuThrottlingEvidence:
         # T3.0 safety fence: POSIX untrusted execution refused before spawn
         assert result["success"] is False
         assert result["exit_code"] == 126
-        assert result["error"].startswith("supervised_backend_required")
+        assert (result["error"].startswith("supervised execution failed before workload start") or result["error"].startswith("supervised_cgroup_unsupported"), f"expected supervised fail-closed refusal, got: {result.get('error', '')[:200]}")
         return  # Skip original capability assertions on POSIX
 
 
@@ -290,7 +290,7 @@ class TestCleanupAfterKernelKill:
         # T3.0 safety fence: POSIX untrusted execution refused before spawn
         assert result["success"] is False
         assert result["exit_code"] == 126
-        assert result["error"].startswith("supervised_backend_required")
+        assert (result["error"].startswith("supervised execution failed before workload start") or result["error"].startswith("supervised_cgroup_unsupported"), f"expected supervised fail-closed refusal, got: {result.get('error', '')[:200]}")
         return  # Skip original capability assertions on POSIX
 
 

@@ -1,7 +1,9 @@
-"""T3.0 production-caller propagation tests.
+"""T3 production-caller propagation tests (H0.2 activation).
 
-Verifies that the T3.0 fence refusal propagates correctly through
-NodeInvoker.invoke() for both untrusted trust levels.
+Verifies that the supervised route's fail-closed refusal propagates
+correctly through NodeInvoker.invoke() for both untrusted trust levels:
+failed EnvelopeResponse, zero direct node execution, zero retry, and the
+trusted supervised evidence projection preserved on the failure path.
 """
 from __future__ import annotations
 
@@ -40,29 +42,42 @@ def _make_envelope() -> InvocationEnvelope:
 
 
 def _make_refusal_result(trust_level: str) -> dict:
+    """A supervised fail-closed refusal in the established result shape —
+    what the T3 adapter returns when the supervised topology cannot start
+    (e.g. unprivileged host) or a requested control is unavailable."""
     return {
         "success": False,
         "error": (
-            "supervised_backend_required: POSIX untrusted execution "
-            f"({trust_level}) is disabled on the legacy SubprocessRunner "
-            "path until supervised routing (T3) is available"
+            "supervised execution failed before workload start "
+            f"(unshare_failed: unshare_clone_newpid_failed: errno=1) [{trust_level}]"
         ),
         "exit_code": 126,
         "isolation_mode": "subprocess",
-        "duration_ms": 0,
+        "duration_ms": 3,
         "child_policy_enforced": False,
-        "child_cwd": "",
-        "temp_dir_isolated": False,
+        "child_cwd": "/tmp/x",
+        "temp_dir_isolated": True,
+        "supervised_execution": {
+            "backend": "native_os_sandbox",
+            "process_started": False,
+            "process_timed_out": False,
+            "output_truncated": False,
+            "exit_code_interpretation": "error",
+            "reason": "unshare_failed: unshare_clone_newpid_failed: errno=1",
+            "process_exit_code": None,
+            "sandbox_metadata": {},
+        },
     }
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX fence propagation only")
+@pytest.mark.skipif(os.name == "nt", reason="POSIX supervised propagation only")
 class TestProductionCallerPropagation:
-    """NodeInvoker must propagate the T3.0 fence refusal correctly."""
+    """NodeInvoker must propagate the supervised refusal correctly."""
 
     @pytest.mark.parametrize("trust_level", ["local_untrusted", "remote_untrusted"])
     async def test_refusal_propagates_through_invoker(self, tmp_path, trust_level):
-        """Refusal -> failed EnvelopeResponse; zero node execution; zero retry."""
+        """Refusal -> failed EnvelopeResponse; zero node execution; zero retry;
+        supervised evidence projection preserved on the failure path."""
         from nodechain.runtime.node_invoker import NodeInvoker
 
         module = _make_module(tmp_path)
@@ -93,11 +108,13 @@ class TestProductionCallerPropagation:
 
         assert response.success is False, "Invoker returned success for refused untrusted"
         assert response.output_type == "error"
-        assert "supervised_backend_required" in (response.error or "")
+        assert "supervised execution failed before workload start" in (response.error or "")
         assert response.output == {}
 
         meta = response.metadata or {}
         assert meta.get("exit_code") == 126, f"exit_code={meta.get('exit_code')}"
+        # T3 evidence projection survives the failure path.
+        assert meta.get("supervised_execution", {}).get("process_started") is False
 
         runner.run_isolated.assert_awaited_once()
         node.execute.assert_not_awaited()

@@ -39,6 +39,7 @@ async def run_supervised_argv_async(
     workload_env: Mapping[str, str],
     timeout_seconds: float,
     max_output_bytes: int,
+    containment: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Public parent-side supervised execution API.
 
@@ -126,6 +127,10 @@ async def run_supervised_argv_async(
             supervisor_config["workload_cwd"] = workload_cwd
         if workload_stdin is not None:
             supervisor_config["has_workload_input"] = True
+        # T3 (H0.2): requested OS containment — forwarded to the trusted
+        # bootstrap, applied fail-closed before workload exec.
+        if containment is not None:
+            supervisor_config["containment"] = dict(containment)
         config_payload = json.dumps(supervisor_config).encode("utf-8")
     except Exception as e:
         return _attach_workload_input_metadata(
@@ -219,7 +224,12 @@ async def run_supervised_argv_async(
         # is the sole descriptor authority (the config JSON carries only
         # has_workload_input as informational).
         supervisor_args = [
-            sys.executable, "-m", "nodechain.runtime.exec_supervisor",
+            # -P: never prepend the inherited cwd to sys.path — the
+            # supervisor is trusted infrastructure and must resolve
+            # nodechain from the trusted installation (PYTHONPATH/site),
+            # never from a project checkout cwd carrying a fake
+            # nodechain package (R9 startup boundary).
+            sys.executable, "-P", "-m", "nodechain.runtime.exec_supervisor",
             "--protocol-fd", str(protocol_wfd),
         ]
         if workload_input_rfd >= 0:

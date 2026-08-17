@@ -94,11 +94,16 @@ class TestConcurrentIsolation:
 
         result_a, result_b = asyncio.run(run_both())
 
-        # A must be refused — T3.0 safety fence fires on all POSIX hosts.
+        # A must be refused — the supervised route fails closed on hosts
+        # without the required topology privileges (T3/H0.2 activation).
         assert not result_a["success"], (
-            "untrusted A executed on POSIX — T3.0 safety fence violated"
+            "untrusted A executed on POSIX without supervised enforcement"
         )
-        assert "supervised_backend_required" in result_a.get("error", "")
+        _err_a = result_a.get("error", "")
+        assert (
+            "supervised execution failed before workload start" in _err_a
+            or "supervised_cgroup_unsupported" in _err_a
+        ), _err_a[:200]
 
         # A's grandchild was never spawned.
         assert not a_spawned.exists(), (
