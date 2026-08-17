@@ -465,7 +465,7 @@ class TestScriptShapes:
         r = SubprocessRunner()
         script = r._build_supervised_child_script(
             "/m/path.py", "TNode", "local_untrusted", "/pkg",
-            enable_seccomp=True,
+            enable_seccomp=True, trusted_sdk_root="/trusted/nc/root",
         )
         # Node-local policy present
         for needle in (
@@ -491,6 +491,28 @@ class TestScriptShapes:
         # The non-supervised form keeps its containment phases.
         assert "apply_pid_namespace_two_stage" in script
         assert "SeccompBackend" in script
+
+    def test_supervised_script_trust_root_never_cwd(self, tmp_path,
+                                                    monkeypatch):
+        """R9: the child script's pre-enforcement import root is the
+        trusted nodechain installation resolved by the parent — never the
+        caller's cwd (a checkout cwd carrying a fake nodechain package
+        would execute before the enforcers exist). Missing root raises."""
+        import nodechain as _nc
+        expected_root = str(Path(_nc.__file__).resolve().parent.parent)
+        monkeypatch.chdir(tmp_path)
+        r = SubprocessRunner()
+        script = r._build_supervised_child_script(
+            "/m/path.py", "TNode", "local_untrusted", "/pkg",
+            trusted_sdk_root=expected_root,
+        )
+        assert f"sys.path.insert(0, {expected_root!r})" in script
+        assert "Path.cwd()" not in script
+        assert str(tmp_path) not in script
+        with pytest.raises(ValueError):
+            r._build_supervised_child_script(
+                "/m/path.py", "TNode", "local_untrusted", "/pkg",
+            )
 
     def test_bootstrap_contains_fail_closed_containment(self):
         from nodechain.runtime.exec_supervisor import _build_bootstrap_script
@@ -859,6 +881,7 @@ class TestReviewRegressions:
         r = SubprocessRunner()
         script = r._build_supervised_child_script(
             "/m/path.py", "TNode", "local_untrusted", "/host/pkg",
+            trusted_sdk_root="/trusted/nc/root",
         )
         assert "workload_fs_root" in script
         assert "fs_policy_root or None" in script
@@ -2041,6 +2064,54 @@ def _make_sitecustomize_module(pkg: Path) -> Path:
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX containment behavior")
 class TestPrivilegedR7Proofs:
+    @pytest.mark.asyncio
+    async def test_fake_cwd_nodechain_package_never_imports(self, tmp_path,
+                                                            monkeypatch):
+        """R9 adversarial proof: the parent process cwd is an
+        attacker-writable project checkout containing a FAKE
+        nodechain/__init__.py that records execution. Run the real
+        supervised local_untrusted route from that cwd: the fake package
+        must never execute (the child imports the SDK from the trusted
+        installation), while the legitimate node still executes."""
+        if not _can_unshare_pid_ns():
+            pytest.skip("host cannot unshare PID ns")
+        fake_proj = tmp_path / "evil_checkout"
+        fake_pkg = fake_proj / "nodechain"
+        fake_pkg.mkdir(parents=True)
+        (fake_pkg / "__init__.py").write_text(
+            "import os\n"
+            "import sys\n"
+            "os.environ['T3_FAKE_NC'] = '1'\n"
+            "try:\n"
+            "    with open('/tmp/t3_fake_nc_marker', 'w') as f:\n"
+            "        f.write('%d %s' % (os.getpid(), sys.argv))\n"
+            "except OSError:\n"
+            "    pass\n",
+            encoding="utf-8",
+        )
+        real_pkg = tmp_path / "real_nodes"
+        real_pkg.mkdir()
+        mod = _make_module(real_pkg)
+        monkeypatch.chdir(fake_proj)
+        r = SubprocessRunner(timeout_seconds=60, max_output_bytes=100_000)
+        result = await r.run_isolated(
+            _envelope(), mod, "TNode", "cwd_evil_node",
+            trust_level="local_untrusted", package_root=str(real_pkg),
+        )
+        if not result["success"]:
+            sup = result.get("supervised_execution", {})
+            assert sup.get("process_started") is False, result
+            pytest.skip(
+                f"supervised topology unavailable: "
+                f"{(sup.get('reason') or '')[:120]}"
+            )
+        out = result["response"]["output"]
+        assert out == {"ran": True}, out
+        # The fake package never executed: no env marker from the child's
+        # own report, and no marker file visible from the parent side.
+        assert "T3_FAKE_NC" not in result.get("error", "")
+        assert not Path("/tmp/t3_fake_nc_marker").exists()
+
     @pytest.mark.asyncio
     @pytest.mark.parametrize("with_seccomp", [True, False])
     async def test_second_chroot_escape_kernel_denied(self, tmp_path,

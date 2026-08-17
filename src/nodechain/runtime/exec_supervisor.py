@@ -2517,7 +2517,11 @@ def _run_bootstrap_child(pipes: SupervisorPipeSet) -> None:
 
     # Exec the Python bootstrap.
     bootstrap_script = _build_bootstrap_script()
-    os.execve(sys.executable, [sys.executable, "-c", bootstrap_script],
+    # -P: never prepend the inherited cwd to sys.path — the bootstrap is
+    # trusted infrastructure importing nodechain.sdk from the trusted
+    # installation, never from a checkout cwd carrying a fake nodechain
+    # package (R9 startup boundary).
+    os.execve(sys.executable, [sys.executable, "-P", "-c", bootstrap_script],
               {"PATH": "/usr/bin:/bin"})
 
 

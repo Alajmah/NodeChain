@@ -224,7 +224,12 @@ async def run_supervised_argv_async(
         # is the sole descriptor authority (the config JSON carries only
         # has_workload_input as informational).
         supervisor_args = [
-            sys.executable, "-m", "nodechain.runtime.exec_supervisor",
+            # -P: never prepend the inherited cwd to sys.path — the
+            # supervisor is trusted infrastructure and must resolve
+            # nodechain from the trusted installation (PYTHONPATH/site),
+            # never from a project checkout cwd carrying a fake
+            # nodechain package (R9 startup boundary).
+            sys.executable, "-P", "-m", "nodechain.runtime.exec_supervisor",
             "--protocol-fd", str(protocol_wfd),
         ]
         if workload_input_rfd >= 0:

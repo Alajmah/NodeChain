@@ -489,6 +489,7 @@ main()
         trust_level: str,
         package_root: str = "",
         enable_seccomp: bool = False,
+        trusted_sdk_root: str = "",
     ) -> str:
         """Build the H0.2/T3 supervised form of the node-run script.
 
@@ -510,6 +511,18 @@ main()
         by the apply_mount_confinement contract); the adapter passes the
         workload-visible path through the config.
         """
+        if not trusted_sdk_root:
+            # The trust root is load-bearing: the child imports the SDK
+            # from the trusted nodechain installation resolved by the
+            # parent. NEVER the caller's cwd — a project checkout as the
+            # service cwd could carry a fake nodechain package that would
+            # execute before the four enforcers exist (R9 startup
+            # boundary).
+            raise ValueError(
+                "trusted_sdk_root is required: the supervised child "
+                "script must import the SDK from the trusted nodechain "
+                "installation, never the caller cwd"
+            )
         return f'''
 import sys
 import os
@@ -518,8 +531,12 @@ import traceback
 import asyncio
 import importlib.util
 
-# Pre-import trusted NodeChain code only
-sys.path.insert(0, {repr(str(Path.cwd()))})
+# Trust root (R9 startup boundary): the trusted NodeChain installation
+# resolved by the parent — never the caller's cwd, whose nodechain/
+# (if any) must not execute before the enforcers exist. The untrusted
+# node itself loads via the explicit spec_from_file_location path
+# AFTER enforcement activates.
+sys.path.insert(0, {trusted_sdk_root!r})
 
 from nodechain.core.envelope import InvocationEnvelope
 from nodechain.sdk.trust import TrustLevel as TL
@@ -1159,6 +1176,30 @@ main()
                     "child_cwd": "",
                     "temp_dir_isolated": False,
                 }
+        # Trusted SDK import root for the supervised child script: the
+        # ALREADY-IMPORTED nodechain installation, resolved here in the
+        # parent and embedded as the exact absolute value. NEVER the
+        # caller's cwd — a project checkout as the service cwd could
+        # carry a fake nodechain package that would execute in the child
+        # before the four enforcers exist (R9 startup boundary). A
+        # setup/configuration failure BEFORE any preparation resource.
+        try:
+            import nodechain as _nc_pkg
+            trusted_sdk_root = str(
+                Path(_nc_pkg.__file__).resolve().parent.parent)
+        except Exception as _e:
+            return {
+                "success": False,
+                "error": (
+                    f"trusted nodechain import root unresolvable: {_e}"
+                ),
+                "exit_code": -1,
+                "isolation_mode": "subprocess",
+                "duration_ms": int((time.monotonic() - start) * 1000),
+                "child_policy_enforced": False,
+                "child_cwd": package_root if package_root else "",
+                "temp_dir_isolated": False,
+            }
         temp_dir = tempfile.mkdtemp(prefix="nodechain_child_")
         child_cwd = package_root if package_root else temp_dir
         workload_module_path = str(module_path)
@@ -1229,6 +1270,7 @@ main()
             child_script = self._build_supervised_child_script(
                 str(module_path), class_name, trust_level, package_root,
                 enable_seccomp=enable_seccomp,
+                trusted_sdk_root=trusted_sdk_root,
             )
 
             # Workload env: the existing secret-filtered semantics with
