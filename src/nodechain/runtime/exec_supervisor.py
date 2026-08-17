@@ -1927,23 +1927,41 @@ def main():
                 _enf["seccomp_error"] = str(_e)
                 _failed.append("seccomp")
 
-        # T3 (H0.2 R7): durable capability boundary — all privileged
-        # namespace/mount/procfs transitions are complete. Drop the
-        # boundary-undoing capabilities from the bounding set: for a root
-        # process, post-exec permitted capabilities derive from the
-        # bounding set, so the workload cannot hold or regain them across
-        # exec (second chroot(), remounts, setns). EINVAL means the
-        # capability is already absent from the bounding set (nothing to
-        # drop); any other refusal fails containment closed. The ptrace
-        # exec authority lives in the supervisor process and is not
-        # affected by the workload's capability state.
+        # T3 (H0.2 R7/R8): durable capability boundary — all privileged
+        # namespace/mount/procfs transitions are complete. Establish the
+        # boundary across EVERY relevant capability set, in the order the
+        # kernel requires:
+        #   1. BOUNDING SET first (PR_CAPBSET_DROP needs CAP_SETPCAP in
+        #      the effective set, still intact): removes the regain path
+        #      across exec — for a root process post-exec permitted caps
+        #      derive from the bounding set.
+        #   2. AMBIENT set cleared entirely (PR_CAP_AMBIENT_CLEAR_ALL):
+        #      ambient capabilities feed post-exec permitted/effective
+        #      independently of the file's capabilities and are NOT pruned
+        #      by a bounding-set drop alone.
+        #   3. INHERITABLE/PERMITTED/EFFECTIVE cleared via libcap's empty
+        #      capability state (cap_set_proc): a dangerous capability
+        #      surviving in inheritable survives the exec calculation even
+        #      after a bounding drop, so the sets themselves are emptied —
+        #      the trusted bootstrap needs no capability after this point
+        #      (metadata writes, signal handling, execve only).
+        #   4. VERIFIED, not merely attempted: the dangerous bits are read
+        #      back and proven absent from all five sets before
+        #      enforcement_verified. Any gap or inability to establish or
+        #      verify the state fails containment closed. EINVAL from a
+        #      bounding drop means the capability is already absent
+        #      (nothing to drop). The ptrace exec authority lives in the
+        #      supervisor process and is not affected.
         try:
             import ctypes as _ct
             _pr_bset_drop = 24
+            _pr_cap_ambient = 39
+            _amb_clear_all = 4
+            _cap_list = (8, 16, 17, 18, 19, 21, 22, 25, 26, 27, 31,
+                         34, 38, 39, 40)
             _libc_caps = _ct.CDLL(None, use_errno=True)
             _dropped_caps = []
-            for _cap in (8, 16, 17, 18, 19, 21, 22, 25, 26, 27, 31,
-                         34, 38, 39, 40):
+            for _cap in _cap_list:
                 _ct.set_errno(0)
                 _rc = _libc_caps.prctl(_pr_bset_drop, _cap, 0, 0, 0)
                 if _rc == 0:
@@ -1955,8 +1973,80 @@ def main():
                     _failed.append("capability_boundary")
                     break
             if "capability_boundary" not in _failed:
+                _ct.set_errno(0)
+                if _libc_caps.prctl(_pr_cap_ambient, _amb_clear_all,
+                                    0, 0, 0) != 0 \
+                        and _ct.get_errno() != 22:
+                    # EINVAL: the kernel refuses CLEAR_ALL e.g. when the
+                    # ambient set is already empty — the per-capability
+                    # verification below is the authoritative gate.
+                    _enf["capability_boundary_error"] = (
+                        "prctl PR_CAP_AMBIENT_CLEAR_ALL errno=%d"
+                        % _ct.get_errno())
+                    _failed.append("capability_boundary")
+            if "capability_boundary" not in _failed:
+                _libcap = _ct.CDLL("libcap.so.2", use_errno=True)
+                _libcap.cap_init.restype = _ct.c_void_p
+                _libcap.cap_set_proc.argtypes = [_ct.c_void_p]
+                _libcap.cap_set_proc.restype = _ct.c_int
+                _libcap.cap_free.argtypes = [_ct.c_void_p
+                                             ]
+                _empty = _libcap.cap_init()
+                if not _empty:
+                    _enf["capability_boundary_error"] = "cap_init failed"
+                    _failed.append("capability_boundary")
+                else:
+                    try:
+                        if _libcap.cap_set_proc(_empty) != 0:
+                            _enf["capability_boundary_error"] = (
+                                "cap_set_proc empty errno=%d"
+                                % _ct.get_errno())
+                            _failed.append("capability_boundary")
+                    finally:
+                        _libcap.cap_free(_empty)
+            if "capability_boundary" not in _failed:
+                # Verification: read all five sets back and prove every
+                # dangerous bit absent. cap_get_flag reads
+                # effective/permitted/inheritable (flags 0/1/2),
+                # cap_get_ambient the ambient set, cap_get_bound the
+                # bounding set — none need /proc inside the chroot.
+                _libcap.cap_get_proc.restype = _ct.c_void_p
+                _libcap.cap_get_flag.argtypes = [
+                    _ct.c_void_p, _ct.c_uint, _ct.c_uint,
+                    _ct.POINTER(_ct.c_uint)]
+                _libcap.cap_get_bound.argtypes = [_ct.c_int]
+                _libcap.cap_get_bound.restype = _ct.c_int
+                _libcap.cap_get_ambient.argtypes = [_ct.c_int]
+                _libcap.cap_get_ambient.restype = _ct.c_int
+                _proc_caps = _libcap.cap_get_proc()
+                _flag_out = _ct.c_uint(1)
+                for _cap in _cap_list:
+                    _in_bnd = _libcap.cap_get_bound(_cap)
+                    _in_amb = _libcap.cap_get_ambient(_cap)
+                    _in_sets = 0
+                    for _fl in (0, 1, 2):
+                        _flag_out = _ct.c_uint(1)
+                        if _libcap.cap_get_flag(
+                                _proc_caps, _cap, _fl,
+                                _ct.byref(_flag_out)) != 0:
+                            _in_sets = -1
+                            break
+                        if _flag_out.value:
+                            _in_sets = 1
+                    if (_in_bnd != 0 or _in_amb != 0 or _in_sets != 0):
+                        _enf["capability_boundary_error"] = (
+                            "verification failed cap=%d bnd=%d amb=%d"
+                            " sets=%d" % (_cap, _in_bnd, _in_amb,
+                                          _in_sets))
+                        _failed.append("capability_boundary")
+                        break
+                _libcap.cap_free(_proc_caps)
+            if "capability_boundary" not in _failed:
                 _enf["capability_boundary_dropped"] = True
                 _enf["capability_boundary_caps"] = _dropped_caps
+                _enf["capability_boundary_verified"] = True
+                _enf["capability_boundary_sets"] = (
+                    "eff/prm/inh empty; amb cleared; bnd cleared")
         except Exception as _e:
             _enf["capability_boundary_error"] = str(_e)
             _failed.append("capability_boundary")

@@ -1940,6 +1940,60 @@ def _make_escape_probe_module(tmp_path: Path) -> Path:
     return mod
 
 
+def _libcap():
+    """Load libcap with the minimal typed surface the seeding proofs
+    need, or return None when unavailable (tests skip)."""
+    import ctypes
+    try:
+        lc = ctypes.CDLL("libcap.so.2", use_errno=True)
+    except OSError:
+        return None
+    lc.cap_init.restype = ctypes.c_void_p
+    lc.cap_set_proc.argtypes = [ctypes.c_void_p]
+    lc.cap_set_proc.restype = ctypes.c_int
+    lc.cap_free.argtypes = [ctypes.c_void_p]
+    lc.cap_set_flag.argtypes = [ctypes.c_void_p, ctypes.c_int,
+                                ctypes.c_int,
+                                ctypes.POINTER(ctypes.c_int), ctypes.c_int]
+    lc.cap_set_flag.restype = ctypes.c_int
+    return lc
+
+
+def _seed_inheritable_and_ambient(lc, caps=(18, 21)):
+    """Seed the CALLING process with the dangerous capabilities in the
+    inheritable AND ambient sets (keeping CAP_SETPCAP so restoration is
+    possible) — the R8 adversarial environment. Returns a restore fn."""
+    import ctypes
+    cap_t = lc.cap_init()
+    if not cap_t:
+        return None
+    arr = (ctypes.c_int * len(caps))(*caps)
+    keep = (8,) + tuple(caps)            # CAP_SETPCAP survives for restore
+    arr_keep = (ctypes.c_int * len(keep))(*keep)
+    for flag in (0, 1):                  # effective, permitted
+        lc.cap_set_flag(cap_t, flag, len(keep), arr_keep, 1)
+    lc.cap_set_flag(cap_t, 2, len(caps), arr, 1)   # inheritable: seed only
+    ok = lc.cap_set_proc(cap_t) == 0
+    lc.cap_free(cap_t)
+    if not ok:
+        return None
+    libc = ctypes.CDLL(None, use_errno=True)
+    for c in caps:
+        libc.prctl(39, 2, c, 0, 0)       # PR_CAP_AMBIENT, RAISE
+
+    def _restore():
+        full = tuple(range(0, 41))
+        arr_full = (ctypes.c_int * len(full))(*full)
+        rt = lc.cap_init()
+        lc.cap_set_flag(rt, 0, len(full), arr_full, 1)
+        lc.cap_set_flag(rt, 1, len(full), arr_full, 1)
+        # inheritable restored to empty (the common root default)
+        lc.cap_set_proc(rt)
+        lc.cap_free(rt)
+        libc.prctl(39, 4, 0, 0, 0)       # PR_CAP_AMBIENT CLEAR_ALL
+    return _restore
+
+
 def _make_sitecustomize_module(pkg: Path) -> Path:
     """A node package whose root also contains an adversarial
     sitecustomize.py (the pre-enforcement startup injection vector). The
@@ -2026,6 +2080,7 @@ class TestPrivilegedR7Proofs:
         # EPERM is proven directly in the sacrificial probe below).
         md = result["supervised_execution"]["sandbox_metadata"]
         assert md.get("capability_boundary_dropped") is True, md
+        assert md.get("capability_boundary_verified") is True, md
         assert 18 in md.get("capability_boundary_caps", []), md   # SYS_CHROOT
         assert 21 in md.get("capability_boundary_caps", []), md   # SYS_ADMIN
 
@@ -2088,6 +2143,124 @@ class TestPrivilegedR7Proofs:
         )
         out = proc.stdout.strip().splitlines()[-1]
         assert "errno=1" in out, out        # EPERM from the kernel
+
+    @pytest.mark.asyncio
+    async def test_seeded_capabilities_cleared_across_exec(self, tmp_path):
+        """R8 adversarial proof: the process tree is DELIBERATELY seeded
+        with CAP_SYS_CHROOT + CAP_SYS_ADMIN in the inheritable AND ambient
+        sets (the kernel's exec-survival vectors that a bounding-set drop
+        alone does not prune) before the supervised bootstrap runs. The
+        trusted boundary evidence must still prove the five-set verified
+        state, and the workload must execute normally."""
+        if not _can_unshare_pid_ns():
+            pytest.skip("host cannot unshare PID ns")
+        lc = _libcap()
+        if lc is None:
+            pytest.skip("libcap unavailable")
+        restore = _seed_inheritable_and_ambient(lc, caps=(18, 21))
+        if restore is None:
+            pytest.skip("capability seeding unavailable on this host")
+        try:
+            mod = _make_module(tmp_path)
+            r = SubprocessRunner(timeout_seconds=60, max_output_bytes=100_000)
+            result = await r.run_isolated(
+                _envelope(), mod, "TNode", "seeded_node",
+                trust_level="local_untrusted",
+            )
+        finally:
+            restore()
+        if not result["success"]:
+            sup = result.get("supervised_execution", {})
+            assert sup.get("process_started") is False, result
+            pytest.skip(
+                f"supervised topology unavailable: "
+                f"{(sup.get('reason') or '')[:120]}"
+            )
+        md = result["supervised_execution"]["sandbox_metadata"]
+        assert md.get("capability_boundary_verified") is True, md
+        assert md.get("capability_boundary_dropped") is True, md
+        assert 18 in md.get("capability_boundary_caps", []), md
+        assert 21 in md.get("capability_boundary_caps", []), md
+
+    def test_kernel_chroot_denied_with_seeded_caps(self, tmp_path):
+        """R8 kernel-level adversarial proof: the sacrificial child seeds
+        inheritable+ambient CAP_SYS_CHROOT/CAP_SYS_ADMIN AFTER confinement
+        but BEFORE the boundary sequence (bounding drops → ambient clear →
+        empty cap_set_proc), then execs — the seeded capabilities must not
+        survive: the raw libc chroot in the post-exec process is EPERM."""
+        if not _can_unshare_pid_ns():
+            pytest.skip("host cannot unshare PID ns")
+        pkg = tmp_path / "seed_pkg"
+        pkg.mkdir()
+        (pkg / "m.py").write_text("x = 1\n", encoding="utf-8")
+        stage2 = (
+            "import ctypes, sys\n"
+            "libc = ctypes.CDLL(None, use_errno=True)\n"
+            "ctypes.set_errno(0)\n"
+            "rc = libc.chroot(b'/tmp')\n"
+            "err = ctypes.get_errno()\n"
+            "print('chroot rc=%d errno=%d' % (rc, err))\n"
+            "sys.exit(0 if rc != 0 else 7)\n"
+        )
+        child = (
+            "import ctypes, os, sys, tempfile\n"
+            "from nodechain.sdk.namespace_profile import apply_mount_confinement\n"
+            "tmpd = tempfile.mkdtemp(prefix='seed_')\n"
+            "r = apply_mount_confinement(package_root=sys.argv[1], temp_dir=tmpd,\n"
+            "                            extra_mounts=[(d, d) for d in ('/usr','/lib','/lib64') if os.path.isdir(d)],\n"
+            "                            read_only_targets=['/package','/usr','/lib','/lib64'])\n"
+            "if not r.get('mount_confinement_enforced'):\n"
+            "    print('confinement_failed'); sys.exit(3)\n"
+            "# ADVERSARIAL SEED: inheritable + ambient SYS_CHROOT/SYS_ADMIN\n"
+            "lc = ctypes.CDLL('libcap.so.2', use_errno=True)\n"
+            "lc.cap_init.restype = ctypes.c_void_p\n"
+            "lc.cap_set_proc.argtypes = [ctypes.c_void_p]\n"
+            "lc.cap_free.argtypes = [ctypes.c_void_p]\n"
+            "lc.cap_set_flag.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_int), ctypes.c_int]\n"
+            "seed = [18, 21]\n"
+            "cap_t = lc.cap_init()\n"
+            "arr_seed = (ctypes.c_int * len(seed))(*seed)\n"
+            "full = list(range(0, 41))\n"
+            "arr_full = (ctypes.c_int * len(full))(*full)\n"
+            "for fl in (0, 1):\n"
+            "    lc.cap_set_flag(cap_t, fl, len(full), arr_full, 1)\n"
+            "lc.cap_set_flag(cap_t, 2, len(seed), arr_seed, 1)\n"
+            "ok = lc.cap_set_proc(cap_t) == 0\n"
+            "lc.cap_free(cap_t)\n"
+            "if not ok:\n"
+            "    print('seed_failed'); sys.exit(5)\n"
+            "libc = ctypes.CDLL(None, use_errno=True)\n"
+            "for c in seed:\n"
+            "    libc.prctl(39, 2, c, 0, 0)  # PR_CAP_AMBIENT RAISE\n"
+            "# THE BOUNDARY (mirrors the bootstrap's R8 sequence)\n"
+            "for cap in (8, 16, 17, 18, 19, 21, 22, 25, 26, 27, 31, 34, 38, 39, 40):\n"
+            "    ctypes.set_errno(0)\n"
+            "    rc = libc.prctl(24, cap, 0, 0, 0)\n"
+            "    if rc != 0 and ctypes.get_errno() != 22:\n"
+            "        print('capdrop_failed'); sys.exit(4)\n"
+            "libc.prctl(39, 4, 0, 0, 0)     # PR_CAP_AMBIENT CLEAR_ALL\n"
+            "empty = lc.cap_init()\n"
+            "rc = lc.cap_set_proc(empty)\n"
+            "lc.cap_free(empty)\n"
+            "if rc != 0:\n"
+            "    print('capset_failed'); sys.exit(6)\n"
+            "import sysconfig\n"
+            "_ld = sysconfig.get_config_var('LIBDIR') or ''\n"
+            "os.execve(sys.executable,\n"
+            "          [sys.executable, '-c', sys.argv[2]],\n"
+            "          {'PATH': '/usr/bin:/bin', 'LD_LIBRARY_PATH': _ld})\n"
+        )
+        import subprocess as _sp
+        proc = _sp.run(
+            [sys.executable, "-c", child, str(pkg), stage2],
+            capture_output=True, text=True, timeout=60,
+        )
+        assert proc.returncode == 0, (
+            f"seeded sacrificial probe failed: rc={proc.returncode} "
+            f"{proc.stdout.strip()[-200:]}"
+        )
+        out = proc.stdout.strip().splitlines()[-1]
+        assert "errno=1" in out, out        # EPERM: seeded caps did not survive
 
     @pytest.mark.asyncio
     async def test_adversarial_sitecustomize_inert(self, tmp_path,
