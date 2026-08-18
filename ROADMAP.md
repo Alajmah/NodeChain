@@ -1,8 +1,8 @@
 # NodeChain Roadmap — Post-Rebaseline
 
 **Document class:** Future work  
-**Baseline date:** 2026-08-14  
-**Baseline SHA:** `71afaef186dca695770c73f212a7f198e97dac2b`  
+**Baseline date:** 2026-08-17  
+**Baseline SHA:** `068120f6a46797182d33e100b5dadfc8ccc77b4f`  
 **Current released version:** `v3.6.0`  
 **Current implementation truth:** [BASELINE.md](BASELINE.md)
 
@@ -29,28 +29,6 @@ The roadmap is organized by outcomes rather than pre-assigned release numbers. A
 **Objective:** remove the remaining contradictions that prevent NodeChain from making a literal “one governed execution truth” claim across the important production and product-proof paths.
 
 These are bounded corrections identified by the current code/document rebaseline. They are not a new platform expansion phase.
-
-## H0.2 — T3 generic POSIX untrusted-node routing
-
-**Observed gap**
-
-The hardened supervised Linux execution substrate exists, but `SubprocessRunner.run_isolated()` explicitly rejects POSIX `local_untrusted` / `remote_untrusted` node execution with `supervised_backend_required` until T3 routing/result mapping is complete.
-
-**Required outcome**
-
-Either:
-
-- route the ordinary `NodeInvoker → SubprocessRunner` untrusted POSIX path into the supervised backend with truthful result mapping; or
-- retain the explicit fail-closed fence until that routing is fully qualified.
-
-No legacy weaker POSIX fallback is acceptable.
-
-**Exit evidence**
-
-- one governed backend owns ordinary POSIX untrusted node execution;
-- `NodeInvoker` sees truthful start/exit/timeout/output/containment results;
-- no double-spawn or parallel containment authority;
-- qualified Linux host evidence covers the integrated production path.
 
 ## H0.6 — Deployment profile truth
 

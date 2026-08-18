@@ -1,8 +1,8 @@
 # NodeChain Current Architecture
 
 **Document class:** Descriptive architecture  
-**Baseline date:** 2026-08-14  
-**Implementation code baseline:** `71afaef186dca695770c73f212a7f198e97dac2b`  
+**Baseline date:** 2026-08-17  
+**Implementation code baseline:** `068120f6a46797182d33e100b5dadfc8ccc77b4f`  
 **Released version at baseline:** `v3.6.0`  
 **Current-state summary:** [BASELINE.md](BASELINE.md)  
 **Strategic source:** [VISION.md](VISION.md)
@@ -305,14 +305,15 @@ NodeInvoker
 SubprocessRunner.run_isolated()
 ```
 
-On POSIX, `SubprocessRunner.run_isolated()` currently contains an explicit T3.0 fence for `local_untrusted` / `remote_untrusted` and returns `supervised_backend_required` before workload spawn.
+On POSIX, `SubprocessRunner.run_isolated()` routes `local_untrusted` / `remote_untrusted` requests through the supervised backend (`_run_supervised_untrusted()`), which owns the entire spawn/lifecycle: PID-namespace topology, requested namespaces, read-only mount confinement, the five-set capability boundary, requested seccomp, and ptrace exec authority. The result mapping preserves supervisor truth (not-started vs started-failed, timeout, output-cap, SIGSYS classification, cleanup-dominates) in the compatibility shape, with the `supervised_execution` evidence projection on success and failure.
 
 Therefore:
 
 ```text
 supervised Linux substrate: implemented
-ordinary POSIX untrusted-node routing into it: not yet integrated
-legacy weaker POSIX fallback: deliberately disabled
+ordinary POSIX untrusted-node routing into it: integrated (H0.2)
+legacy weaker POSIX fallback: does not exist under any condition
+enforcement host requirement: privileged Linux; elsewhere fail-closed before workload start
 ```
 
 Documentation and deployment profiles must preserve this distinction.
@@ -472,7 +473,7 @@ Some native/sandbox command-runner paths have their own qualification evidence. 
 | Local trusted development | SDK/CLI/runtime development and trusted-node execution | Supported |
 | GitHub-hosted CI | Cross-platform regression, packaging, Publication Tree, non-privileged behavior | Supported; not privileged Linux containment proof |
 | Privileged Linux verification | Native/supervised containment qualification on a capability-qualified host | Supported as a qualification profile |
-| Generic POSIX untrusted Harness Node execution | Ordinary `NodeInvoker` untrusted path | Fail-closed pending T3 routing |
+| Generic POSIX untrusted Harness Node execution | Ordinary `NodeInvoker` untrusted path | Supervised routing (enforced on privileged Linux; fail-closed before workload start elsewhere) |
 | Windows control-plane/development | CLI/SDK/general runtime behavior without Linux-equivalent containment claims | Supported within platform limits |
 | Managed multi-tenant service | Enterprise hosted execution | Not implemented |
 

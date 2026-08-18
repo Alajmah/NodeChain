@@ -118,6 +118,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   provisional preparation is not itself an authoritative transition. No
   H0.4 trace redesign, no RecoveryService redesign, no replay.
 
+- **H0.2 — Supervised untrusted execution routing (T3).**
+  Ordinary POSIX `local_untrusted` / `remote_untrusted` invocation now
+  routes through the supervised backend as the single spawn/lifecycle
+  authority: the legacy POSIX spawn body is unreachable for untrusted
+  trust levels and no try-supervised-except-legacy fallback exists
+  under any condition. The frozen outcome matrix maps supervisor truth
+  into the compatibility shape (parent/setup failures -1;
+  supervisor-existed-but-unconfirmed 126; not-started vs started-failed
+  discrimination; timeout; output-cap; SIGSYS→seccomp-kill exit -31;
+  cleanup-dominates), with the `supervised_execution` evidence
+  projection on success AND failure. Containment boundaries qualified:
+  read-only bind mounts (`/package` and all runtime extras via
+  `MS_REMOUNT|MS_BIND|MS_RDONLY`, `/tmp` writable, fail-closed on any
+  refused remount); a durable five-set capability boundary (bounding
+  drops while `CAP_SETPCAP` is effective, ambient clear, empty
+  effective/permitted/inheritable via libcap, read-back verification of
+  every dangerous bit across all five sets before
+  `enforcement_verified`, proven against deliberately seeded
+  ambient+inheritable `CAP_SYS_CHROOT`/`CAP_SYS_ADMIN`); trust-rooted
+  interpreter startup (workload `python -I -c`; child SDK imports from
+  the resolved trusted installation, never the caller cwd; supervisor
+  `python -P -m`; bootstrap `python -P -c`; adversarial fake-cwd
+  package proof); real requested-seccomp enforcement when a filter
+  binding exists (available→enforced→verified→exec-confirmed chain;
+  kernel SIGSYS denial via a denied `os.fork` workload; binding
+  preloaded before the confinement chroot because
+  `ctypes.util.find_library` cannot resolve inside it); workload
+  equivalence preserved (nested module paths under an ancestor package
+  root, module-outside-root fails closed in the parent,
+  TEMP/TMP/TMPDIR advertise the workload-visible `/tmp`, trusted
+  seccomp flags projected into `EnvelopeResponse.metadata`). The
+  supervisor's metadata-reader probe distinguishes ptrace stops from
+  terminal child death (si_code-based), and the bootstrap blocks
+  SIGCHLD noise (seccomp-binding import vforks) with the original mask
+  restored before workload exec. On hosts without the privileges the
+  topology needs, the route fails closed before workload start —
+  hosted CI asserts that truth. Adversarial proofs on privileged
+  Linux include the classic double-chroot escape (kernel-denied with
+  and without optional seccomp), the sacrificial two-stage
+  confinement→capdrop→exec→`chroot` EPERM probe, adversarial
+  `sitecustomize`/PYTHONPATH startup hooks (inert), and the fake
+  `nodechain` package in the parent cwd (never imported).
+  Qualification at merge: privileged structural set 374 passed /
+  72 skipped / 0 failed; Windows full suite 7438 passed / 0 failed;
+  exact-head CI 10/10 and Publication Tree 2/2 at both the PR head
+  (`18dc2a7058db19a98831e239715ac3026f49e973`) and the master squash
+  SHA (`068120f6a46797182d33e100b5dadfc8ccc77b4f`). Deployment-profile
+  truths deferred to H0.6: editable/source-backed installs and
+  custom-prefix interpreter layouts fail closed under mount
+  confinement; no cgroup support on the supervised route (requested
+  cgroups are refused before start with `supervised_cgroup_unsupported`).
+
 ## [3.6.0] — First Public-Era Release
 
 **Release type:** feature + governance (minor).

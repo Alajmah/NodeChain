@@ -1,8 +1,8 @@
 # NodeChain Current Public Surfaces
 
 **Document class:** Descriptive compatibility map  
-**Baseline date:** 2026-08-14  
-**Baseline SHA:** `71afaef186dca695770c73f212a7f198e97dac2b`  
+**Baseline date:** 2026-08-17  
+**Baseline SHA:** `068120f6a46797182d33e100b5dadfc8ccc77b4f`  
 **Released version:** `v3.6.0`
 
 This document is the current companion to the historical `docs/frozen-surfaces.md` v1 compatibility contract.
@@ -90,7 +90,7 @@ remote_untrusted
 
 Current execution behavior must additionally be read with `BASELINE.md` and `docs/linux-deployment.md` because trust identity and execution availability are distinct.
 
-At the development baseline, ordinary POSIX `local_untrusted` / `remote_untrusted` execution through `SubprocessRunner.run_isolated()` is deliberately fail-closed pending T3 supervised routing. The existence of a trust-level enum does not imply a currently enabled execution backend on every platform/profile.
+At the development baseline, ordinary POSIX `local_untrusted` / `remote_untrusted` execution through `SubprocessRunner.run_isolated()` routes into the supervised backend (H0.2). Enforcement requires a privileged Linux host; on every other platform or profile the invocation fails closed before workload start with `process_started=false`. The existence of a trust-level enum does not imply an enforced execution backend on every platform/profile.
 
 ---
 
