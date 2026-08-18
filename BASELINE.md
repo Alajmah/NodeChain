@@ -2,9 +2,9 @@
 
 **Document class:** Descriptive baseline  
 **Status:** Active development truth  
-**Baseline date:** 2026-08-17  
+**Baseline date:** 2026-08-18  
 **Released version:** `v3.6.0`  
-**Implementation code baseline:** `068120f6a46797182d33e100b5dadfc8ccc77b4f` (the `master` code state at the H0.2 supervised untrusted execution routing, including the read-only bind-mount, seccomp/ptrace, five-set capability-boundary, and startup trust-root corrections)  
+**Implementation code baseline:** `78f98252173eb38d4284ed92f0fd3343c5c5ce21` (the `master` state at the H0.6 deployment-profile closure — implementation squash `068120f6` plus the canonical deployment-profile documentation; Horizon 0 is closed)  
 **Supersedes for current-state claims:** implementation/status sections in older README, VISION, ROADMAP, and architecture snapshots
 
 This document answers one question: **what does the NodeChain codebase actually contain and support at the pinned implementation baseline?** Documentation-only commits may follow this SHA without changing the implementation facts recorded here.
@@ -20,7 +20,7 @@ NodeChain has two legitimate anchors and they must not be conflated.
 | Anchor | Value | Meaning |
 |---|---|---|
 | Released product baseline | `v3.6.0` | Latest packaged/released version represented by `pyproject.toml` and `nodechain.__version__` |
-| Implementation code baseline | `068120f6a46797182d33e100b5dadfc8ccc77b4f` | `master` code state at the H0.2 supervised untrusted execution routing including the read-only bind-mount, seccomp/ptrace, five-set capability-boundary, and startup trust-root corrections; includes post-v3.6 work merged through PR #25 |
+| Implementation code baseline | `78f98252173eb38d4284ed92f0fd3343c5c5ce21` | `master` state at the H0.6 deployment-profile closure (implementation squash `068120f6` of PR #25 + the canonical deployment-profile documentation of PR #27); Horizon 0 closed |
 
 The implementation baseline includes the `ResearchWorkspaceBundleV1` contract and the governed Research Workspace runner. Those capabilities are **post-v3.6 development state**, not retroactively part of the v3.6.0 release.
 
@@ -275,6 +275,6 @@ The following are the concrete corrections discovered or reaffirmed by the rebas
 4. ~~Route every accepted runtime trace event through one durable emission authority.~~ **Closed in H0.4 (implementation pin `b89c9dd7ba2890d4fa66f89b2b682f036446a591`).** One live `ChainTrace` append authority (`_record_trace_event`, durable-first, same object); first-class `trace_event_id` for authoritative durable trace rows including operator/recovery events; one `get_trace_events()` projection; AST guard enforces exactly one `.add_event()` call in all of `src/nodechain/`.
 5. ~~Consolidate authoritative state transitions behind one durability-before-acknowledgement boundary.~~ **Closed in H0.5 (implementation pin `71afaef186dca695770c73f212a7f198e97dac2b`).** Authoritative/accepted `ChainState` transition boundaries use candidate copy → durable commit → adopt; failed commits leave the accepted state untouched with no revision consumed; lifecycle state and asserting trace events commit in one transaction; resume control-marker removals are candidate-owned. Scheduler-local provisional preparation is not itself an authoritative transition.
 6. Connect evaluation to the complete governed runtime where the evaluation claim requires runtime-level evidence.
-7. Keep deployment-profile documentation explicit about which execution path and host capability profile is being claimed.
+7. ~~Keep deployment-profile documentation explicit about which execution path and host capability profile is being claimed.~~ **Closed in H0.6 (truth pin `78f98252173eb38d4284ed92f0fd3343c5c5ce21`).** The canonical six-profile matrix with dispositions and the evidence ledger is `docs/deployment-profiles.md`; every current descriptive document links to it rather than maintaining competing detail, and the claim-audit gate holds at zero contradictory deployment claims.
 
 The roadmap must not reopen already-proven features merely because stronger or broader variants are possible. New work should close one of these concrete boundaries or advance a separately stated product outcome.
