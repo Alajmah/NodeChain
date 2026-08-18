@@ -477,7 +477,7 @@ Some native/sandbox command-runner paths have their own qualification evidence. 
 | Windows control-plane/development | CLI/SDK/general runtime behavior without Linux-equivalent containment claims | Supported within platform limits |
 | Managed multi-tenant service | Enterprise hosted execution | Not implemented |
 
-See `docs/linux-deployment.md` for operational detail.
+The canonical profile authority — full field-level matrix, dispositions, and evidence ledger — is `docs/deployment-profiles.md`. See `docs/linux-deployment.md` for Linux operational detail.
 
 ---
 

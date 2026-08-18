@@ -118,6 +118,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   provisional preparation is not itself an authoritative transition. No
   H0.4 trace redesign, no RecoveryService redesign, no replay.
 
+- **H0.6 — Deployment profile truth.**
+  Establishes `docs/deployment-profiles.md` as the canonical
+  deployment-profile authority: the six-profile matrix (trusted local
+  development, GitHub-hosted CI, privileged Linux verification, generic
+  POSIX untrusted execution, Windows control-plane, and the future
+  managed/delegated profile recorded as not implemented), each with
+  intended use, host prerequisites, execution backend, enforced
+  controls, failure behavior, qualification evidence, and hard
+  not-claimed limits. The load-bearing distinction is recorded once:
+  trust identity says what the workload is; the deployment profile
+  decides whether a qualified backend exists to execute it. Deferred
+  H0.2 deployment truths receive explicit dispositions —
+  editable/source-backed installs and custom-prefix interpreter
+  layouts are unsupported under mount confinement and fail closed;
+  requested cgroups are refused before start; `WNOWAIT` is qualified
+  only on the Linux family the suites run on; the host `package_root`
+  pathname is informational in the trusted child context; missing
+  privileges or a missing seccomp binding fail closed before workload
+  start; Windows containment is documented as unavailable rather than
+  equivalent. The pre-H0.2 T3-fence story is retired from
+  `README.md`, `docs/linux-deployment.md` (rewritten as the Linux
+  operational appendix around the now-active supervised route), and
+  `docs/ci.md`; stale implementation-baseline pins in those three
+  documents are advanced to the H0.2 implementation squash. The
+  external-verification native-sandbox containment sentence now names
+  the four proven v2.78 primitives (mount confinement, network
+  namespace, PID/procfs isolation, seccomp) instead of implying
+  cgroup enforcement the displayed evidence does not identify.
+  ARCHITECTURE/BASELINE/public-surfaces/documentation-authority link
+  to the canonical matrix rather than maintaining competing detail.
+  Documentation only — no runtime change; H0.2 sealed evidence is
+  reused unchanged per the frozen H0.6 plan.
+
 - **H0.2 — Supervised untrusted execution routing (T3).**
   Ordinary POSIX `local_untrusted` / `remote_untrusted` invocation now
   routes through the supervised backend as the single spawn/lifecycle

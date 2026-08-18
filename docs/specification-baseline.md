@@ -1,8 +1,8 @@
 # NodeChain System Specification — Implementation Mapping
 
 **Document class:** Descriptive mapping to normative sources  
-**Baseline date:** 2026-08-10  
-**Baseline SHA:** `af1943c24a58d80ae048b9b9d50842cf0e0b27d1`
+**Baseline date:** 2026-08-18  
+**Baseline SHA:** `068120f6a46797182d33e100b5dadfc8ccc77b4f`
 
 This document maps the current implementation to the NodeChain **System Specification** and the original **Reference Implementation** without rewriting either source to match temporary code state.
 
@@ -187,10 +187,10 @@ A reusable node remains subject to trust, policy, side-effect, trace, validation
 
 The current implementation still has several authority seams documented in `BASELINE.md` and `ARCHITECTURE.md`:
 
-- the lightweight `chain_orchestrator.py` can directly execute a node outside the full orchestrator;
-- not every runtime trace write has been consolidated through one durable emitter path;
-- authoritative state transitions are not yet expressed through one explicit transition coordinator;
-- generic POSIX untrusted Harness Node execution remains fail-closed pending T3 supervised routing;
+- the lightweight `chain_orchestrator.py` direct-execution seam is closed (H0.3: legacy composition execution is fail-closed);
+- runtime trace writes are consolidated through one durable emitter path (H0.4);
+- authoritative state transitions are expressed through one explicit transition boundary (H0.5);
+- generic POSIX untrusted Harness Node execution is routed through the supervised backend (H0.2: one governed backend, no legacy fallback, fail-closed on hosts lacking the required privileges);
 - evaluation can run structurally or through direct-node quality paths rather than always through the complete governed runtime;
 - multi-tenant/managed service controls remain future work.
 

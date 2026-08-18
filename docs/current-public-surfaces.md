@@ -88,7 +88,7 @@ local_untrusted
 remote_untrusted
 ```
 
-Current execution behavior must additionally be read with `BASELINE.md` and `docs/linux-deployment.md` because trust identity and execution availability are distinct.
+Current execution behavior must additionally be read with `docs/deployment-profiles.md` (the canonical profile matrix), `BASELINE.md`, and `docs/linux-deployment.md` because trust identity and execution availability are distinct.
 
 At the development baseline, ordinary POSIX `local_untrusted` / `remote_untrusted` execution through `SubprocessRunner.run_isolated()` routes into the supervised backend (H0.2). Enforcement requires a privileged Linux host; on every other platform or profile the invocation fails closed before workload start with `process_started=false`. The existence of a trust-level enum does not imply an enforced execution backend on every platform/profile.
 

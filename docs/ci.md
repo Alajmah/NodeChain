@@ -1,8 +1,9 @@
 # NodeChain CI and Qualification Contract
 
 **Document class:** Operational / descriptive  
-**Baseline date:** 2026-08-10  
-**Implementation code baseline:** `af1943c24a58d80ae048b9b9d50842cf0e0b27d1`  
+**Baseline date:** 2026-08-18  
+**Implementation code baseline:** `068120f6a46797182d33e100b5dadfc8ccc77b4f`  
+**Canonical profile authority:** [docs/deployment-profiles.md](deployment-profiles.md)  
 **Authoritative configuration:** `.github/workflows/ci.yml`, `.github/workflows/publication-tree.yml`, and branch protection
 
 The version is currently `3.6.0`. Post-v3.6 development state is described separately in `BASELINE.md`; this version statement tracks the installed/released package version used by the release-truth guards.
@@ -265,7 +266,7 @@ If the release makes a native-containment claim beyond hosted capabilities, the 
 
 A fully green protected check set does not by itself prove:
 
-- generic POSIX untrusted Harness Node routing through the supervised backend (T3 remains a code integration boundary at the baseline);
+- privileged enforcement of the supervised route on arbitrary deployment hosts (the supervised backend owns the generic POSIX untrusted route at this baseline, but hosted CI runners cannot provide its privileges — those runs assert the fail-closed truth only; see the canonical profile matrix);
 - privileged Linux namespace/seccomp/cgroup/ptrace behavior on every deployment host;
 - production service SLOs or scale;
 - multi-tenant isolation;

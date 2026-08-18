@@ -43,7 +43,7 @@ Each claim has a corresponding evidence path.
 
 | Open question | Status | Why it's open |
 |---|---|---|
-| Complete hostile-code containment | Not claimed | The native sandbox enforces namespace/seccomp/cgroup isolation, but this is not a formal kernel-escape proof |
+| Complete hostile-code containment | Not claimed | The native sandbox enforces mount-confinement/network-namespace/PID-procfs/seccomp isolation (the four proven v2.78 primitives), but this is not a formal kernel-escape proof |
 | Unprivileged production deployment | Not proven | The native sandbox backend requires root; unprivileged userns support is future work |
 | Docker backend | Not shipped | No concrete blocker justifies Docker over the native path yet |
 | GHA-native sandbox enforcement | Not claimed | The self-hosted runner is non-root and cannot execute namespace/chroot operations |

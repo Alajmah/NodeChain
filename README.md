@@ -24,9 +24,9 @@ NodeChain now separates strategy, current implementation truth, architecture, ro
 ### Release vs implementation baseline
 
 - **Released version:** `v3.6.0`
-- **Implementation code baseline traced for this rebaseline:** `af1943c24a58d80ae048b9b9d50842cf0e0b27d1`
+- **Implementation code baseline traced for this rebaseline:** `068120f6a46797182d33e100b5dadfc8ccc77b4f`
 
-That SHA is the `master` code state examined before this documentation-only wave. The implementation baseline includes the post-v3.6 `ResearchWorkspaceBundleV1` contract and governed Research Workspace merged in PR #12 and PR #13. Those features are not retroactively part of the v3.6.0 release. Documentation-only commits may follow the pinned implementation SHA without changing the implementation facts.
+That SHA is the `master` implementation squash of PR #25 (H0.2 supervised untrusted execution routing). The implementation baseline includes the post-v3.6 `ResearchWorkspaceBundleV1` contract, the governed Research Workspace, and the Horizon 0 corrections merged through PR #25. Those features are not retroactively part of the v3.6.0 release. Documentation-only commits may follow the pinned implementation SHA without changing the implementation facts.
 
 ---
 
@@ -174,8 +174,7 @@ Later versions add further invariants for profiles, sandbox capabilities, cgroup
 At the pinned implementation baseline:
 
 - built-in and trusted paths can execute through the ordinary runtime according to policy;
-- the hardened supervised Linux execution substrate exists;
-- **ordinary POSIX `local_untrusted` / `remote_untrusted` node invocation is deliberately fail-closed in `SubprocessRunner.run_isolated()` pending T3 supervised routing into the generic `NodeInvoker` path**;
+- **ordinary POSIX `local_untrusted` / `remote_untrusted` node invocation routes through the supervised backend** (H0.2 sealed): it executes with containment evidence on a qualified privileged Linux host and fails closed before workload start on any host lacking the required privileges;
 - Windows does not claim equivalence to Linux PID namespaces, seccomp, procfs isolation, or cgroup semantics.
 
 ### Historical seccomp compatibility anchor
@@ -195,9 +194,9 @@ nodechain run "query" \
   --trust-check
 ```
 
-Both `production_untrusted` and `hardened_untrusted` are named compatibility anchors for historical production-deployment recipes. On the pinned POSIX implementation baseline, neither preset bypasses the T3 safety fence for a genuinely untrusted Harness Node. A required containment path that is not available must fail closed rather than silently downgrade.
+Both `production_untrusted` and `hardened_untrusted` are named compatibility anchors for historical production-deployment recipes. On the pinned POSIX implementation baseline, both presets route genuinely untrusted Harness Nodes through the supervised backend; on a host without the required privileges the invocation fails closed rather than silently downgrading.
 
-See [docs/linux-deployment.md](docs/linux-deployment.md) and [BASELINE.md](BASELINE.md#6-untrusted-execution-baseline) before making deployment or containment claims.
+See [docs/deployment-profiles.md](docs/deployment-profiles.md), [docs/linux-deployment.md](docs/linux-deployment.md), and [BASELINE.md](BASELINE.md#6-untrusted-execution-baseline) before making deployment or containment claims.
 
 ---
 
