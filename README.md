@@ -24,9 +24,9 @@ NodeChain now separates strategy, current implementation truth, architecture, ro
 ### Release vs implementation baseline
 
 - **Released version:** `v3.6.0`
-- **Implementation code baseline traced for this rebaseline:** `068120f6a46797182d33e100b5dadfc8ccc77b4f`
+- **Implementation code baseline traced for this rebaseline:** `78f98252173eb38d4284ed92f0fd3343c5c5ce21`
 
-That SHA is the `master` implementation squash of PR #25 (H0.2 supervised untrusted execution routing). The implementation baseline includes the post-v3.6 `ResearchWorkspaceBundleV1` contract, the governed Research Workspace, and the Horizon 0 corrections merged through PR #25. Those features are not retroactively part of the v3.6.0 release. Documentation-only commits may follow the pinned implementation SHA without changing the implementation facts.
+That SHA is the `master` squash of PR #27 (the H0.6 deployment-profile closure; its implementation core is the PR #25 supervised-routing squash `068120f6`). The implementation baseline includes the post-v3.6 `ResearchWorkspaceBundleV1` contract, the governed Research Workspace, and the Horizon 0 corrections merged through PR #25 and PR #27. Those features are not retroactively part of the v3.6.0 release. Documentation-only commits may follow the pinned implementation SHA without changing the implementation facts.
 
 ---
 

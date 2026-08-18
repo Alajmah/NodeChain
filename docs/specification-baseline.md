@@ -2,7 +2,7 @@
 
 **Document class:** Descriptive mapping to normative sources  
 **Baseline date:** 2026-08-18  
-**Baseline SHA:** `068120f6a46797182d33e100b5dadfc8ccc77b4f`
+**Baseline SHA:** `78f98252173eb38d4284ed92f0fd3343c5c5ce21`
 
 This document maps the current implementation to the NodeChain **System Specification** and the original **Reference Implementation** without rewriting either source to match temporary code state.
 

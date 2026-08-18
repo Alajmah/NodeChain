@@ -151,6 +151,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Documentation only — no runtime change; H0.2 sealed evidence is
   reused unchanged per the frozen H0.6 plan.
 
+- **H0.6 closure — Horizon 0 CLOSED.** Pins the H0.6 truth baseline
+  to `78f98252173eb38d4284ed92f0fd3343c5c5ce21` (the deployment-profile
+  closure squash), closes correction-queue item 7, advances the
+  descriptive document pins, and records Horizon 0 closed in
+  `ROADMAP.md`: H0.1 Research CLI authority, H0.3 singular execution
+  authority, H0.4 singular trace authority, H0.5 authoritative
+  state-transition boundary, H0.2 POSIX supervised untrusted routing,
+  and H0.6 deployment profile truth are all sealed. Post-merge
+  qualification of the H0.6 truth squash: CI 10/10 and Publication
+  Tree 2/2 on `78f9825`. Horizon 1 begins with the Workspace object
+  model.
+
 - **H0.2 — Supervised untrusted execution routing (T3).**
   Ordinary POSIX `local_untrusted` / `remote_untrusted` invocation now
   routes through the supervised backend as the single spawn/lifecycle

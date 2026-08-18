@@ -1,8 +1,8 @@
 # NodeChain Roadmap — Post-Rebaseline
 
 **Document class:** Future work  
-**Baseline date:** 2026-08-17  
-**Baseline SHA:** `068120f6a46797182d33e100b5dadfc8ccc77b4f`  
+**Baseline date:** 2026-08-18  
+**Baseline SHA:** `78f98252173eb38d4284ed92f0fd3343c5c5ce21`  
 **Current released version:** `v3.6.0`  
 **Current implementation truth:** [BASELINE.md](BASELINE.md)
 
@@ -30,20 +30,20 @@ The roadmap is organized by outcomes rather than pre-assigned release numbers. A
 
 These are bounded corrections identified by the current code/document rebaseline. They are not a new platform expansion phase.
 
-## H0.6 — Deployment profile truth
+## Horizon 0 — CLOSED
 
-**Required outcome**
+All six Horizon 0 outcomes are sealed:
 
-Documentation and qualification distinguish at least:
+| Outcome | Implementation pin |
+|---|---|
+| H0.1 Research CLI authority | `f197ecbe4a9ae617ac419342676fd8a89a511f01` |
+| H0.3 Singular execution authority | `989b21fe1d61332f3848474fdfd3e0d9ca1aaf5c` |
+| H0.4 Singular trace authority | `b89c9dd7ba2890d4fa66f89b2b682f036446a591` |
+| H0.5 Authoritative state-transition boundary | `71afaef186dca695770c73f212a7f198e97dac2b` |
+| H0.2 POSIX supervised untrusted routing | `068120f6a46797182d33e100b5dadfc8ccc77b4f` |
+| H0.6 Deployment profile truth | `78f98252173eb38d4284ed92f0fd3343c5c5ce21` |
 
-- trusted local development;
-- GitHub-hosted cross-platform CI;
-- privileged Linux containment verification;
-- generic POSIX untrusted-node execution;
-- Windows control-plane/development behavior;
-- future production delegated/managed execution.
-
-No document may use evidence from one profile to imply qualification of another.
+The canonical deployment-profile authority is `docs/deployment-profiles.md`. Horizon 1 begins with the Workspace object model.
 
 ---
 

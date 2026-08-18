@@ -2,7 +2,7 @@
 
 **Document class:** Descriptive deployment authority  
 **Baseline date:** 2026-08-18  
-**Implementation code baseline:** `068120f6a46797182d33e100b5dadfc8ccc77b4f` (implementation squash of PR #25; documentation commits may follow without changing these facts)  
+**Implementation code baseline:** `78f98252173eb38d4284ed92f0fd3343c5c5ce21` (the H0.6 truth squash; evidence rows below still name the SHAs they were actually produced at)  
 **Current released version:** `v3.6.0`  
 **Current-state summary:** [BASELINE.md](../BASELINE.md)
 
