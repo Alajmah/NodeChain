@@ -109,6 +109,7 @@ Evidence must name the exact code/artifact and environment/profile it proves. Ev
 | What did the original research chain design require? | Original Reference Implementation |
 | What does CI actually prove? | `.github/workflows/*` + `docs/ci.md` |
 | What does a deployment/security proof establish? | The named evidence document at its exact code/environment baseline |
+| What does deployment profile X support? | `docs/deployment-profiles.md` (canonical matrix) + the exact evidence it names |
 
 ---
 

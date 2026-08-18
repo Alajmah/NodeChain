@@ -155,7 +155,7 @@ Containment and startup boundaries qualified at this baseline:
 - requested seccomp is really enforced when a filter binding is present (available → enforced → verified → exec-confirmed chain, kernel SIGSYS denial proof); without a binding the run fails closed before start;
 - on hosts without the privileges the topology needs (hosted CI), the route fails closed before workload start (`process_started=False`) — that is the design truth, never a weaker fallback.
 
-Deployment-profile truths deferred to H0.6: editable/source-backed installations and custom-prefix interpreter layouts (e.g. conda-style paths outside `/usr` and `/venv`) are not supported under mount confinement and fail closed; the host `package_root` pathname is visible to the trusted child context; non-Linux `WNOWAIT` kernel profiles are unqualified.
+Deployment-profile truth is now canonical in `docs/deployment-profiles.md` (the six-profile matrix with dispositions and the evidence ledger): editable/source-backed installations and custom-prefix interpreter layouts are unsupported under mount confinement and fail closed; the host `package_root` pathname is visible to the trusted child context as information only; non-Linux `WNOWAIT` kernel profiles are unqualified; requested cgroups are refused before start.
 
 Therefore the truthful claim is:
 
@@ -237,7 +237,8 @@ NodeChain does not currently claim:
 - distributed worker execution;
 - general multi-tenant isolation and RBAC across organizations;
 - universal Linux compatibility for privileged supervised containment (unprivileged hosts fail closed before workload start, by design);
-- editable/source-backed installations or custom-prefix interpreter layouts under mount confinement (deployment-profile truth deferred to H0.6);
+- editable/source-backed installations or custom-prefix interpreter layouts under mount confinement (disposition recorded in `docs/deployment-profiles.md`);
+- cgroup accounting or limits on the supervised route (requested cgroups are refused before start);
 - Windows equivalence to Linux namespace/seccomp/PID-containment primitives;
 - complete hostile-code security proof;
 - a universal full-orchestrator evaluation path;

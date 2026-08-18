@@ -1,28 +1,31 @@
 # NodeChain Linux Deployment Profiles
 
-**Document class:** Descriptive deployment profile  
-**Baseline date:** 2026-08-10  
-**Implementation code baseline:** `af1943c24a58d80ae048b9b9d50842cf0e0b27d1`  
-**Current released version:** `v3.6.0`
+**Document class:** Descriptive deployment profile (operational appendix)  
+**Baseline date:** 2026-08-18  
+**Implementation code baseline:** `068120f6a46797182d33e100b5dadfc8ccc77b4f`  
+**Current released version:** `v3.6.0`  
+**Canonical profile authority:** [docs/deployment-profiles.md](deployment-profiles.md)
 
-This document replaces the older “production Linux deployment” narrative with profile-specific claims that match the pinned implementation code.
+This document is the Linux operational appendix to the canonical deployment-profile matrix. Profile definitions, evidence classes, and not-claimed limits live there; this page carries Linux-specific operational detail.
 
 The most important distinction is:
 
-> **NodeChain has a hardened supervised Linux execution substrate, but the ordinary `NodeInvoker → SubprocessRunner` POSIX untrusted-node path is currently fail-closed pending T3 integration into that substrate.**
+> **One supervised backend owns ordinary POSIX untrusted-node execution (H0.2 sealed). On a qualified privileged Linux host it executes with observed containment evidence; on any host lacking the required privileges or kernel features it fails closed before workload start. No weaker legacy path exists.**
 
-Do not treat historical sandbox evidence as proof that every current untrusted Harness Node invocation uses the same backend.
+Do not treat historical sandbox evidence as proof that every current untrusted Harness Node invocation uses the same backend — evidence is profile-bound.
 
 ---
 
 ## 1. Deployment/qualification profile matrix
+
+The canonical matrix with full field detail lives in [docs/deployment-profiles.md](deployment-profiles.md). Summary:
 
 | Profile | Intended use | Baseline status | Untrusted execution claim |
 |---|---|---|---|
 | Trusted local Linux development | SDK, CLI, blueprints, trusted/built-in nodes, tests | Supported | Does not require generic untrusted execution |
 | GitHub-hosted Ubuntu CI | Portable regression, packaging, ordinary integration | Supported | Not privileged containment qualification |
 | Privileged Linux verification host | Native/supervised sandbox and containment evidence | Supported as a qualification profile when prerequisites exist | Specific tested execution path only |
-| Generic POSIX untrusted Harness Node invocation | Normal `NodeInvoker` isolated-node path | **Fail-closed pending T3** | Returns `supervised_backend_required` before workload spawn |
+| Generic POSIX untrusted Harness Node invocation | Normal `NodeInvoker` isolated-node path | **Routed through the supervised backend** (H0.2 sealed) | Executes with enforcement evidence on a qualified privileged Linux host; fails closed before workload start elsewhere |
 | Future delegated Linux execution service | Production untrusted workload service | Not yet a qualified product profile | Must use one governed supervised backend |
 | Windows development/control plane | Cross-platform SDK/CLI/control behavior | Separate platform profile | No Linux-equivalent namespace/seccomp/cgroup claim |
 
@@ -60,7 +63,7 @@ It should not be used to claim privileged containment merely because the host is
 
 ---
 
-## 3. Current generic untrusted-node boundary
+## 3. Generic untrusted-node routing (H0.2 sealed)
 
 The normal isolated-node call chain is:
 
@@ -70,29 +73,31 @@ Orchestrator
 NodeInvoker
   ↓
 SubprocessRunner.run_isolated()
+  ↓
+_run_supervised_untrusted() → the supervised backend
 ```
 
-At the pinned implementation baseline, `SubprocessRunner.run_isolated()` begins with an explicit T3.0 safety fence for POSIX `local_untrusted` and `remote_untrusted` nodes.
+At the pinned implementation baseline, POSIX `local_untrusted` and `remote_untrusted` requests route through the supervised backend, which owns the entire spawn/lifecycle: PID-namespace topology, requested namespaces, read-only mount confinement, the five-set capability boundary, requested seccomp, and ptrace exec authority. The former T3.0 safety fence was replaced by this routing branch as the final production edit of H0.2.
 
-The method returns a failure result containing:
-
-```text
-supervised_backend_required
-```
-
-before creating the workload process.
-
-The reason is recorded directly in code: the legacy POSIX runner path is not permitted to proceed until supervised routing/result mapping is integrated. A weaker fallback must not silently execute an untrusted workload.
+The result mapping preserves supervisor truth in the compatibility shape, and the `supervised_execution` evidence projection rides both success and failure. There is no try-supervised-except-legacy fallback under any condition: the legacy POSIX spawn body is unreachable for untrusted trust levels.
 
 ### Operational consequence
 
-A deployment that requires ordinary untrusted Harness Nodes on POSIX is **not yet complete** simply by installing the released/current implementation. It needs the T3 integration/qualification outcome from `ROADMAP.md` or must remain fail-closed.
+A deployment running ordinary untrusted Harness Nodes on POSIX needs a host that satisfies the supervised prerequisites (section 5) and a qualified installation layout (see the canonical matrix). On any other host the invocation fails closed before workload start with `process_started=false` — an explicit refusal, never a weaker fallback.
+
+### Qualified containment boundaries at this baseline
+
+- mount confinement binds `/package` and every runtime extra mount read-only, with `/tmp` writable; a refused read-only remount fails containment closed before workload start;
+- a verified capability boundary removes the boundary-undoing capabilities (including `CAP_SYS_CHROOT` and `CAP_SYS_ADMIN`) from all five relevant capability sets before `enforcement_verified`;
+- every Python launch is trust-rooted (`-I` workload, trusted-installation import root, `-P` supervisor/bootstrap);
+- requested seccomp is really enforced when a filter binding is present, with kernel SIGSYS denial proof; without a binding the run fails closed;
+- requested cgroup accounting/limits are refused in the parent before any start (`supervised_cgroup_unsupported`).
 
 ---
 
 ## 4. Supervised Linux execution substrate
 
-Separately from the generic NodeInvoker integration, NodeChain contains the hardened supervised execution stack developed through v3.5.1.
+The supervised execution stack below is the active substrate of the generic route above — developed and hardened through v3.5.1, joined to the ordinary path by H0.2.
 
 Important modules include:
 
@@ -117,7 +122,7 @@ The design includes:
 - namespace-wide cleanup and reaping;
 - independent host process-group containment.
 
-This is the intended substrate for the generic POSIX untrusted-node routing work.
+This is the active substrate of the generic POSIX untrusted-node routing (H0.2 sealed).
 
 ---
 
@@ -245,7 +250,7 @@ Earlier qualification work included a **Mount Namespace Prototype** that demonst
 - verification that the workload could not escape the mount namespace;
 - `mount_namespace_enforced` evidence from the qualified child in that path.
 
-These prototypes remain documented evidence of what the supervised substrate is designed to enforce. They are not automatically active in the current generic POSIX untrusted-node path, which is fail-closed pending T3.
+These prototypes remain documented evidence of what the supervised substrate is designed to enforce. The generic POSIX untrusted-node path now routes through the supervised substrate (H0.2); the prototypes' own evidence stays bound to the runs that produced it.
 
 ### Namespace Behavior on Proxmox LXC
 
@@ -323,7 +328,7 @@ This service example is an outer process-management recipe. It does not enable t
 
 ### Untrusted Harness Node service
 
-Do not enable a weaker legacy POSIX path to bypass `supervised_backend_required`.
+There is no weaker legacy POSIX path: the supervised route is the only backend, and the legacy spawn body is unreachable for untrusted trust levels.
 
 The production direction is:
 
