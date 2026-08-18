@@ -2,9 +2,9 @@
 
 **Document class:** Descriptive baseline  
 **Status:** Active development truth  
-**Baseline date:** 2026-08-14  
+**Baseline date:** 2026-08-17  
 **Released version:** `v3.6.0`  
-**Implementation code baseline:** `71afaef186dca695770c73f212a7f198e97dac2b` (the `master` code state at the H0.5 authoritative state-transition boundary, including the resume-marker repair)  
+**Implementation code baseline:** `068120f6a46797182d33e100b5dadfc8ccc77b4f` (the `master` code state at the H0.2 supervised untrusted execution routing, including the read-only bind-mount, seccomp/ptrace, five-set capability-boundary, and startup trust-root corrections)  
 **Supersedes for current-state claims:** implementation/status sections in older README, VISION, ROADMAP, and architecture snapshots
 
 This document answers one question: **what does the NodeChain codebase actually contain and support at the pinned implementation baseline?** Documentation-only commits may follow this SHA without changing the implementation facts recorded here.
@@ -20,7 +20,7 @@ NodeChain has two legitimate anchors and they must not be conflated.
 | Anchor | Value | Meaning |
 |---|---|---|
 | Released product baseline | `v3.6.0` | Latest packaged/released version represented by `pyproject.toml` and `nodechain.__version__` |
-| Implementation code baseline | `71afaef186dca695770c73f212a7f198e97dac2b` | `master` code state at the H0.5 authoritative state-transition boundary including the resume-marker repair; includes post-v3.6 work merged through PR #24 |
+| Implementation code baseline | `068120f6a46797182d33e100b5dadfc8ccc77b4f` | `master` code state at the H0.2 supervised untrusted execution routing including the read-only bind-mount, seccomp/ptrace, five-set capability-boundary, and startup trust-root corrections; includes post-v3.6 work merged through PR #25 |
 
 The implementation baseline includes the `ResearchWorkspaceBundleV1` contract and the governed Research Workspace runner. Those capabilities are **post-v3.6 development state**, not retroactively part of the v3.6.0 release.
 
@@ -137,21 +137,29 @@ These are current architectural seams. They are not evidence that the primary ru
 
 ## 6. Untrusted execution baseline
 
-The repository contains a hardened supervised POSIX execution substrate and a separate ordinary node-isolation integration path. They are not yet fully joined.
+The hardened supervised POSIX execution substrate and the ordinary node-isolation integration path are JOINED: H0.2 (T3) routes ordinary POSIX untrusted invocation through the supervised backend as the single spawn/lifecycle authority.
 
 ### Supervised execution substrate
 
 `runtime/supervised_argv.py`, the supervisor/session modules, PID-namespace topology logic, ptrace `PTRACE_EVENT_EXEC` authority, bounded asynchronous I/O, namespace cleanup, and host process-group containment implement the hardened Linux execution substrate developed through v3.5.1.
 
-### Ordinary NodeInvoker path
+### Ordinary NodeInvoker path (H0.2 routing)
 
-`NodeInvoker` sends isolated non-built-in nodes through `SubprocessRunner.run_isolated()`.
+`NodeInvoker` sends isolated non-built-in nodes through `SubprocessRunner.run_isolated()`. On POSIX, `local_untrusted` and `remote_untrusted` requests route through `_run_supervised_untrusted()` into the supervised stack; the legacy POSIX spawn body is unreachable for untrusted trust levels, and there is no try-supervised-except-legacy fallback under any condition. The frozen outcome matrix maps supervisor truth into the compatibility result shape (not-started vs started-failed, timeout, output-cap, SIGSYS/seccomp-kill classification, cleanup-dominates), and the `supervised_execution` evidence projection rides both success and failure.
 
-At this baseline, `SubprocessRunner.run_isolated()` contains an explicit T3.0 safety fence: on POSIX, `local_untrusted` and `remote_untrusted` requests return `supervised_backend_required` before workload spawn. The legacy POSIX path is deliberately disabled until supervised routing/result mapping is integrated.
+Containment and startup boundaries qualified at this baseline:
+
+- mount confinement binds the package at `/package` and every runtime extra mount read-only (`MS_REMOUNT|MS_BIND|MS_RDONLY`), with `/tmp` writable; any required read-only remount that cannot be established fails closed before workload start;
+- a durable capability boundary removes the boundary-undoing capabilities (including `CAP_SYS_CHROOT` and `CAP_SYS_ADMIN`) from all five relevant sets (effective, permitted, inheritable, ambient, bounding) before `enforcement_verified`, verified by read-back and proven against deliberately seeded ambient/inheritable capabilities;
+- every Python launch boundary is trust-rooted: the workload interpreter runs `python -I -c` (no cwd/user-site on `sys.path`, `PYTHON*` ignored), the child script imports the SDK from the resolved trusted installation (never the caller cwd), and the supervisor and bootstrap launch with `-P`;
+- requested seccomp is really enforced when a filter binding is present (available → enforced → verified → exec-confirmed chain, kernel SIGSYS denial proof); without a binding the run fails closed before start;
+- on hosts without the privileges the topology needs (hosted CI), the route fails closed before workload start (`process_started=False`) — that is the design truth, never a weaker fallback.
+
+Deployment-profile truths deferred to H0.6: editable/source-backed installations and custom-prefix interpreter layouts (e.g. conda-style paths outside `/usr` and `/venv`) are not supported under mount confinement and fail closed; the host `package_root` pathname is visible to the trusted child context; non-Linux `WNOWAIT` kernel profiles are unqualified.
 
 Therefore the truthful claim is:
 
-> The supervised Linux execution substrate exists and is heavily qualified, while ordinary POSIX untrusted-node invocation is currently fail-closed pending T3 integration into the generic `SubprocessRunner` / `NodeInvoker` path.
+> One governed supervised backend owns ordinary POSIX untrusted-node execution, with read-only bind confinement, a verified five-set capability boundary, and trust-rooted interpreter startup. Enforcement requires a privileged Linux host; everywhere else the path fails closed before workload start.
 
 No documentation should describe the generic POSIX untrusted-node path as silently falling back to a weaker sandbox.
 
@@ -228,8 +236,8 @@ NodeChain does not currently claim:
 - managed cloud/SaaS operation;
 - distributed worker execution;
 - general multi-tenant isolation and RBAC across organizations;
-- generic POSIX untrusted-node execution through the ordinary `NodeInvoker` path until T3 routing is closed;
-- universal Linux compatibility for privileged supervised containment;
+- universal Linux compatibility for privileged supervised containment (unprivileged hosts fail closed before workload start, by design);
+- editable/source-backed installations or custom-prefix interpreter layouts under mount confinement (deployment-profile truth deferred to H0.6);
 - Windows equivalence to Linux namespace/seccomp/PID-containment primitives;
 - complete hostile-code security proof;
 - a universal full-orchestrator evaluation path;
@@ -261,7 +269,7 @@ See `docs/documentation-authority.md` for the update rules that keep these class
 The following are the concrete corrections discovered or reaffirmed by the rebaseline. They are inputs to `ROADMAP.md`, not hidden caveats:
 
 1. ~~Correct `nodechain research review` to reconstruct through the descriptor-aware path so terminal C5 bundle finalization is guaranteed on the CLI path.~~ **Closed in H0.1 (implementation pin `f197ecbe4a9ae617ac419342676fd8a89a511f01`).**
-2. Complete T3 routing/result mapping from ordinary POSIX untrusted-node invocation into the supervised backend, or retain the explicit fail-closed boundary until it is complete.
+2. ~~Complete T3 routing/result mapping from ordinary POSIX untrusted-node invocation into the supervised backend, or retain the explicit fail-closed boundary until it is complete.~~ **Closed in H0.2 (implementation pin `068120f6a46797182d33e100b5dadfc8ccc77b4f`).** One supervised backend owns ordinary POSIX untrusted-node execution with truthful result mapping; no legacy fallback exists under any condition. Read-only bind mounts (`/package` + runtime extras, `/tmp` writable), a verified five-set capability boundary before `enforcement_verified`, real requested-seccomp enforcement with SIGSYS denial proof, and trust-rooted interpreter startup (`-I` child, trusted-installation import root, `-P` supervisor/bootstrap) are all adversarially proven on privileged Linux; unprivileged hosts fail closed before workload start.
 3. ~~Retire or govern the lightweight `chain_orchestrator.py` direct-execution path.~~ **Closed in H0.3 (implementation pin `989b21fe1d61332f3848474fdfd3e0d9ca1aaf5c`).** Legacy composition execution is fail-closed; no `BaseNode.execute()` call remains in the module (AST-guarded).
 4. ~~Route every accepted runtime trace event through one durable emission authority.~~ **Closed in H0.4 (implementation pin `b89c9dd7ba2890d4fa66f89b2b682f036446a591`).** One live `ChainTrace` append authority (`_record_trace_event`, durable-first, same object); first-class `trace_event_id` for authoritative durable trace rows including operator/recovery events; one `get_trace_events()` projection; AST guard enforces exactly one `.add_event()` call in all of `src/nodechain/`.
 5. ~~Consolidate authoritative state transitions behind one durability-before-acknowledgement boundary.~~ **Closed in H0.5 (implementation pin `71afaef186dca695770c73f212a7f198e97dac2b`).** Authoritative/accepted `ChainState` transition boundaries use candidate copy → durable commit → adopt; failed commits leave the accepted state untouched with no revision consumed; lifecycle state and asserting trace events commit in one transaction; resume control-marker removals are candidate-owned. Scheduler-local provisional preparation is not itself an authoritative transition.
