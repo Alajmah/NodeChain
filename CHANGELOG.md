@@ -118,6 +118,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   provisional preparation is not itself an authoritative transition. No
   H0.4 trace redesign, no RecoveryService redesign, no replay.
 
+- **H1.1 — Workspace object model.**
+  Introduces `nodechain.research.workspace` with a frozen,
+  versioned `ResearchWorkspaceSnapshot` — the stable user/product model
+  for a research workspace. `open_workspace(workspace_dir, run_id=None)`
+  discovers all runs under a workspace root, selects one (explicitly or
+  deterministically by the most recently created descriptor), and
+  projects the authoritative runtime/evidence records into an immutable
+  snapshot. The Workspace is a projection, not a truth store: it never
+  executes nodes, transitions ChainState, writes trace, resolves
+  recovery, or maintains a competing lifecycle. Every roadmap concept is
+  represented: objective (from the verified RunDescriptor), plan,
+  runs (all discoverable run summaries), sources, qualified sources
+  (with source_id/hash/artifact_ref preserved exactly), evidence,
+  claims, citations, uncertainties, faults (from immutable fault
+  records), recovery (side-effect ledger + durable recovery decisions),
+  review decisions (runtime attempts + CLI submissions + resume
+  outcomes), trace (via StateManager.get_trace_events), and terminal
+  verified bundles (via BundleReader integrity verification only).
+  Three explicitly separated statuses replace any single overloaded
+  `status` field: `execution_status` (runtime ChainState status),
+  `research_outcome` (product/evidence outcome from the verified
+  bundle), and `bundle_status` (absent/verified/invalid). Each major
+  section carries its availability state — `not_available`,
+  `live_partial`, `live_current`, `terminal_verified` — so absence is
+  never fabricated as empty completed data. Read-side helpers added to
+  `run_descriptor.py`: `list_run_ids()`, `list_run_descriptors()`,
+  `list_review_records()`, `list_outcome_records()`. Adversarial test
+  matrix (A–J) covers empty workspace, descriptor-only run, active-run
+  projection, paused-for-review (corpus-dependent), fault preservation,
+  qualified-source linkage, verified terminal bundle, tampered-bundle
+  rejection, multi-run visibility with deterministic selection, and the
+  read-only invariant (no runtime revision, trace, DB row, descriptor,
+  fault record, or bundle mutation across repeated projections).
+
 - **H0.6 — Deployment profile truth.**
   Establishes `docs/deployment-profiles.md` as the canonical
   deployment-profile authority: the six-profile matrix (trusted local

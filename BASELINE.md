@@ -165,6 +165,11 @@ No documentation should describe the generic POSIX untrusted-node path as silent
 
 ---
 
+
+## 6a. Research Workspace object model (H1.1)
+
+`nodechain.research.workspace.open_workspace()` projects the authoritative runtime/evidence records of a workspace's selected run into a frozen, versioned `ResearchWorkspaceSnapshot`. The Workspace is a read-only projection — it creates no competing runtime state, performs no lifecycle mutation, and performs no persistence write. Every concept from the H1.1 roadmap contract is represented: objective, plan, runs, sources, qualified sources, evidence, claims, citations, uncertainties, faults, recovery, review decisions, trace, and terminal verified bundles (integrity-verified through `BundleReader` only). Three statuses are explicitly separated: `execution_status` (runtime truth), `research_outcome` (product/evidence outcome), and `bundle_status` (absent/verified/invalid). Each section carries its availability state so absence is never fabricated.
+
 ## 7. Evaluation baseline
 
 Evaluation infrastructure is substantial but must be described in layers.

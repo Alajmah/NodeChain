@@ -51,28 +51,6 @@ The canonical deployment-profile authority is `docs/deployment-profiles.md`. Hor
 
 **Objective:** turn the accepted research product-proof backend into a coherent user product without weakening the runtime/evidence contract.
 
-## H1.1 — Workspace object model
-
-Provide a stable user-facing concept of a Workspace containing:
-
-```text
-brief / objective
-plan
-runs
-sources
-qualified sources
-evidence
-claims
-citations
-uncertainties
-faults and recovery
-review decisions
-trace
-terminal verified bundles
-```
-
-The Workspace should be a projection over authoritative runtime/evidence records, not an independent truth store.
-
 ## H1.2 — Research operator experience
 
 Build a coherent CLI/API/UI flow for:

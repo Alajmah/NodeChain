@@ -344,3 +344,71 @@ def list_fault_records(
     for f in sorted(faults_dir.glob("*.json")):
         records.append(json.loads(f.read_text(encoding="utf-8")))
     return records
+
+
+# --------------------------------------------------------------------------- #
+# H1.1: Read-side enumeration helpers (deterministic, read-only)
+# --------------------------------------------------------------------------- #
+
+
+def list_run_ids(workspace_dir: str | Path) -> list[str]:
+    """Enumerate all run IDs that have a descriptor in the workspace.
+
+    A run directory without a readable descriptor is skipped — a
+    descriptor-less directory is not a discoverable run (it may be an
+    interrupted write or a manual artifact).
+    """
+    runs_root = Path(workspace_dir) / "runs"
+    if not runs_root.is_dir():
+        return []
+    ids: list[str] = []
+    for child in sorted(runs_root.iterdir()):
+        if not child.is_dir():
+            continue
+        if not descriptor_path(workspace_dir, child.name).exists():
+            continue
+        ids.append(child.name)
+    return ids
+
+
+def list_run_descriptors(
+    workspace_dir: str | Path,
+) -> list[tuple[str, RunDescriptor]]:
+    """Load all discoverable run descriptors, digest-verified.
+
+    Returns a list of ``(run_id, descriptor)`` pairs sorted by run_id.
+    A descriptor that fails digest verification raises ValueError from
+    ``load_descriptor`` — the caller decides whether to skip or surface
+    it (the workspace projector surfaces it as a section error rather
+    than fabricating a healthy run).
+    """
+    out: list[tuple[str, RunDescriptor]] = []
+    for rid in list_run_ids(workspace_dir):
+        out.append((rid, load_descriptor(workspace_dir, rid)))
+    return out
+
+
+def list_review_records(
+    workspace_dir: str | Path, run_id: str
+) -> list[dict[str, Any]]:
+    """List all review records for a run (sorted by review_id filename)."""
+    reviews_dir = run_dir(workspace_dir, run_id) / "reviews"
+    if not reviews_dir.is_dir():
+        return []
+    records: list[dict[str, Any]] = []
+    for f in sorted(reviews_dir.glob("*.json")):
+        records.append(json.loads(f.read_text(encoding="utf-8")))
+    return records
+
+
+def list_outcome_records(
+    workspace_dir: str | Path, run_id: str
+) -> list[dict[str, Any]]:
+    """List all resume outcome records for a run (sorted by review_id)."""
+    outcomes_dir = run_dir(workspace_dir, run_id) / "outcomes"
+    if not outcomes_dir.is_dir():
+        return []
+    records: list[dict[str, Any]] = []
+    for f in sorted(outcomes_dir.glob("*.json")):
+        records.append(json.loads(f.read_text(encoding="utf-8")))
+    return records
