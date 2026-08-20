@@ -118,6 +118,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   provisional preparation is not itself an authoritative transition. No
   H0.4 trace redesign, no RecoveryService redesign, no replay.
 
+- **H1.2 — Research operator experience.**
+  Adds the read-side operator CLI on top of the H1.1
+  ResearchWorkspaceSnapshot: `research open` (workspace overview),
+  `research runs` (listing), `research inspect` (per-section drill-down
+  with availability states and the governed recovery handoff),
+  `research verify` (terminal-bundle integrity through BundleReader),
+  `research compare` (side-by-side run comparison), and `research
+  export` (verified-bundle copy; never regenerates). Every new command
+  supports `--json`. `research run` gains an additive `--workspace DIR`
+  option making workspace creation/targeting coherent (first run into
+  DIR creates the workspace; subsequent open/runs/inspect observe the
+  same root through the existing WorkspaceRunner composition path).
+  All new commands are read-only through StateManager(read_only=True)
+  — the DB-hash invariant proves zero persistence writes across all
+  observation commands. Existing `research run` and `research review`
+  authority paths remain unchanged and backward compatible. H1.2 is
+  scoped as CLI operator experience + stable machine-readable JSON
+  contract; API/UI product surfaces consume this contract in a
+  successor outcome.
+
 - **H1.1 — Workspace object model.**
   Introduces `nodechain.research.workspace` with a frozen,
   versioned `ResearchWorkspaceSnapshot` — the stable user/product model

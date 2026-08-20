@@ -21,6 +21,7 @@ from nodechain.cli.exit_codes import (
     EXIT_NOT_FOUND,
     EXIT_RUN_PAUSED,
     EXIT_RUN_FAILED,
+    EXIT_RUN_VALIDATION,
     EXIT_RESUME_NOT_RESUMABLE,
 )
 
@@ -53,16 +54,24 @@ def research() -> None:
     help="Path to the sealed fixture corpus YAML file.",
 )
 @click.option(
+    "--workspace",
+    "workspace_dir",
+    default=None,
+    help="Operational workspace directory (default: data/research_workspace). "
+         "Created implicitly on first run — the workspace root is the parent "
+         "of runs/, not a separate identity.",
+)
+@click.option(
     "--db",
     "db_path",
     default=None,
-    help="Path to the run state database (default: data/research_workspace.db).",
+    help="Path to the run state database (default: <workspace>/workspace.db).",
 )
 @click.option(
     "--trace-dir",
     "trace_dir",
     default=None,
-    help="Directory for trace files (default: data/traces).",
+    help="Directory for trace files (default: <workspace>/traces).",
 )
 @click.option(
     "--json-output",
@@ -73,6 +82,7 @@ def research() -> None:
 def research_run(
     brief: str,
     corpus_path: str,
+    workspace_dir: str | None,
     db_path: str | None,
     trace_dir: str | None,
     json_output: str | None,
@@ -103,6 +113,7 @@ def research_run(
         corpus_path=corpus_path,
         db_path=db_path,
         trace_dir=trace_dir,
+        workspace_dir=workspace_dir,
     )
 
     console.print(f"[dim]Corpus digest: {runner.corpus_digest[:16]}...[/dim]")
@@ -326,3 +337,347 @@ def _maybe_write_json(path: str | None, data: dict) -> None:
         Path(path).write_text(
             json.dumps(data, indent=2, sort_keys=True), encoding="utf-8"
         )
+
+
+# ========================================================================== #
+# H1.2: Read-side operator commands (all read-only through open_workspace)
+# ========================================================================== #
+
+
+_DEFAULT_WORKSPACE = "data/research_workspace"
+
+
+def _snapshot_to_dict(snap) -> dict:
+    """Serialize a ResearchWorkspaceSnapshot for JSON output."""
+    return snap.model_dump(mode="json")
+
+
+def _print_section_table(snap, console_: Console) -> None:
+    """Print a compact section-availability table."""
+    from rich.table import Table
+    table = Table(title="Workspace Sections", show_lines=False)
+    table.add_column("Section", style="cyan")
+    table.add_column("State", style="green")
+    for name in ("objective", "plan", "sources", "qualified_sources",
+                 "evidence", "claims", "citations", "uncertainties",
+                 "trace", "terminal_bundle"):
+        section = getattr(snap, name, None)
+        if section is not None:
+            state = section.state
+            style = ("green" if state == "terminal_verified"
+                     else "yellow" if "live" in state else "dim")
+            table.add_row(name, f"[{style}]{state}[/{style}]")
+    console_.print(table)
+
+
+@research.command("open")
+@click.option("--workspace", "workspace_dir", default=_DEFAULT_WORKSPACE,
+              help="Workspace directory.")
+@click.option("--run-id", "run_id", default=None,
+              help="Specific run to select (default: most recently persisted).")
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
+def research_open(workspace_dir: str, run_id: str | None, as_json: bool) -> None:
+    """Open a research workspace and show its overview.
+
+    Creates nothing — this is a read-only observation through the H1.1
+    ResearchWorkspaceSnapshot. A nonexistent workspace returns an empty
+    overview, not an error.
+    """
+    from nodechain.research.workspace import open_workspace
+    snap = open_workspace(workspace_dir, run_id=run_id)
+    if as_json:
+        click.echo(json.dumps(_snapshot_to_dict(snap), indent=2,
+                              default=str))
+        return
+    if not snap.runs:
+        console.print(Panel(
+            f"[dim]No discoverable runs in {workspace_dir}[/dim]",
+            title="Workspace",
+        ))
+        return
+    from rich.table import Table
+    table = Table(title=f"Workspace: {snap.workspace_root}")
+    table.add_column("Run ID", style="cyan")
+    table.add_column("Status")
+    table.add_column("Revision")
+    table.add_column("Bundle")
+    for r in snap.runs:
+        marker = " →" if r.run_id == snap.selected_run_id else ""
+        table.add_row(r.run_id + marker, r.execution_status or "—",
+                      str(r.revision), r.bundle_status)
+    console.print(table)
+    sel = next((r for r in snap.runs if r.run_id == snap.selected_run_id), None)
+    if sel:
+        console.print(f"\n[bold]Selected:[/bold] {sel.run_id}")
+        console.print(f"  Execution: {sel.execution_status or '—'}")
+        console.print(f"  Research outcome: {snap.research_outcome or '—'}")
+        console.print(f"  Bundle: {snap.bundle_status}")
+
+
+@research.command("runs")
+@click.option("--workspace", "workspace_dir", default=_DEFAULT_WORKSPACE,
+              help="Workspace directory.")
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
+def research_runs(workspace_dir: str, as_json: bool) -> None:
+    """List all discoverable runs in a workspace."""
+    from nodechain.research.workspace import open_workspace
+    snap = open_workspace(workspace_dir)
+    if as_json:
+        click.echo(json.dumps(
+            {"runs": [r.model_dump(mode="json") for r in snap.runs]},
+            indent=2, default=str))
+        return
+    if not snap.runs:
+        console.print(f"[dim]No runs in {workspace_dir}[/dim]")
+        return
+    from rich.table import Table
+    table = Table(title=f"Runs in {workspace_dir}")
+    table.add_column("Run ID", style="cyan")
+    table.add_column("Status")
+    table.add_column("Rev")
+    table.add_column("Step")
+    table.add_column("Current Node")
+    table.add_column("Bundle")
+    table.add_column("Created")
+    for r in snap.runs:
+        table.add_row(r.run_id, r.execution_status or "—", str(r.revision),
+                      str(r.step), r.current_node or "—", r.bundle_status,
+                      r.created_at[:19] if r.created_at else "—")
+    console.print(table)
+
+
+@research.command("inspect")
+@click.argument("run_id", required=True)
+@click.option("--workspace", "workspace_dir", default=_DEFAULT_WORKSPACE,
+              help="Workspace directory.")
+@click.option("--section", "section", default=None,
+              help="Show only one section (objective, plan, sources, etc.).")
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
+def research_inspect(run_id: str, workspace_dir: str, section: str | None,
+                     as_json: bool) -> None:
+    """Inspect one run: all sections with availability states, faults,
+    recovery evidence, review truth, and the governed recovery handoff."""
+    from nodechain.research.workspace import open_workspace
+    try:
+        snap = open_workspace(workspace_dir, run_id=run_id)
+    except FileNotFoundError:
+        console.print(f"[red]Error:[/red] no descriptor for run {run_id}")
+        sys.exit(EXIT_NOT_FOUND)
+    if as_json:
+        click.echo(json.dumps(_snapshot_to_dict(snap), indent=2,
+                              default=str))
+        return
+    console.print(Panel(
+        f"[bold]{run_id}[/bold]\n"
+        f"Execution: {snap.execution_status or '—'}  "
+        f"Revision: {snap.runtime_revision}\n"
+        f"Research outcome: {snap.research_outcome or '—'}  "
+        f"Bundle: {snap.bundle_status}",
+        title="Run Inspection",
+    ))
+    if section:
+        attr = getattr(snap, section, None)
+        if attr is None:
+            console.print(f"[red]Unknown section:[/red] {section}")
+            sys.exit(EXIT_NOT_FOUND)
+        if hasattr(attr, "state"):
+            console.print(f"\n[bold]{section}[/bold]: {attr.state}")
+            if attr.data is not None:
+                click.echo(json.dumps(attr.data, indent=2, default=str))
+        else:
+            click.echo(json.dumps(attr, indent=2, default=str))
+        return
+    _print_section_table(snap, console)
+    if snap.faults:
+        console.print(f"\n[bold red]Faults ({len(snap.faults)}):[/bold red]")
+        for f in snap.faults:
+            console.print(f"  {f.fault_id}: {f.fault_type} @ {f.node_id}"
+                          f" — {f.reason}")
+    # AC5a — governed recovery handoff
+    actionable = [se for se in snap.recovery.side_effects
+                  if se.get("status") in ("unknown", "retry_authorized")]
+    if actionable:
+        console.print(f"\n[bold yellow]Recovery required ({len(actionable)} "
+                      f"actionable side effects):[/bold yellow]")
+        for se in actionable:
+            console.print(f"  side effect: {se.get('type', '?')}:"
+                          f"{se.get('target', se.get('idempotency_key', '?'))}"
+                          f"  status: {se.get('status', '?')}")
+        console.print(
+            f"\n[bold]Next:[/bold] run the governed recovery console:\n"
+            f"  nodechain recover --db <descriptor-db> --run-id {run_id}"
+        )
+
+
+@research.command("verify")
+@click.argument("run_id", required=True)
+@click.option("--workspace", "workspace_dir", default=_DEFAULT_WORKSPACE,
+              help="Workspace directory.")
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
+def research_verify(run_id: str, workspace_dir: str, as_json: bool) -> None:
+    """Verify a run's terminal bundle through BundleReader integrity."""
+    from nodechain.research.workspace import (
+        BUNDLE_ABSENT, BUNDLE_INVALID, BUNDLE_VERIFIED, open_workspace,
+    )
+    try:
+        snap = open_workspace(workspace_dir, run_id=run_id)
+    except FileNotFoundError:
+        console.print(f"[red]Error:[/red] no descriptor for run {run_id}")
+        sys.exit(EXIT_NOT_FOUND)
+    result = {
+        "run_id": run_id,
+        "bundle_status": snap.bundle_status,
+        "bundle_digest": (snap.terminal_bundle.data.bundle_digest
+                          if snap.terminal_bundle.data and hasattr(
+                              snap.terminal_bundle.data, "bundle_digest")
+                          else ""),
+        "run_status": (snap.terminal_bundle.data.run_status
+                       if snap.terminal_bundle.data and hasattr(
+                           snap.terminal_bundle.data, "run_status")
+                       else ""),
+    }
+    if as_json:
+        click.echo(json.dumps(result, indent=2))
+        return
+    if snap.bundle_status == BUNDLE_VERIFIED:
+        console.print(Panel(
+            f"[green]VERIFIED[/green]\n\n"
+            f"Bundle digest: {result['bundle_digest'][:16]}...\n"
+            f"Run status: {result['run_status']}",
+            title="Terminal Bundle",
+        ))
+    elif snap.bundle_status == BUNDLE_INVALID:
+        console.print(Panel(
+            f"[red]INVALID[/red]\n\n"
+            f"Bundle exists but integrity verification failed.",
+            title="Terminal Bundle",
+        ))
+        sys.exit(EXIT_RUN_VALIDATION)
+    else:
+        console.print(f"[dim]No terminal bundle for run {run_id}[/dim]")
+
+
+@research.command("compare")
+@click.argument("run_id_a", required=True)
+@click.argument("run_id_b", required=True)
+@click.option("--workspace", "workspace_dir", default=_DEFAULT_WORKSPACE,
+              help="Workspace directory.")
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
+def research_compare(run_id_a: str, run_id_b: str, workspace_dir: str,
+                     as_json: bool) -> None:
+    """Compare two runs side by side."""
+    from nodechain.research.workspace import open_workspace
+    try:
+        snap_a = open_workspace(workspace_dir, run_id=run_id_a)
+        snap_b = open_workspace(workspace_dir, run_id=run_id_b)
+    except FileNotFoundError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        sys.exit(EXIT_NOT_FOUND)
+
+    def _count(section_data) -> int:
+        if isinstance(section_data, list):
+            return len(section_data)
+        if isinstance(section_data, dict):
+            for key in ("sources", "qualified_sources", "claims", "evidence"):
+                if key in section_data and isinstance(section_data[key], list):
+                    return len(section_data[key])
+        return 0
+
+    result = {
+        "run_a": {
+            "run_id": run_id_a,
+            "execution_status": snap_a.execution_status,
+            "research_outcome": snap_a.research_outcome,
+            "bundle_status": snap_a.bundle_status,
+            "revision": snap_a.runtime_revision,
+            "sources_count": _count(snap_a.sources.data),
+            "qualified_sources_count": _count(snap_a.qualified_sources.data),
+            "claims_count": _count(snap_a.claims.data),
+        },
+        "run_b": {
+            "run_id": run_id_b,
+            "execution_status": snap_b.execution_status,
+            "research_outcome": snap_b.research_outcome,
+            "bundle_status": snap_b.bundle_status,
+            "revision": snap_b.runtime_revision,
+            "sources_count": _count(snap_b.sources.data),
+            "qualified_sources_count": _count(snap_b.qualified_sources.data),
+            "claims_count": _count(snap_b.claims.data),
+        },
+    }
+    if as_json:
+        click.echo(json.dumps(result, indent=2))
+        return
+    from rich.table import Table
+    table = Table(title=f"Run Comparison: {run_id_a} vs {run_id_b}")
+    table.add_column("Property")
+    table.add_column(run_id_a, style="cyan")
+    table.add_column(run_id_b, style="magenta")
+    for key in ("execution_status", "research_outcome", "bundle_status",
+                "revision", "sources_count", "qualified_sources_count",
+                "claims_count"):
+        table.add_row(key, str(result["run_a"][key]), str(result["run_b"][key]))
+    console.print(table)
+
+
+@research.command("export")
+@click.argument("run_id", required=True)
+@click.option("--output", "output_path", required=True,
+              help="Output path for the exported bundle (directory or .zip).")
+@click.option("--workspace", "workspace_dir", default=_DEFAULT_WORKSPACE,
+              help="Workspace directory.")
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
+def research_export(run_id: str, output_path: str, workspace_dir: str,
+                    as_json: bool) -> None:
+    """Export a run's verified terminal bundle.
+
+    Operates only on a bundle that passes BundleReader integrity
+    verification. Copies the authoritative artifact — never regenerates
+    or reinterprets it.
+    """
+    import shutil as _shutil
+    from nodechain.research.workspace import BUNDLE_VERIFIED, open_workspace
+    try:
+        snap = open_workspace(workspace_dir, run_id=run_id)
+    except FileNotFoundError:
+        console.print(f"[red]Error:[/red] no descriptor for run {run_id}")
+        sys.exit(EXIT_NOT_FOUND)
+    if snap.bundle_status != BUNDLE_VERIFIED:
+        console.print(
+            f"[red]Error:[/red] bundle is {snap.bundle_status}, not verified"
+        )
+        sys.exit(EXIT_NOT_FOUND)
+
+    bundle_dir = (Path(workspace_dir) / "runs" / run_id / "bundle").resolve()
+    out = Path(output_path).resolve()
+    if out.suffix == ".zip":
+        # Zip the verified bundle directory.
+        out.parent.mkdir(parents=True, exist_ok=True)
+        _shutil.make_archive(str(out.with_suffix("")), "zip",
+                             root_dir=str(bundle_dir.parent),
+                             base_dir=bundle_dir.name)
+        exported = out
+    else:
+        # Copy the bundle directory.
+        if out.exists():
+            console.print(f"[red]Error:[/red] output already exists: {out}")
+            sys.exit(EXIT_RUN_VALIDATION)
+        _shutil.copytree(bundle_dir, out)
+        exported = out
+
+    result = {
+        "run_id": run_id,
+        "exported_to": str(exported),
+        "bundle_digest": (snap.terminal_bundle.data.bundle_digest
+                          if snap.terminal_bundle.data else ""),
+    }
+    if as_json:
+        click.echo(json.dumps(result, indent=2))
+        return
+    console.print(Panel(
+        f"[green]EXPORTED[/green]\n\n"
+        f"Run: {run_id}\n"
+        f"Output: {exported}\n"
+        f"Digest: {result['bundle_digest'][:16]}...",
+        title="Bundle Export",
+    ))
