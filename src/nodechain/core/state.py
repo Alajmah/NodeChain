@@ -177,6 +177,7 @@ class StateManager:
         db_path: str | Path = "data/chain_state.db",
         *,
         kek_manager: Any = None,
+        read_only: bool = False,
     ) -> None:
         """Initialize the durable state manager.
 
@@ -187,16 +188,25 @@ class StateManager:
         never reads NODECHAIN_DEV_MODE. A read-only command may construct
         this default safely because KEK loading remains lazy (only resolved
         when a governed side effect actually starts).
+
+        H1.1: ``read_only=True`` opens the database for observation WITHOUT
+        creating anything. No parent directory is created, no SQLite file
+        is created, and no schema initialization runs. A missing database
+        is an observable fact (all reads return empty), not an error to
+        be repaired by side effect.
         """
         self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._read_only = read_only
+        if not read_only:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
         if kek_manager is not None:
             self._kek_manager = kek_manager
         else:
             # Deterministic production default — no environment read.
             from nodechain.core.capsule_crypto import KekManager as _KM
             self._kek_manager = _KM(local_dev=False)
-        self._init_db()
+        if not read_only:
+            self._init_db()
         # v2.82/v2.83: extracted persistence stores (internal implementation
         # detail). StateManager remains the public facade; these hold the
         # moved logic.
@@ -1023,6 +1033,8 @@ class StateManager:
 
         Delegates to EventLogStore.get_trace_events.
         """
+        if self._read_only and not self._db_readable():
+            return []
         return self._event_log.get_trace_events(run_id)
 
     def record_invocation(
@@ -1079,8 +1091,14 @@ class StateManager:
         """
         return self._event_log.get_events(run_id)
 
+    def _db_readable(self) -> bool:
+        """H1.1: whether the DB file exists and can be read without creating it."""
+        return self.db_path.exists()
+
     def load(self, run_id: str) -> ChainState | None:
         """Restore chain state for pause/resume."""
+        if self._read_only and not self._db_readable():
+            return None
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
                 "SELECT state_json FROM chain_states WHERE run_id = ?",
@@ -1099,6 +1117,8 @@ class StateManager:
         / ``completed_at`` carried inside the state JSON, which stay fixed once
         set. Operator surfaces use this to show true persistence freshness.
         """
+        if self._read_only and not self._db_readable():
+            return None
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
                 "SELECT updated_at FROM chain_states WHERE run_id = ?",
@@ -1208,6 +1228,8 @@ class StateManager:
 
         v2.83: delegates to DecisionLogStore. Behavior unchanged.
         """
+        if self._read_only and not self._db_readable():
+            return []
         return self._decision_log.get_review_attempts(
             run_id=run_id, admitted=admitted, rejection_reason=rejection_reason,
         )
@@ -1302,6 +1324,8 @@ class StateManager:
 
         v2.83: delegates to DecisionLogStore. Behavior unchanged.
         """
+        if self._read_only and not self._db_readable():
+            return []
         return self._decision_log.get_recovery_decisions(
             run_id=run_id, idempotency_key=idempotency_key, decision=decision,
         )
@@ -1892,7 +1916,10 @@ class StateManager:
         """Get all side effects for a run.
 
         v2.83: delegates to SideEffectLedgerStore. Behavior unchanged.
+        H1.1: guarded in read_only mode — a missing DB returns empty.
         """
+        if self._read_only and not self._db_readable():
+            return []
         return self._side_effect_ledger.get_side_effects(run_id)
 
     def get_side_effect_by_key(self, run_id: str, idempotency_key: str) -> dict | None:

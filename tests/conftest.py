@@ -53,8 +53,10 @@ def _test_dev_kek_manager(monkeypatch):
     import nodechain.core.state as _state_mod
     _orig_init = _state_mod.StateManager.__init__
 
-    def _patched_init(self, db_path="data/chain_state.db", *, kek_manager=None):
-        _orig_init(self, db_path, kek_manager=kek_manager or _dev_manager)
+    def _patched_init(self, db_path="data/chain_state.db", *, kek_manager=None,
+                      read_only=False):
+        _orig_init(self, db_path, kek_manager=kek_manager or _dev_manager,
+                   read_only=read_only)
 
     monkeypatch.setattr(_state_mod.StateManager, "__init__", _patched_init)
     yield
