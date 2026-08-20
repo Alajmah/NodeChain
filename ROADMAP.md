@@ -51,22 +51,6 @@ The canonical deployment-profile authority is `docs/deployment-profiles.md`. Hor
 
 **Objective:** turn the accepted research product-proof backend into a coherent user product without weakening the runtime/evidence contract.
 
-## H1.2 — Research operator experience
-
-Build a coherent CLI/API/UI flow for:
-
-- create/open workspace;
-- launch research run;
-- inspect progress;
-- review pending decisions;
-- inspect sources/evidence/claims;
-- understand faults/degraded completion;
-- resume/recover;
-- verify/download final bundle;
-- compare runs.
-
-The current `research run` / `research review` commands are the starting substrate, not the final UX.
-
 ## H1.3 — Live source acquisition profile
 
 Add a product profile that applies the Research Workspace evidence/bundle semantics to live source acquisition rather than the sealed fixture corpus.
