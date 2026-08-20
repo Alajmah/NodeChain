@@ -170,6 +170,12 @@ No documentation should describe the generic POSIX untrusted-node path as silent
 
 `nodechain.research.workspace.open_workspace()` projects the authoritative runtime/evidence records of a workspace's selected run into a frozen, versioned `ResearchWorkspaceSnapshot`. The Workspace is a read-only projection — it creates no competing runtime state, performs no lifecycle mutation, and performs no persistence write. Every concept from the H1.1 roadmap contract is represented: objective, plan, runs, sources, qualified sources, evidence, claims, citations, uncertainties, faults, recovery, review decisions, trace, and terminal verified bundles (integrity-verified through `BundleReader` only). Three statuses are explicitly separated: `execution_status` (runtime truth), `research_outcome` (product/evidence outcome), and `bundle_status` (absent/verified/invalid). Each section carries its availability state so absence is never fabricated.
 
+## 6b. Research operator CLI surface (H1.2)
+
+The operator experience is a read-side CLI on top of the H1.1 snapshot: `nodechain research open` (workspace overview), `runs` (listing with persistence time `updated_at`), `inspect` (per-section drill-down with availability states and the governed recovery handoff), `verify` (terminal-bundle integrity through `BundleReader`, including the verified document inventory), `compare` (side-by-side run comparison), and `export` (verified-bundle copy — directory or `.zip` — never regeneration). Every command supports `--json`; `research run` accepts an additive `--workspace DIR` so creation and observation target the same workspace root.
+
+All observation commands are runtime-state read-only through `StateManager(read_only=True)`: the DB-hash invariant proves zero persistence writes across `open`, `runs`, `inspect`, `verify`, and `compare`. `research export` has exactly one side effect — the explicitly requested output artifact. `research verify` exits nonzero on an invalid bundle in both human and `--json` modes. `inspect`'s recovery handoff resolves the descriptor's `db_path` and routes to the existing governed recovery console (`nodechain recover inspect` / `list-unknown`); it invents no recovery action and has no placeholder fallback. API/UI product surfaces that consume the `--json` contract remain future work (Roadmap H1.6).
+
 ## 7. Evaluation baseline
 
 Evaluation infrastructure is substantial but must be described in layers.
