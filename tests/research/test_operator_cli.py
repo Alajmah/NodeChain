@@ -113,7 +113,7 @@ class TestInspect:
         assert r.exit_code == 0
         data = json.loads(r.output)
         assert data["selected_run_id"] == rid
-        assert data["projection_version"] == 1
+        assert data["projection_version"] == 2
 
     def test_inspect_not_found(self, tmp_path: Path):
         # A workspace with runs: inspect on a nonexistent run errors.
@@ -387,8 +387,9 @@ class TestPausedReviewHandoff:
             state = _State()
 
         class _StubRunner:
-            def __init__(self, brief, corpus_path, db_path=None,
-                         trace_dir=None, workspace_dir=None):
+            def __init__(self, brief, corpus_path=None, *, profile="fixture",
+                         db_path=None, trace_dir=None, workspace_dir=None,
+                         chain_id="research-workspace-v1", model_adapter=None):
                 self.corpus_digest = "0123456789abcdef" * 2
 
             def run(self):

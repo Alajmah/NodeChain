@@ -157,6 +157,7 @@ class SourceRecord(_BundleModel):
     authors: list[str] = Field(default_factory=list)
     abstract: str | None = None
     source_hash: str
+    artifact_ref: str | None = None
 
     @field_validator("source_id", "origin_api", "title")
     @classmethod
@@ -636,17 +637,37 @@ class ResearchWorkspaceManifest(_BundleModel):
     artifact_inventory: list[FileHash] = Field(default_factory=list)
     bundle_digest: str
     provider_mode: str
-    fixture_corpus_version: str
+    fixture_corpus_version: str | None
     trace_reference: str
     replay_eligible: bool
 
     @field_validator(
         "run_id", "chain_id", "blueprint_version", "source_commit",
-        "provider_mode", "fixture_corpus_version",
+        "provider_mode",
     )
     @classmethod
     def _nonempty(cls, v: str) -> str:
         return _nonempty_str(v)
+
+    @model_validator(mode="after")
+    def _fixture_corpus_rule(self) -> "ResearchWorkspaceManifest":
+        """fixture_corpus_version is non-empty exactly for fixture runs.
+
+        H1.3: a live-provider bundle must NOT carry fixture corpus metadata
+        (null instead); a fixture bundle must carry a non-empty version.
+        """
+        if self.provider_mode == "fixture":
+            if not (self.fixture_corpus_version or "").strip():
+                raise ValueError(
+                    "fixture_corpus_version must be non-empty for "
+                    "provider_mode='fixture'"
+                )
+        elif self.fixture_corpus_version is not None:
+            raise ValueError(
+                f"fixture_corpus_version must be null for provider_mode="
+                f"{self.provider_mode!r}"
+            )
+        return self
 
     @field_validator("input_digest", "bundle_digest")
     @classmethod

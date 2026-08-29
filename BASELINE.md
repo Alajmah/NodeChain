@@ -176,6 +176,18 @@ The operator experience is a read-side CLI on top of the H1.1 snapshot: `nodecha
 
 All observation commands are runtime-state read-only through `StateManager(read_only=True)`: the DB-hash invariant proves zero persistence writes across `open`, `runs`, `inspect`, `verify`, and `compare`. `research export` has exactly one side effect — the explicitly requested output artifact. `research verify` exits nonzero on an invalid bundle in both human and `--json` modes. `inspect`'s recovery handoff resolves the descriptor's `db_path` and routes to the existing governed recovery console (`nodechain recover inspect` / `list-unknown`); it invents no recovery action and has no placeholder fallback. API/UI product surfaces that consume the `--json` contract remain future work (Roadmap H1.6).
 
+## 6c. Live source acquisition profile (H1.3)
+
+The Research Workspace has exactly two acquisition profiles: `fixture` (the default, sealed-corpus deterministic path) and `live` (the existing governed academic adapters: Semantic Scholar, arXiv, OpenAlex, CrossRef, PubMed). `nodechain research run --profile live` selects live acquisition; combination rules fail closed (`fixture` requires `--corpus`, `live` rejects it) with no silent fallback in either direction.
+
+Live composition reuses the ordinary execution spine: the production `SearchToolNode`, the existing guarded adapter registry (`OrdinaryDispatchGuard` with capsule-before-wire), and the existing production model-provider resolution factored into `resolve_production_model_adapter` (the same authority as the ordinary run path). The runner and CLI hold no direct adapter or network path.
+
+Every ingested live source carries a NodeChain-computed content identity: `source_hash` is the SHA-256 of canonical normalized content (origin, title, authors, DOI, abstract, publication metadata, source type, venue, retained origin-specific signals — excluding volatile acquisition metadata such as the retrieval timestamp), and `artifact_ref` is `ingested:<source_id>:<source_hash>`. Authoritative `query_used`/`retrieved_at` propagate from acquisition provenance into the persisted record; the `QualifiedSourceLinker`'s fail-closed binding is unchanged. Thus the same content fetched later hashes identically while changed content changes the hash.
+
+Descriptors are versioned: legacy documents without `descriptor_version` remain V1 fixture descriptors whose stored raw-document digest is their identity (loading never recomputes it under V2 defaults); new runs write V2 acquisition-aware descriptors carrying the profile, a launch-intent `input_digest` (brief/profile/adapters/provenance version/non-secret model identity — never a source snapshot or replay digest), the allowed adapter set, and resolved non-secret model identity. Credentials are never persisted.
+
+Terminal live bundles remain BundleV1: `provider_mode="live"`, `fixture_corpus_version` null (non-empty is enforced exactly for fixture runs by model and schema), and `replay_eligible=false` unconditionally. Adapter coverage, used adapters, retrieval timestamps, hashes, and artifact refs derive from actual records rather than hardcoding. The reproducibility claim is artifact-bounded: NodeChain proves exactly which content and provenance a run used, and does not claim a later network query returns the same sources. The Workspace projection exposes `acquisition_profile` and `reproducibility_mode` (`deterministic_fixture` / `artifact_bounded_live`) on the snapshot and every run summary, so no live run can be presented as a deterministic fixture run. Fault truth is unchanged: records project only from actual trace events.
+
 ## 7. Evaluation baseline
 
 Evaluation infrastructure is substantial but must be described in layers.

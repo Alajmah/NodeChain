@@ -92,13 +92,19 @@ def finalize_bundle(
     desc: RunDescriptor,
     trace: Any,
     state: Any,
-    corpus: Any,
+    corpus: Any | None = None,
     source_commit: str = "",
 ) -> Path:
     """Finalize a terminal run into a ResearchWorkspaceBundleV1.
 
     If a bundle already exists for this run (idempotent re-finalize),
     verify its integrity and return it rather than throwing.
+
+    H1.3: profile-aware finalization. The acquisition profile comes from
+    the descriptor (legacy V1 descriptors are fixture). Fixture runs keep
+    their sealed-corpus metadata and deterministic replay semantics; live
+    runs derive provider mode/adapters/timestamps from actual records,
+    carry no fixture metadata, and are never replay-eligible.
     """
     bundle_dir = Path(workspace_dir) / "runs" / run_id / "bundle"
     if bundle_dir.exists() and (bundle_dir / "manifest.json").exists():
@@ -114,18 +120,72 @@ def finalize_bundle(
             raise BundleFinalizationError(f"paused run: {trace_final_status}")
         raise BundleFinalizationError(f"not terminal: {trace_final_status}")
 
+    profile = desc.profile
+    if profile == "live":
+        provider_mode = "live"
+        # H1.3 does not implement deterministic replay from captured live
+        # artifacts — replay eligibility is unconditionally false.
+        replay_eligible = False
+    else:
+        provider_mode = "fixture"
+        replay_eligible = trace_final_status != "failed"
+
+    # Minimum-evidence thresholds: fixture runs use their sealed corpus
+    # policy; live runs use the corpus contract's own defaults (the same
+    # MinimumEvidencePolicy defaults every fixture corpus falls back to).
+    if corpus is not None:
+        thresholds = corpus.minimum_evidence
+    else:
+        from nodechain.research.corpus import MinimumEvidencePolicy
+        thresholds = MinimumEvidencePolicy()
+
     outputs = _load_outputs(desc.db_path, run_id)
     ts = _ts()
     created_at = desc.created_at.replace("+00:00", "Z") if "+" in desc.created_at else desc.created_at
 
     sources_out = _parse_output(outputs, "source_ingestion")
     sources = sources_out.get("sources", [])
+    search_out = _parse_output(outputs, "search_tool")
     ev_out = _parse_output(outputs, "evidence_synthesizer")
     claims = ev_out.get("claims", [])
     evidence_list = ev_out.get("evidence", [])
     val_out = _parse_output(outputs, "claim_validator")
     validated = val_out.get("validated_claims", [])
     risk_out = _parse_output(outputs, "risk_classifier")
+
+    # Adapters ACTUALLY invoked during the run, derived from the
+    # authoritative search_tool execution record. Permission is not
+    # execution evidence, and neither is planning: the runtime journals a
+    # side-effect row for every (query, target adapter) pair BEFORE
+    # dispatch, so the ledger alone cannot distinguish planned from
+    # invoked. The node's own record can:
+    #   adapters_called            → invoked (completed; includes
+    #                                dedup-skips of operations this run
+    #                                already completed)
+    #   adapters_failed entries    → invoked ONLY for failures raised
+    #                                around adapter.search() itself.
+    #                                Pre-wire blocks
+    #                                (LANE_ADMISSION_REJECTED), execution
+    #                                gating blocks (side_effect_*), and
+    #                                unknown-adapter resolution failures
+    #                                never reached the wire and stay out.
+    # A run that dispatched nothing reports an empty set.
+    adapters_invoked: set[str] = {
+        a for a in search_out.get("adapters_called", []) if a
+    }
+    for failure in search_out.get("adapters_failed", []):
+        name = failure.get("adapter") or ""
+        if not name or name == "unknown":
+            continue
+        if failure.get("reason_code") == "LANE_ADMISSION_REJECTED":
+            continue  # blocked pre-wire — dispatch did not occur
+        error = failure.get("error", "")
+        if error.startswith("Unknown adapter"):
+            continue  # adapter resolution failed — never invoked
+        if error.startswith("side_effect_"):
+            continue  # execution-gating block — dispatch did not occur
+        adapters_invoked.add(name)
+    adapters_used = sorted(adapters_invoked)
 
     # Build evidence records from actual source content.
     # Generate evidence for both supporting AND contradicting sources.
@@ -178,9 +238,9 @@ def finalize_bundle(
     )
     terminal_status = _determine_terminal_status(
         trace_final_status,
-        corpus.minimum_evidence.min_sources,
-        corpus.minimum_evidence.min_evidence_per_claim,
-        corpus.minimum_evidence.min_confidence,
+        thresholds.min_sources,
+        thresholds.min_evidence_per_claim,
+        thresholds.min_confidence,
         len(sources),
         evidence_counts_per_claim,
         len(claims),
@@ -218,6 +278,26 @@ def finalize_bundle(
     if trace_final_status == "failed":
         current_step_node = getattr(state, "current_node", "") or "failed"
 
+    # Profile-derived acquisition truth (H1.3): required adapters from the
+    # descriptor; coverage derived from the ACTUAL ingested records, used
+    # adapters from ACTUAL dispatch evidence — never hardcoded, never the
+    # permission set.
+    required_adapters = (
+        ["fixture"] if profile == "fixture"
+        else list(desc.allowed_adapters or ())
+    )
+    adapter_coverage: dict[str, int] = {}
+    for s in sources:
+        origin = s.get("origin_api", "") or "unknown"
+        adapter_coverage[origin] = adapter_coverage.get(origin, 0) + 1
+    # Model identity labels: 'fixture-mock' only for fixture runs. Live runs
+    # carry the resolved non-secret model identity from the descriptor.
+    model_label = (
+        "fixture-mock" if profile == "fixture"
+        else f"{desc.model_provider or 'live'}/{desc.model_name or 'unspecified'}"
+    )
+    input_digest = desc.input_digest or desc.corpus_digest or ""
+
     writer = BundleWriter(bundle_dir)
 
     # brief.json
@@ -228,9 +308,9 @@ def finalize_bundle(
         "created_at": created_at,
         "scope": {"domains": [], "time_range": {"start": "2026-01-01T00:00:00Z", "end": "2026-12-31T23:59:59Z"}},
         "constraints": {
-            "min_sources": corpus.minimum_evidence.min_sources,
+            "min_sources": thresholds.min_sources,
             "max_sources": 100,
-            "required_adapters": ["fixture"],
+            "required_adapters": required_adapters,
         },
         "target_depth": "standard",
     })
@@ -243,11 +323,11 @@ def finalize_bundle(
         "started_at": created_at,
         "updated_at": ts,
         "status": terminal_status,
-        "input_digest": desc.corpus_digest,
-        "provider_mode": "fixture",
+        "input_digest": input_digest,
+        "provider_mode": provider_mode,
         "current_step": current_step_node,
         "steps_completed": steps_completed_list,
-        "replay_eligible": trace_final_status != "failed",
+        "replay_eligible": replay_eligible,
     })
 
     # plan.json
@@ -264,11 +344,12 @@ def finalize_bundle(
         ] + [
             {"node_id": "search_tool", "position": 4, "node_type": "tool"}
         ],
-        "adapters_required": ["fixture"],
+        "adapters_required": required_adapters,
         "estimated_cost_usd": 0.0,
     })
 
-    # sources.json
+    # sources.json — per-source retrieval truth from the ingested records;
+    # adapter coverage derived from actual origins.
     writer.write_document("sources.json", {
         "bundle_version": "1.0",
         "run_id": run_id,
@@ -284,10 +365,11 @@ def finalize_bundle(
                 "authors": list(s.get("authors", ())),
                 "abstract": s.get("abstract", ""),
                 "source_hash": s.get("source_hash", ""),
+                "artifact_ref": s.get("artifact_ref", ""),
             }
             for s in sources
         ],
-        "adapter_coverage": {"fixture": len(sources)},
+        "adapter_coverage": adapter_coverage,
         "deduplication_count": 0,
     })
 
@@ -306,7 +388,7 @@ def finalize_bundle(
             }
             for e in evidence_list if isinstance(e, dict)
         ],
-        "extraction_model": "fixture-mock",
+        "extraction_model": model_label,
         "mean_confidence": actual_confidence,
     })
 
@@ -329,7 +411,7 @@ def finalize_bundle(
             }
             for c in claims if isinstance(c, dict)
         ],
-        "synthesis_model": "fixture-mock",
+        "synthesis_model": model_label,
         "executive_answer": ev_out.get("executive_answer", ""),
     })
 
@@ -432,11 +514,11 @@ def finalize_bundle(
         "supported_claims": len([c for c in claims if isinstance(c, dict) and c.get("status") == "supported"]),
         "contested_claims": 0,
         "sources_cited": len(sources),
-        "adapters_used": ["fixture"],
+        "adapters_used": adapters_used,
         "failures_recorded": len(fault_records),
         "review_required": risk_out.get("review_required", False),
         "review_completed": risk_out.get("review_required", False) is False,
-        "replay_eligible": trace_final_status != "failed",
+        "replay_eligible": replay_eligible,
     })
 
     # Compute manifest.
@@ -448,11 +530,13 @@ def finalize_bundle(
         created_at=created_at,
         finalized_at=ts,
         run_status=terminal_status,
-        input_digest=desc.corpus_digest,
-        provider_mode="fixture",
-        fixture_corpus_version=desc.corpus_version,
+        input_digest=input_digest,
+        provider_mode=provider_mode,
+        fixture_corpus_version=(
+            desc.corpus_version if profile == "fixture" else None
+        ),
         trace_reference="trace.json",
-        replay_eligible=trace_final_status != "failed",
+        replay_eligible=replay_eligible,
     )
 
     # KEK exclusion check BEFORE publication.

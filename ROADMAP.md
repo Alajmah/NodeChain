@@ -43,25 +43,13 @@ All six Horizon 0 outcomes are sealed:
 | H0.2 POSIX supervised untrusted routing | `068120f6a46797182d33e100b5dadfc8ccc77b4f` |
 | H0.6 Deployment profile truth | `78f98252173eb38d4284ed92f0fd3343c5c5ce21` |
 
-The canonical deployment-profile authority is `docs/deployment-profiles.md`. Horizon 1 begins with the Workspace object model.
+The canonical deployment-profile authority is `docs/deployment-profiles.md`. Horizon 1 continues with the Workspace object model (H1.1 → H1.2 → H1.3, all sealed).
 
 ---
 
 # Horizon 1 — Governed Research Workspace productization
 
 **Objective:** turn the accepted research product-proof backend into a coherent user product without weakening the runtime/evidence contract.
-
-## H1.3 — Live source acquisition profile
-
-Add a product profile that applies the Research Workspace evidence/bundle semantics to live source acquisition rather than the sealed fixture corpus.
-
-Required properties:
-
-- live adapters preserve the same provenance/version contract;
-- qualified-source identity is bound to actual ingested artifacts;
-- fault records remain projections of actual runtime evidence;
-- network/source variability is explicit in reproducibility claims;
-- sealed fixture mode remains available for deterministic qualification.
 
 ## H1.4 — Human-readable final research artifact
 

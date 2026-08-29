@@ -166,7 +166,14 @@ def _atomic_write(path: Path, content: str) -> Path:
 
 
 class RunDescriptor(BaseModel):
-    """Persisted metadata for a research workspace run."""
+    """Persisted metadata for a research workspace run.
+
+    H1.3 descriptor evolution (V2): acquisition-aware fields carry the
+    run's acquisition profile and non-secret acquisition configuration.
+    Legacy V1 documents (no ``descriptor_version``) are fixture descriptors
+    whose stored raw-document digest IS their identity — loading one must
+    never recompute that digest under V2-shaped defaults.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -174,10 +181,13 @@ class RunDescriptor(BaseModel):
     chain_id: str
     question: str
     focus_areas: tuple[str, ...] = ()
-    corpus_path: str
-    corpus_digest: str
-    corpus_version: str
-    scenario_id: str
+    # Corpus fields: required content for fixture runs, None for live runs.
+    # A V1 document always carries them as strings; None marks "not
+    # applicable" so live descriptors never fake a sealed corpus.
+    corpus_path: str | None = None
+    corpus_digest: str | None = None
+    corpus_version: str | None = None
+    scenario_id: str | None = None
     db_path: str
     trace_dir: str
     workspace_dir: str
@@ -188,15 +198,36 @@ class RunDescriptor(BaseModel):
     kek_path: str = ""
     descriptor_digest: str = ""
 
+    # ---- H1.3 V2 acquisition-aware fields (absent on legacy documents). --
+    descriptor_version: int = 1
+    acquisition_profile: str | None = None
+    input_digest: str | None = None
+    allowed_adapters: tuple[str, ...] | None = None
+    adapter_versions: dict[str, str] | None = None
+    provenance_version: int | None = None
+    model_provider: str | None = None
+    model_name: str | None = None
+
+    @property
+    def profile(self) -> str:
+        """Acquisition profile, defaulting to fixture for legacy V1 docs."""
+        return self.acquisition_profile or "fixture"
+
     @model_validator(mode="after")
     def _compute_digest(self) -> "RunDescriptor":
-        """Compute canonical digest over all fields except descriptor_digest."""
-        data = self.model_dump(mode="json")
+        """Compute canonical digest over all fields except descriptor_digest.
+
+        V1 identity rule (H1.3 AC7): a legacy descriptor (no explicit
+        ``descriptor_version``) keeps the digest verified against its raw
+        stored document. Recomputing it under V2 default fields would
+        silently change a V1 run's identity, so V1 construction is a no-op.
+        """
+        if self.descriptor_version < 2:
+            return self
+        data = self.model_dump(mode="json", exclude_none=True)
         data.pop("descriptor_digest", None)
         canonical = json.dumps(data, sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-        # Use object.__setattr__ to bypass frozen if needed; RunDescriptor
-        # is not frozen so direct assignment works.
         if self.descriptor_digest != digest:
             self.descriptor_digest = digest
         return self
@@ -249,8 +280,11 @@ def save_descriptor(
 ) -> Path:
     """Write a run descriptor atomically to the per-run workspace directory."""
     p = descriptor_path(workspace_dir, desc.run_id)
-    # Recompute digest before writing.
-    data = desc.model_dump(mode="json")
+    # Recompute digest before writing. ``exclude_none`` keeps V2 documents
+    # truthful: fields that do not apply to the run's profile (corpus fields
+    # on a live run) are absent from the persisted document rather than
+    # serialized as nulls.
+    data = desc.model_dump(mode="json", exclude_none=True)
     data.pop("descriptor_digest", None)
     canonical = json.dumps(data, sort_keys=True, separators=(",", ":"))
     data["descriptor_digest"] = hashlib.sha256(

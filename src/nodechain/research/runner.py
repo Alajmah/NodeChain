@@ -54,14 +54,32 @@ from .scoped_env import scoped_env
 # Research blueprint (Phase 5 sealed-workspace chain)
 # --------------------------------------------------------------------------- #
 
+#: The five already-existing Research SearchToolNode adapters permitted by
+#: the H1.3 live profile. No new search provider is part of H1.3; blueprint
+#: capabilities remain the hard upper bound on what a run may dispatch.
+LIVE_ACQUISITION_ADAPTERS: tuple[str, ...] = (
+    "semantic_scholar",
+    "arxiv",
+    "openalex",
+    "crossref",
+    "pubmed",
+)
 
-def _research_blueprint(chain_id: str, goal: str) -> ChainBlueprint:
+ACQUISITION_PROFILES: tuple[str, ...] = ("fixture", "live")
+
+
+def _research_blueprint(
+    chain_id: str, goal: str, allowed_adapters: list[str]
+) -> ChainBlueprint:
     """Build the Phase 5 research blueprint.
 
-    This is a linear chain using the existing research nodes with the
-    FixtureSearchToolNode. The ``risk_classifier`` node is included so the
-    existing runtime review-pause mechanism (hard-wired to that node_id) can
-    trigger a genuine pause/review/resume flow.
+    This is a linear chain using the existing research nodes. The
+    ``search_tool`` node's ``allowed_adapters`` config is parameterized by
+    acquisition profile (H1.3): fixture runs grant only the sealed fixture
+    adapter; live runs grant the five existing governed academic adapters.
+    The ``risk_classifier`` node is included so the existing runtime
+    review-pause mechanism (hard-wired to that node_id) can trigger a
+    genuine pause/review/resume flow.
     """
     return ChainBlueprint(
         chain_id=chain_id,
@@ -76,7 +94,7 @@ def _research_blueprint(chain_id: str, goal: str) -> ChainBlueprint:
                 node_id="search_tool",
                 node_type="tool",
                 config={
-                    "allowed_adapters": ["fixture"],
+                    "allowed_adapters": list(allowed_adapters),
                     "allowed_tools": ["search"],
                 },
                 position=4,
@@ -166,19 +184,46 @@ class WorkspaceRunner:
     def __init__(
         self,
         brief: ResearchBrief | str,
-        corpus_path: str | Path,
+        corpus_path: str | Path | None = None,
         *,
+        profile: str = "fixture",
         db_path: str | Path | None = None,
         trace_dir: str | Path | None = None,
         workspace_dir: str | Path | None = None,
         chain_id: str = "research-workspace-v1",
+        model_adapter: Any = None,
     ) -> None:
+        if profile not in ACQUISITION_PROFILES:
+            raise ValueError(
+                f"unknown acquisition profile {profile!r}; "
+                f"must be one of {ACQUISITION_PROFILES}"
+            )
         if isinstance(brief, str):
             brief = ResearchBrief.from_question(brief)
         self.brief = brief
-        self._corpus_path = str(corpus_path)
-        self.corpus = load_corpus(corpus_path)
-        self.corpus_digest = compute_corpus_canonical_digest(self.corpus)
+        self.profile = profile
+        # Fail-closed profile/corpus combination rules — no silent fallback
+        # from live to fixture and no fixture run without a sealed corpus.
+        if profile == "fixture":
+            if corpus_path is None:
+                raise ValueError(
+                    "the fixture acquisition profile requires --corpus"
+                )
+            self._corpus_path = str(corpus_path)
+            self.corpus = load_corpus(corpus_path)
+            self.corpus_digest = compute_corpus_canonical_digest(self.corpus)
+        else:  # live
+            if corpus_path is not None:
+                raise ValueError(
+                    "the live acquisition profile does not accept --corpus"
+                )
+            self._corpus_path = ""
+            self.corpus = None
+            self.corpus_digest = ""
+        self.allowed_adapters = (
+            ["fixture"] if profile == "fixture"
+            else list(LIVE_ACQUISITION_ADAPTERS)
+        )
         self.chain_id = chain_id
         self._workspace_dir = str(workspace_dir or "data/research_workspace")
         Path(self._workspace_dir).mkdir(parents=True, exist_ok=True)
@@ -187,11 +232,33 @@ class WorkspaceRunner:
         Path(self._trace_dir).mkdir(parents=True, exist_ok=True)
         self._kek_path = str(Path(self._workspace_dir) / ".kek")
         self.orchestrator: Orchestrator | None = None
-        self._search_node: FixtureSearchToolNode | None = None
+        self._search_node: Any = None
         self._fixture_adapter: FixtureSearchAdapter | None = None
         self._guard: Any = None
         self._run_descriptor: RunDescriptor | None = None
         self._review_env: dict[str, str] = {}
+        self._adapter_versions: dict[str, str] = {}
+
+        # Model adapter resolution. The fixture profile keeps its sealed
+        # FixtureModelAdapter (built in _build_nodes). The live profile uses
+        # the existing production model-provider resolution semantics — the
+        # same authority as the ordinary NodeChain run path — or an explicitly
+        # injected bounded deterministic adapter (qualification only).
+        if profile == "live":
+            if model_adapter is not None:
+                self._model_adapter = model_adapter
+                self.model_provider = "injected"
+                self.model_name = type(model_adapter).__name__
+            else:
+                from nodechain.cli.run import resolve_production_model_adapter
+                (self._model_adapter, provider, model_name
+                 ) = resolve_production_model_adapter()
+                self.model_provider = provider
+                self.model_name = model_name
+        else:
+            self._model_adapter = None
+            self.model_provider = "fixture"
+            self.model_name = "fixture-mock"
 
     @classmethod
     def from_descriptor(cls, desc: RunDescriptor) -> "WorkspaceRunner":
@@ -200,10 +267,65 @@ class WorkspaceRunner:
         This is the fresh-process reconstruction path: a new WorkspaceRunner
         object is created with all paths from the descriptor, suitable for
         compose_for_resume + resume.
+
+        For a live V2 descriptor, the persisted acquisition configuration is
+        AUTHORITATIVE: allowed adapters, provider/model identity, adapter
+        versions, and provenance version come from the descriptor, while
+        credentials and endpoints remain current environment authority. If
+        the current environment cannot satisfy the persisted configuration,
+        reconstruction fails closed — it never silently substitutes current
+        defaults, so a run cannot pause under configuration A and resume
+        under configuration B.
         """
+        if desc.profile == "live":
+            allowed = [a for a in (desc.allowed_adapters or ()) if a]
+            if not allowed or any(
+                    a not in LIVE_ACQUISITION_ADAPTERS for a in allowed):
+                raise ValueError(
+                    f"descriptor for run {desc.run_id} declares an "
+                    f"unsatisfiable live adapter set: {desc.allowed_adapters}"
+                )
+            if desc.model_provider == "injected":
+                raise ValueError(
+                    f"live run {desc.run_id} used an injected process-local "
+                    f"model adapter; that acquisition configuration cannot "
+                    f"be reconstructed in a fresh process — resume refused"
+                )
+            from nodechain.cli.run import resolve_production_model_adapter
+            adapter, provider, model = resolve_production_model_adapter()
+            if (provider, model) != (desc.model_provider, desc.model_name):
+                raise ValueError(
+                    f"current model resolution ({provider}/{model}) does not "
+                    f"match the persisted acquisition configuration "
+                    f"({desc.model_provider}/{desc.model_name}) for run "
+                    f"{desc.run_id}; refusing to resume under a substituted "
+                    f"configuration"
+                )
+            runner = cls(
+                brief=ResearchBrief.from_question(desc.question),
+                corpus_path=None,
+                profile="live",
+                workspace_dir=desc.workspace_dir,
+                db_path=desc.db_path,
+                trace_dir=desc.trace_dir,
+                chain_id=desc.chain_id,
+                model_adapter=adapter,
+            )
+            # The constructor labels injected adapters with their class
+            # name; restore the persisted non-secret identity (the adapter
+            # instance itself came from the current-environment resolution
+            # verified above, so credentials stayed with the environment).
+            runner.model_provider = desc.model_provider
+            runner.model_name = desc.model_name
+            # Descriptor-authoritative acquisition set (may be a subset of
+            # the five permitted adapters granted at launch).
+            runner.allowed_adapters = allowed
+            runner._run_descriptor = desc
+            return runner
         runner = cls(
             brief=ResearchBrief.from_question(desc.question),
             corpus_path=desc.corpus_path,
+            profile="fixture",
             workspace_dir=desc.workspace_dir,
             db_path=desc.db_path,
             trace_dir=desc.trace_dir,
@@ -217,33 +339,48 @@ class WorkspaceRunner:
     # ------------------------------------------------------------------ #
 
     def _build_nodes(self) -> dict[str, Any]:
-        """Construct the existing research nodes with FixtureSearchToolNode."""
+        """Construct the existing research nodes for the run's profile."""
         from nodechain.cli.run import _create_nodes
 
-        # Extract search terms from the corpus query keys so the model adapter
-        # produces queries that match the sealed corpus.
-        search_terms = list(self.corpus.queries.keys())
-        # Claim confidence: derived from the corpus scenario_kind.
-        claim_confidence = 0.75  # default: high confidence (stable literature)
-        scenario_kind = getattr(self.corpus, "scenario_kind", "stable_literature")
-        if scenario_kind == "conflicting_evidence":
-            claim_confidence = 0.2  # low confidence from genuinely contradictory evidence
-        model_adapter = FixtureModelAdapter(
-            latency_ms=0,
-            search_terms=search_terms,
-            claim_confidence=claim_confidence,
-            scenario_kind=scenario_kind,
-        )
-        nodes = _create_nodes(
-            model_adapter,
-            self._trace_dir,
-            memory_manager=None,  # sealed run — no ChromaDB
-            policy_engine=None,  # set on orchestrator
-            state_manager=None,  # set on orchestrator
-        )
-        # Replace the production SearchToolNode with the fixture specialization.
-        nodes["search_tool"] = FixtureSearchToolNode()
-        # Add the QualifiedSourceLinker between quality evaluation and synthesis.
+        if self.profile == "live":
+            # Live composition: the ordinary production SearchToolNode and
+            # the existing production model-provider resolution. The guarded
+            # adapter registry is wired in _compose (it needs the run_id).
+            nodes = _create_nodes(
+                self._model_adapter,
+                self._trace_dir,
+                memory_manager=None,
+                policy_engine=None,
+                state_manager=None,
+            )
+        else:
+            # Fixture composition: extract search terms from the corpus
+            # query keys so the model adapter produces queries that match
+            # the sealed corpus.
+            search_terms = list(self.corpus.queries.keys())
+            # Claim confidence: derived from the corpus scenario_kind.
+            claim_confidence = 0.75  # default: high confidence (stable literature)
+            scenario_kind = getattr(self.corpus, "scenario_kind", "stable_literature")
+            if scenario_kind == "conflicting_evidence":
+                claim_confidence = 0.2  # low confidence from genuinely contradictory evidence
+            model_adapter = FixtureModelAdapter(
+                latency_ms=0,
+                search_terms=search_terms,
+                claim_confidence=claim_confidence,
+                scenario_kind=scenario_kind,
+            )
+            nodes = _create_nodes(
+                model_adapter,
+                self._trace_dir,
+                memory_manager=None,  # sealed run — no ChromaDB
+                policy_engine=None,  # set on orchestrator
+                state_manager=None,  # set on orchestrator
+            )
+            # Replace the production SearchToolNode with the fixture
+            # specialization.
+            nodes["search_tool"] = FixtureSearchToolNode()
+        # Add the QualifiedSourceLinker between quality evaluation and
+        # synthesis (both profiles — it is the fail-closed linkage authority).
         from .qualified_source_linker import QualifiedSourceLinkerNode
         nodes["qualified_source_linker"] = QualifiedSourceLinkerNode()
         return nodes
@@ -267,7 +404,9 @@ class WorkspaceRunner:
             policy_engine.register(policy)
 
         # Build blueprint.
-        blueprint = _research_blueprint(self.chain_id, self.brief.question)
+        blueprint = _research_blueprint(
+            self.chain_id, self.brief.question, list(self.allowed_adapters)
+        )
 
         # Build nodes.
         nodes = self._build_nodes()
@@ -281,23 +420,10 @@ class WorkspaceRunner:
             policy_engine=policy_engine,
         )
 
-        # Wire the guarded fixture adapter. For resume, bind to the persisted
-        # run_id (for capsule lookup). For initial run, use the orchestrator's
-        # newly allocated run_id.
+        # Wire the guarded acquisition adapters. For resume, bind to the
+        # persisted run_id (for capsule lookup). For initial run, use the
+        # orchestrator's newly allocated run_id.
         run_id = persisted_run_id or orchestrator.state.run_id
-        fixture_map = corpus_to_fixture_map(self.corpus)
-        self._fixture_adapter = FixtureSearchAdapter(fixture_map)
-
-        # Lane-admission: fail_before_dispatch. When this fault is active,
-        # a lane-admission wrapper rejects dispatch BEFORE the guard's search()
-        # is invoked. This is a product-level admission decision, NOT a
-        # capsule-integrity failure. The guard is never called, so:
-        #   guard.dispatch_count == 0
-        #   adapter.invocation_count == 0
-        #   no capsule-integrity violation
-        fail_before_dispatch_active = bool(
-            self.corpus.fault_injection.fail_before_dispatch_lanes
-        )
 
         def capsule_validator(check_run_id: str, adapter_name: str, digest: str) -> bool:
             """Verify an exact capsule exists for this run + adapter + digest
@@ -326,42 +452,88 @@ class WorkspaceRunner:
             except Exception:
                 return False
 
-        guard = OrdinaryDispatchGuard(
-            target_adapter=self._fixture_adapter,
-            run_id=run_id,
-            capsule_validator=capsule_validator,
-            skip_trust_check=False,  # MUST be False
-        )
-
-        # Lane-admission wrapper for fail_before_dispatch: wraps the guard so
-        # search() is rejected BEFORE the guard processes it. The guard's
-        # dispatch count stays 0 and the adapter is never invoked. This is a
-        # product-level admission decision, not a capsule-integrity failure.
-        if fail_before_dispatch_active:
-            original_search = guard.search
-
-            async def fail_before_search(query):
-                from nodechain.adapters.search.base_search import (
-                    SearchAdapterError,
+        if self.profile == "live":
+            # Live composition: reuse the existing production guarded
+            # adapter registry. Every live search dispatch runs through the
+            # ordinary SearchToolNode, the side-effect lifecycle, and the
+            # capsule-before-wire invariant — the runner never calls an
+            # adapter or an API directly.
+            from nodechain.runtime.recovery_dispatch_guard import (
+                build_ordinary_guarded_registry,
+            )
+            guarded_registry = build_ordinary_guarded_registry(
+                run_id=run_id,
+                adapter_names=list(self.allowed_adapters),
+                capsule_validator=capsule_validator,
+            )
+            missing = [
+                name for name in self.allowed_adapters
+                if name not in guarded_registry
+            ]
+            if missing:
+                raise RuntimeError(
+                    f"live acquisition adapters unavailable: {missing}"
                 )
-                from nodechain.adapters.search.failure_types import (
-                    AdapterFailure,
-                    SearchFailureType,
-                )
-                raise SearchAdapterError(
-                    AdapterFailure(
-                        adapter=self._fixture_adapter.adapter_name,
-                        failure_type=SearchFailureType.UNKNOWN,
-                        retryable=False,
-                        message="fail_before_dispatch: lane admission rejected "
-                        "(dispatch did not occur)",
-                        reason_code="LANE_ADMISSION_REJECTED",
+            self._guard = guarded_registry
+            self._adapter_versions = {
+                name: str(getattr(g, "adapter_version", "") or "")
+                for name, g in guarded_registry.items()
+            }
+            self._search_node.set_adapter_resolver(guarded_registry)
+        else:
+            fixture_map = corpus_to_fixture_map(self.corpus)
+            self._fixture_adapter = FixtureSearchAdapter(fixture_map)
+
+            # Lane-admission: fail_before_dispatch. When this fault is active,
+            # a lane-admission wrapper rejects dispatch BEFORE the guard's
+            # search() is invoked. This is a product-level admission
+            # decision, NOT a capsule-integrity failure. The guard is never
+            # called, so:
+            #   guard.dispatch_count == 0
+            #   adapter.invocation_count == 0
+            #   no capsule-integrity violation
+            fail_before_dispatch_active = bool(
+                self.corpus.fault_injection.fail_before_dispatch_lanes
+            )
+
+            guard = OrdinaryDispatchGuard(
+                target_adapter=self._fixture_adapter,
+                run_id=run_id,
+                capsule_validator=capsule_validator,
+                skip_trust_check=False,  # MUST be False
+            )
+
+            # Lane-admission wrapper for fail_before_dispatch: wraps the
+            # guard so search() is rejected BEFORE the guard processes it.
+            # The guard's dispatch count stays 0 and the adapter is never
+            # invoked. This is a product-level admission decision, not a
+            # capsule-integrity failure.
+            if fail_before_dispatch_active:
+                original_search = guard.search
+
+                async def fail_before_search(query):
+                    from nodechain.adapters.search.base_search import (
+                        SearchAdapterError,
                     )
-                )
-            guard.search = fail_before_search
+                    from nodechain.adapters.search.failure_types import (
+                        AdapterFailure,
+                        SearchFailureType,
+                    )
+                    raise SearchAdapterError(
+                        AdapterFailure(
+                            adapter=self._fixture_adapter.adapter_name,
+                            failure_type=SearchFailureType.UNKNOWN,
+                            retryable=False,
+                            message="fail_before_dispatch: lane admission rejected "
+                            "(dispatch did not occur)",
+                            reason_code="LANE_ADMISSION_REJECTED",
+                        )
+                    )
+                guard.search = fail_before_search
 
-        self._guard = guard
-        self._search_node.set_adapter_resolver({"fixture": guard})
+            self._guard = guard
+            self._adapter_versions = {"fixture": guard.adapter_version}
+            self._search_node.set_adapter_resolver({"fixture": guard})
 
         # Validate contracts.
         issues = orchestrator.validate_contracts()
@@ -374,6 +546,34 @@ class WorkspaceRunner:
     # ------------------------------------------------------------------ #
     # Run / Resume
     # ------------------------------------------------------------------ #
+
+    def _compute_input_digest(self) -> str:
+        """Launch-intent/config digest for the run (H1.3 AC5/AC7).
+
+        Canonical inputs: the brief, the acquisition profile, the allowed
+        adapter set, the provenance version, and the resolved non-secret
+        model identity — plus the corpus digest for fixture runs. This is
+        NOT a source snapshot and NOT a deterministic replay digest: it
+        identifies what the run was launched to do, never what the network
+        returned.
+        """
+        import hashlib as _hl
+
+        from nodechain.core.provenance import CURRENT_PROVENANCE_VERSION
+
+        payload = {
+            "question": self.brief.question,
+            "focus_areas": sorted(self.brief.focus_areas),
+            "acquisition_profile": self.profile,
+            "allowed_adapters": sorted(self.allowed_adapters),
+            "provenance_version": CURRENT_PROVENANCE_VERSION,
+            "model_provider": self.model_provider,
+            "model_name": self.model_name,
+        }
+        if self.profile == "fixture":
+            payload["corpus_digest"] = self.corpus_digest
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return _hl.sha256(canonical.encode("utf-8")).hexdigest()
 
     def run(self) -> "RunResult":
         """Execute the research chain from start.
@@ -395,14 +595,26 @@ class WorkspaceRunner:
                 chain_id=self.chain_id,
                 question=self.brief.question,
                 focus_areas=tuple(self.brief.focus_areas),
-                corpus_path=str(self._corpus_path),
-                corpus_digest=self.corpus_digest,
-                corpus_version=self.corpus.corpus_version,
-                scenario_id=self.corpus.scenario_id,
                 db_path=self._db_path,
                 trace_dir=self._trace_dir,
                 workspace_dir=self._workspace_dir,
                 kek_path=self._kek_path,
+                descriptor_version=2,
+                acquisition_profile=self.profile,
+                input_digest=self._compute_input_digest(),
+                allowed_adapters=tuple(self.allowed_adapters),
+                adapter_versions=dict(self._adapter_versions),
+                provenance_version=self._provenance_version(),
+                model_provider=self.model_provider,
+                model_name=self.model_name,
+                **(
+                    dict(
+                        corpus_path=self._corpus_path,
+                        corpus_digest=self.corpus_digest,
+                        corpus_version=self.corpus.corpus_version,
+                        scenario_id=self.corpus.scenario_id,
+                    ) if self.profile == "fixture" else {}
+                ),
             )
             save_descriptor(self._workspace_dir, desc)
             self._run_descriptor = desc
@@ -435,6 +647,12 @@ class WorkspaceRunner:
             state=orch.state,
             runner=self,
         )
+
+    @staticmethod
+    def _provenance_version() -> int:
+        from nodechain.core.provenance import CURRENT_PROVENANCE_VERSION
+
+        return CURRENT_PROVENANCE_VERSION
 
     #: Recognized fault reason codes for event projection.
     _RECOGNIZED_FAULT_CODES: frozenset[str] = frozenset({
@@ -615,8 +833,57 @@ class WorkspaceRunner:
 
         This does NOT manually assign orchestrator.state — the existing
         orchestrator.resume(persisted_run_id) seam loads state from the DB.
+
+        For a live V2 run, the persisted acquisition configuration is
+        ENFORCED against the reconstructed composition before the caller
+        can resume: the descriptor's provenance version must equal the
+        currently supported provenance version, and every authorized
+        adapter's current version must exactly match the descriptor's
+        recorded version. Missing or mismatched persisted version
+        information fails closed — a run can never resume under a
+        substituted provenance contract or adapter implementation.
         """
-        return self._compose(persisted_run_id=persisted_run_id)
+        orchestrator = self._compose(persisted_run_id=persisted_run_id)
+        desc = self._run_descriptor
+        if (desc is not None and desc.profile == "live"
+                and desc.descriptor_version >= 2):
+            from nodechain.core.provenance import CURRENT_PROVENANCE_VERSION
+            if desc.provenance_version is None:
+                raise ValueError(
+                    f"live descriptor for run {persisted_run_id} is missing "
+                    f"provenance_version; resume refused"
+                )
+            if desc.provenance_version != CURRENT_PROVENANCE_VERSION:
+                raise ValueError(
+                    f"descriptor provenance_version "
+                    f"{desc.provenance_version} != supported "
+                    f"{CURRENT_PROVENANCE_VERSION} for run "
+                    f"{persisted_run_id}; refusing to resume under a "
+                    f"changed provenance contract"
+                )
+            persisted_versions = dict(desc.adapter_versions or {})
+            if not persisted_versions:
+                raise ValueError(
+                    f"live descriptor for run {persisted_run_id} is missing "
+                    f"adapter_versions; resume refused"
+                )
+            for name in self.allowed_adapters:
+                persisted = persisted_versions.get(name)
+                if not persisted:
+                    raise ValueError(
+                        f"live descriptor for run {persisted_run_id} is "
+                        f"missing the persisted version for authorized "
+                        f"adapter {name!r}; resume refused"
+                    )
+                current = self._adapter_versions.get(name)
+                if current != persisted:
+                    raise ValueError(
+                        f"adapter {name!r} version changed since run "
+                        f"{persisted_run_id} launched: descriptor records "
+                        f"{persisted}, current is {current}; refusing to "
+                        f"resume under a substituted configuration"
+                    )
+        return orchestrator
 
     def resume(self, run_id: str | None = None) -> "RunResult":
         """Resume a paused run through the existing runtime resume seam.
