@@ -350,7 +350,7 @@ def _write_valid_bundle(dest: Path) -> Path:
         run_status=RunStatus.COMPLETED,
         input_digest=INPUT_DIGEST,
         provider_mode="live",
-        fixture_corpus_version="corpus-1",
+        fixture_corpus_version=None,
         trace_reference="trace.json",
         replay_eligible=True,
     )
@@ -428,7 +428,7 @@ def test_unknown_field_rejected(tmp_path: Path) -> None:
         source_commit=COMMIT, run_id=RUN_ID, chain_id=CHAIN_ID,
         blueprint_version="bp-1", created_at=TS, finalized_at=TS,
         run_status=RunStatus.COMPLETED, input_digest=INPUT_DIGEST,
-        provider_mode="live", fixture_corpus_version="corpus-1",
+        provider_mode="live", fixture_corpus_version=None,
     )
     with pytest.raises(BundleValidationError):
         writer.finalize(manifest)
@@ -450,7 +450,7 @@ def test_missing_required_field_rejected(tmp_path: Path) -> None:
         source_commit=COMMIT, run_id=RUN_ID, chain_id=CHAIN_ID,
         blueprint_version="bp-1", created_at=TS, finalized_at=TS,
         run_status=RunStatus.COMPLETED, input_digest=INPUT_DIGEST,
-        provider_mode="live", fixture_corpus_version="corpus-1",
+        provider_mode="live", fixture_corpus_version=None,
     )
     with pytest.raises(BundleValidationError):
         writer.finalize(manifest)
@@ -472,7 +472,7 @@ def test_unsupported_bundle_version_rejected(tmp_path: Path) -> None:
         source_commit=COMMIT, run_id=RUN_ID, chain_id=CHAIN_ID,
         blueprint_version="bp-1", created_at=TS, finalized_at=TS,
         run_status=RunStatus.COMPLETED, input_digest=INPUT_DIGEST,
-        provider_mode="live", fixture_corpus_version="corpus-1",
+        provider_mode="live", fixture_corpus_version=None,
     )
     with pytest.raises(BundleValidationError):
         writer.finalize(manifest)
@@ -497,7 +497,7 @@ def test_cross_reference_failure_orphan_evidence(tmp_path: Path) -> None:
         source_commit=COMMIT, run_id=RUN_ID, chain_id=CHAIN_ID,
         blueprint_version="bp-1", created_at=TS, finalized_at=TS,
         run_status=RunStatus.COMPLETED, input_digest=INPUT_DIGEST,
-        provider_mode="live", fixture_corpus_version="corpus-1",
+        provider_mode="live", fixture_corpus_version=None,
     )
     with pytest.raises(BundleValidationError, match="cross-reference"):
         writer.finalize(manifest)
@@ -516,7 +516,7 @@ def test_cross_reference_failure_orphan_source_on_citation(tmp_path: Path) -> No
         source_commit=COMMIT, run_id=RUN_ID, chain_id=CHAIN_ID,
         blueprint_version="bp-1", created_at=TS, finalized_at=TS,
         run_status=RunStatus.COMPLETED, input_digest=INPUT_DIGEST,
-        provider_mode="live", fixture_corpus_version="corpus-1",
+        provider_mode="live", fixture_corpus_version=None,
     )
     with pytest.raises(BundleValidationError, match="cross-reference"):
         writer.finalize(manifest)
@@ -540,7 +540,7 @@ def test_cross_reference_validation_target_type_routing(tmp_path: Path) -> None:
         source_commit=COMMIT, run_id=RUN_ID, chain_id=CHAIN_ID,
         blueprint_version="bp-1", created_at=TS, finalized_at=TS,
         run_status=RunStatus.COMPLETED, input_digest=INPUT_DIGEST,
-        provider_mode="live", fixture_corpus_version="corpus-1",
+        provider_mode="live", fixture_corpus_version=None,
     )
     with pytest.raises(BundleValidationError, match="cross-reference"):
         writer.finalize(manifest)
@@ -590,7 +590,7 @@ def test_atomic_finalization_fault_leaves_no_partial(tmp_path: Path) -> None:
         source_commit=COMMIT, run_id=RUN_ID, chain_id=CHAIN_ID,
         blueprint_version="bp-1", created_at=TS, finalized_at=TS,
         run_status=RunStatus.COMPLETED, input_digest=INPUT_DIGEST,
-        provider_mode="live", fixture_corpus_version="corpus-1",
+        provider_mode="live", fixture_corpus_version=None,
     )
     # Force os.replace to fail to simulate a fault at the final atomic step.
     with mock.patch(
@@ -626,7 +626,7 @@ def test_duplicate_id_rejected(tmp_path: Path) -> None:
         source_commit=COMMIT, run_id=RUN_ID, chain_id=CHAIN_ID,
         blueprint_version="bp-1", created_at=TS, finalized_at=TS,
         run_status=RunStatus.COMPLETED, input_digest=INPUT_DIGEST,
-        provider_mode="live", fixture_corpus_version="corpus-1",
+        provider_mode="live", fixture_corpus_version=None,
     )
     with pytest.raises(BundleValidationError, match="duplicate"):
         writer.finalize(manifest)

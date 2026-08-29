@@ -344,7 +344,7 @@ def _write_valid_bundle(dest: Path) -> Path:
         run_status="completed",
         input_digest=INPUT_DIGEST,
         provider_mode="live",
-        fixture_corpus_version="corpus-1",
+        fixture_corpus_version=None,
         trace_reference="trace.json",
         replay_eligible=True,
     )
@@ -425,7 +425,7 @@ def test_trace_schema_validation_rejects_missing_chain_id(tmp_path: Path) -> Non
         source_commit=COMMIT, run_id=RUN_ID, chain_id=CHAIN_ID,
         blueprint_version="bp-1", created_at=TS, finalized_at=TS,
         run_status="completed", input_digest=INPUT_DIGEST,
-        provider_mode="live", fixture_corpus_version="corpus-1",
+        provider_mode="live", fixture_corpus_version=None,
     )
     with pytest.raises(BundleValidationError, match="trace.json"):
         writer.finalize(manifest)
@@ -447,7 +447,7 @@ def test_trace_schema_validation_rejects_event_missing_core_field(
         source_commit=COMMIT, run_id=RUN_ID, chain_id=CHAIN_ID,
         blueprint_version="bp-1", created_at=TS, finalized_at=TS,
         run_status="completed", input_digest=INPUT_DIGEST,
-        provider_mode="live", fixture_corpus_version="corpus-1",
+        provider_mode="live", fixture_corpus_version=None,
     )
     with pytest.raises(BundleValidationError, match="trace.json"):
         writer.finalize(manifest)
@@ -469,7 +469,7 @@ def test_trace_rejects_unknown_envelope_fields(tmp_path: Path) -> None:
         source_commit=COMMIT, run_id=RUN_ID, chain_id=CHAIN_ID,
         blueprint_version="bp-1", created_at=TS, finalized_at=TS,
         run_status="completed", input_digest=INPUT_DIGEST,
-        provider_mode="live", fixture_corpus_version="corpus-1",
+        provider_mode="live", fixture_corpus_version=None,
     )
     with pytest.raises(BundleValidationError, match="trace.json"):
         writer.finalize(manifest)
@@ -489,7 +489,7 @@ def test_trace_rejects_unknown_root_field(tmp_path: Path) -> None:
         source_commit=COMMIT, run_id=RUN_ID, chain_id=CHAIN_ID,
         blueprint_version="bp-1", created_at=TS, finalized_at=TS,
         run_status="completed", input_digest=INPUT_DIGEST,
-        provider_mode="live", fixture_corpus_version="corpus-1",
+        provider_mode="live", fixture_corpus_version=None,
     )
     with pytest.raises(BundleValidationError, match="trace.json"):
         writer.finalize(manifest)
@@ -512,7 +512,7 @@ def test_trace_explicit_extensions_surface_is_permitted(tmp_path: Path) -> None:
         source_commit=COMMIT, run_id=RUN_ID, chain_id=CHAIN_ID,
         blueprint_version="bp-1", created_at=TS, finalized_at=TS,
         run_status="completed", input_digest=INPUT_DIGEST,
-        provider_mode="live", fixture_corpus_version="corpus-1",
+        provider_mode="live", fixture_corpus_version=None,
     )
     finalized = writer.finalize(manifest)
     assert (finalized / "trace.json").exists()
@@ -552,7 +552,7 @@ def test_finalize_rejects_stale_file_hash(tmp_path: Path) -> None:
         source_commit=COMMIT, run_id=RUN_ID, chain_id=CHAIN_ID,
         blueprint_version="bp-1", created_at=TS, finalized_at=TS,
         run_status="completed", input_digest=INPUT_DIGEST,
-        provider_mode="live", fixture_corpus_version="corpus-1",
+        provider_mode="live", fixture_corpus_version=None,
     )
     # Mutate a staged file post-compute_manifest.
     brief_path = writer.staging_dir / "brief.json"
@@ -580,7 +580,7 @@ def test_finalize_rejects_tampered_manifest_digest(tmp_path: Path) -> None:
         source_commit=COMMIT, run_id=RUN_ID, chain_id=CHAIN_ID,
         blueprint_version="bp-1", created_at=TS, finalized_at=TS,
         run_status="completed", input_digest=INPUT_DIGEST,
-        provider_mode="live", fixture_corpus_version="corpus-1",
+        provider_mode="live", fixture_corpus_version=None,
     )
     bad_manifest = manifest.model_copy(
         update={"bundle_digest": "0" * 64}
@@ -813,7 +813,7 @@ def test_finalize_rejects_non_terminal_status(
         source_commit=COMMIT, run_id=RUN_ID, chain_id=CHAIN_ID,
         blueprint_version="bp-1", created_at=TS, finalized_at=TS,
         run_status=status, input_digest=INPUT_DIGEST,
-        provider_mode="live", fixture_corpus_version="corpus-1",
+        provider_mode="live", fixture_corpus_version=None,
     )
     with pytest.raises(BundleValidationError, match="non-terminal"):
         writer.finalize(manifest)
@@ -838,7 +838,7 @@ def test_finalize_accepts_each_terminal_status(
         source_commit=COMMIT, run_id=RUN_ID, chain_id=CHAIN_ID,
         blueprint_version="bp-1", created_at=TS, finalized_at=TS,
         run_status=status, input_digest=INPUT_DIGEST,
-        provider_mode="live", fixture_corpus_version="corpus-1",
+        provider_mode="live", fixture_corpus_version=None,
     )
     finalized = writer.finalize(manifest)
     assert (finalized / "manifest.json").exists()
@@ -1030,7 +1030,7 @@ def _write_bundle_with_documents(dest: Path, docs: dict[str, dict]) -> Path:
         source_commit=COMMIT, run_id=RUN_ID, chain_id=CHAIN_ID,
         blueprint_version="bp-1", created_at=TS, finalized_at=TS,
         run_status="completed", input_digest=INPUT_DIGEST,
-        provider_mode="live", fixture_corpus_version="corpus-1",
+        provider_mode="live", fixture_corpus_version=None,
     )
     return writer.finalize(manifest)
 
@@ -1346,7 +1346,7 @@ def test_schema_rejects_unversioned_root_extensions(tmp_path: Path) -> None:
         source_commit=COMMIT, run_id=RUN_ID, chain_id=CHAIN_ID,
         blueprint_version="bp-1", created_at=TS, finalized_at=TS,
         run_status="completed", input_digest=INPUT_DIGEST,
-        provider_mode="live", fixture_corpus_version="corpus-1",
+        provider_mode="live", fixture_corpus_version=None,
     )
     with pytest.raises(BundleValidationError, match="trace.json"):
         writer.finalize(manifest)
@@ -1368,7 +1368,7 @@ def test_schema_rejects_unversioned_event_extensions(tmp_path: Path) -> None:
         source_commit=COMMIT, run_id=RUN_ID, chain_id=CHAIN_ID,
         blueprint_version="bp-1", created_at=TS, finalized_at=TS,
         run_status="completed", input_digest=INPUT_DIGEST,
-        provider_mode="live", fixture_corpus_version="corpus-1",
+        provider_mode="live", fixture_corpus_version=None,
     )
     with pytest.raises(BundleValidationError, match="trace.json"):
         writer.finalize(manifest)
@@ -1393,7 +1393,7 @@ def test_schema_accepts_versioned_root_and_event_extensions(
         source_commit=COMMIT, run_id=RUN_ID, chain_id=CHAIN_ID,
         blueprint_version="bp-1", created_at=TS, finalized_at=TS,
         run_status="completed", input_digest=INPUT_DIGEST,
-        provider_mode="live", fixture_corpus_version="corpus-1",
+        provider_mode="live", fixture_corpus_version=None,
     )
     finalized = writer.finalize(manifest)
     assert (finalized / "trace.json").exists()

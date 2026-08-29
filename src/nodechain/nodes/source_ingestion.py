@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -485,6 +486,41 @@ NORMALIZERS = {
 }
 
 
+#: Substantive normalized-content fields covered by the live content hash.
+#: Volatile acquisition metadata (retrieval timestamp, query) is deliberately
+#: excluded: the hash answers "what content did NodeChain ingest", not "when
+#: or how was it obtained".
+_LIVE_CONTENT_FIELDS: tuple[str, ...] = (
+    "title",
+    "authors",
+    "publication_date",
+    "doi",
+    "abstract",
+    "source_type",
+    "peer_reviewed",
+    "citation_count",
+    "venue",
+    "subject_areas",
+    "open_access",
+    "pdf_url",
+    "credibility_signals",
+)
+
+
+def _canonical_live_content(origin: str, normalized: dict[str, Any]) -> str:
+    """Canonical JSON over the substantive normalized source content.
+
+    The origin is included so content identity stays per-origin
+    deterministic. Sort keys and compact separators make the bytes stable;
+    the SHA-256 of this string is the NodeChain-computed ``source_hash``.
+    """
+    content: dict[str, Any] = {"origin_api": origin}
+    for key in _LIVE_CONTENT_FIELDS:
+        if key in normalized:
+            content[key] = normalized[key]
+    return json.dumps(content, sort_keys=True, separators=(",", ":"))
+
+
 class SourceIngestionNode(BaseNode):
     """
     Node 5: Data transformer. Normalizes all API schemas into
@@ -530,12 +566,42 @@ class SourceIngestionNode(BaseNode):
                 continue
             seen_titles.add(title_hash)
 
-            source_record = {
-                "source_id": str(uuid.uuid4()),
-                "origin_api": origin,
-                **normalized,
-                "provenance": provenance,
-            }
+            if origin == "fixture":
+                # Fixture normalizers already supply the sealed-corpus
+                # source_id/source_hash/artifact_ref (validated fail-closed).
+                source_record = {
+                    "source_id": str(uuid.uuid4()),
+                    "origin_api": origin,
+                    **normalized,
+                    "provenance": provenance,
+                }
+            else:
+                # H1.3 live identity: NodeChain computes the content hash
+                # from canonical normalized content — never trusted from an
+                # external API — and binds the artifact reference to it.
+                # Schema-level nullable/default transformations (e.g.
+                # abstract None → "") are applied BEFORE hashing so the
+                # hash is always over exactly the persisted content.
+                if normalized.get("abstract") is None:
+                    normalized["abstract"] = ""
+                source_id = str(uuid.uuid4())
+                canonical = _canonical_live_content(origin, normalized)
+                source_hash = hashlib.sha256(
+                    canonical.encode("utf-8")
+                ).hexdigest()
+                source_record = {
+                    "source_id": source_id,
+                    "origin_api": origin,
+                    **normalized,
+                    "source_hash": source_hash,
+                    "artifact_ref": f"ingested:{source_id}:{source_hash}",
+                    # Authoritative acquisition provenance (validated by the
+                    # provenance builder above) — finalization must not
+                    # invent or substitute these values.
+                    "query_used": raw.get("query_used", ""),
+                    "retrieved_at": raw.get("retrieved_at", ""),
+                    "provenance": provenance,
+                }
 
             sources.append(source_record)
             by_origin[origin] = by_origin.get(origin, 0) + 1

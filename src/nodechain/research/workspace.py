@@ -45,7 +45,7 @@ from nodechain.research.run_descriptor import (
 )
 
 #: Bump when the projection shape gains a breaking change.
-PROJECTION_VERSION = 1
+PROJECTION_VERSION = 2
 
 #: Section availability states — absence is never fabricated as empty data.
 SECTION_NOT_AVAILABLE = "not_available"
@@ -92,6 +92,10 @@ class WorkspaceRunSummary(_Frozen):
     created_at: str = ""
     bundle_status: str = BUNDLE_ABSENT
     has_runtime_state: bool = False
+    # H1.3: acquisition/reproducibility truth so a live run can never be
+    # presented as a deterministic fixture run.
+    acquisition_profile: str = "fixture"
+    reproducibility_mode: str = "deterministic_fixture"
 
 
 class WorkspaceFault(_Frozen):
@@ -180,10 +184,24 @@ class ResearchWorkspaceSnapshot(_Frozen):
     research_outcome: str = ""
     bundle_status: str = BUNDLE_ABSENT
 
+    # H1.3: acquisition/reproducibility truth for the selected run.
+    acquisition_profile: str = "fixture"
+    reproducibility_mode: str = "deterministic_fixture"
+
 
 # --------------------------------------------------------------------------- #
 # Internal projection helpers
 # --------------------------------------------------------------------------- #
+
+
+#: H1.3 reproducibility classification. Fixture runs are deterministic
+#: (sealed-corpus qualification semantics); live runs are artifact-bounded —
+#: NodeChain can prove exactly which content/provenance was used, but cannot
+#: promise a later network query returns the same sources or bytes.
+def _reproducibility_mode(profile: str) -> str:
+    if profile == "live":
+        return "artifact_bounded_live"
+    return "deterministic_fixture"
 
 
 def _parse_output(outputs: dict[str, Any], node_id: str) -> dict[str, Any]:
@@ -529,6 +547,8 @@ def open_workspace(
             created_at=d.created_at,
             bundle_status=r_bundle,
             has_runtime_state=r_state is not None,
+            acquisition_profile=d.profile,
+            reproducibility_mode=_reproducibility_mode(d.profile),
         ))
 
     # -- Trace section ------------------------------------------------------
@@ -568,4 +588,6 @@ def open_workspace(
         execution_status=execution_status,
         research_outcome=research_outcome,
         bundle_status=bundle_status,
+        acquisition_profile=desc.profile,
+        reproducibility_mode=_reproducibility_mode(desc.profile),
     )

@@ -118,6 +118,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   provisional preparation is not itself an authoritative transition. No
   H0.4 trace redesign, no RecoveryService redesign, no replay.
 
+- **H1.3 — Live source acquisition profile.**
+  The Research Workspace gains a second acquisition profile alongside the
+  sealed fixture default: `nodechain research run --profile live`
+  acquires sources through the five existing governed academic adapters
+  (Semantic Scholar, arXiv, OpenAlex, CrossRef, PubMed). Combination
+  rules fail closed — `fixture` requires `--corpus`, `live` rejects it —
+  with no silent fallback in either direction. Live composition reuses
+  the ordinary execution spine: the production `SearchToolNode`, the
+  `OrdinaryDispatchGuard` guarded adapter registry with
+  capsule-before-wire, and the existing production model-provider
+  resolution (factored into `resolve_production_model_adapter`, the
+  shared authority with the ordinary run path). The runner and CLI hold
+  no direct adapter or network path. Every ingested live source carries
+  a NodeChain-computed content identity — `source_hash` is the SHA-256
+  of canonical normalized content excluding volatile acquisition
+  metadata, and `artifact_ref` binds `ingested:<source_id>:<source_hash>`
+  — with authoritative `query_used`/`retrieved_at` propagated from
+  acquisition provenance and the `QualifiedSourceLinker` fail-closed
+  binding unchanged. Run descriptors are versioned: legacy documents
+  stay V1 fixture descriptors whose stored raw-document digest is their
+  identity (never recomputed under V2 defaults); new runs write V2
+  acquisition-aware descriptors with the profile, a launch-intent
+  `input_digest` (never a source snapshot or replay digest), allowed
+  adapters, and resolved non-secret model identity. Credentials are
+  never persisted. Terminal live bundles remain BundleV1 with
+  `provider_mode="live"`, `fixture_corpus_version` null (enforced
+  non-empty exactly for fixture runs by model and schema), and
+  `replay_eligible=false` unconditionally; adapter coverage, used
+  adapters, timestamps, hashes, and artifact refs derive from actual
+  records. The reproducibility claim is artifact-bounded: NodeChain
+  proves exactly which content and provenance a run used, and does not
+  claim a later network query returns the same sources. The Workspace
+  projection exposes `acquisition_profile` and `reproducibility_mode`
+  on the snapshot and every run summary. Fault truth is unchanged:
+  records project only from actual trace events. Focused qualification
+  (matrix A–L) exercises the real adapter/SearchTool/provenance seam
+  through zero-network deterministic `_fetch` control on the real
+  adapter instances — CI never depends on the public APIs being
+  reachable.
+
 - **H1.2 — Research operator experience.**
   Adds the read-side operator CLI on top of the H1.1
   ResearchWorkspaceSnapshot: `research open` (workspace overview),

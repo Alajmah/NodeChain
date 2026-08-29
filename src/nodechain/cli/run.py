@@ -136,6 +136,48 @@ def _create_nodes(model_adapter: LIMModelAdapter, trace_dir: str, memory_manager
     return nodes
 
 
+def resolve_production_model_adapter(model_name: str | None = None):
+    """Resolve the production model adapter from the environment.
+
+    This is the single production model-provider resolution authority,
+    factored from ``run_chain`` (H1.3) so the Research Workspace live
+    profile reuses the same semantics instead of inventing a second
+    provider abstraction. Returns ``(model_adapter, provider, model_name)``
+    where ``provider``/``model_name`` are the resolved NON-SECRET identity
+    suitable for persistence; credentials stay environment authority.
+
+    Provider selection (unchanged from the ordinary run path):
+
+    - ``NODECHAIN_PROVIDER=lim`` (default) → local LIM server;
+    - ``NODECHAIN_PROVIDER=mock`` → deterministic MockModelAdapter;
+    - anything else → OpenAI-compatible provider (LM Studio, Ollama,
+      vLLM, cloud APIs) resolved from OPENAI_BASE_URL/NODECHAIN_BASE_URL.
+    """
+    provider = os.environ.get("NODECHAIN_PROVIDER", "lim").lower()
+    model_name = model_name or os.environ.get("NODECHAIN_MODEL", "auto")
+    lim_url = os.environ.get("LIM_BASE_URL", "http://localhost:8766")
+    if provider == "lim":
+        model_adapter = LIMModelAdapter(lim_url=lim_url, model=model_name)
+    elif provider == "mock":
+        from nodechain.adapters.mock_model_adapter import MockModelAdapter
+        model_adapter = MockModelAdapter()
+    else:
+        from nodechain.adapters.model_adapter import ModelAdapter
+        base_url = (
+            os.environ.get("OPENAI_BASE_URL", "")
+            or os.environ.get("NODECHAIN_BASE_URL", "")
+            or lim_url
+        )
+        api_key = os.environ.get("OPENAI_API_KEY", "unused")
+        model_adapter = ModelAdapter(
+            provider="openai_compatible",
+            model=model_name,
+            api_key=api_key,
+            base_url=base_url,
+        )
+    return model_adapter, provider, model_name
+
+
 async def run_chain(
     query: str,
     blueprint_path: str,
@@ -165,35 +207,15 @@ async def run_chain(
         sys.exit(EXIT_RUN_VALIDATION)
 
     # Create model adapter - supports local and cloud
-    provider = os.environ.get("NODECHAIN_PROVIDER", "lim").lower()
-    model_name = model_name or os.environ.get("NODECHAIN_MODEL", "auto")
-    lim_url = os.environ.get("LIM_BASE_URL", "http://localhost:8766")
+    # (H1.3: resolution lives in resolve_production_model_adapter, the
+    # shared authority also used by the Research Workspace live profile.)
     try:
+        model_adapter, provider, model_name = resolve_production_model_adapter(model_name)
         if provider == "lim":
-            model_adapter = LIMModelAdapter(lim_url=lim_url, model=model_name)
             loaded = model_adapter.get_loaded_models()
             console.print(f"[green]ok[/green] LIM adapter ready: {len(loaded)} models loaded")
-        elif provider == "mock":
-            from nodechain.adapters.mock_model_adapter import MockModelAdapter
-            model_adapter = MockModelAdapter()
-            console.print(f"[green]ok[/green] Mock adapter ready")
         else:
-            # OpenAI-compatible provider (LM Studio, Ollama, vLLM, cloud APIs)
-            from nodechain.adapters.model_adapter import ModelAdapter
-            # Resolve base URL: prefer OPENAI_BASE_URL, fall back to NODECHAIN_BASE_URL
-            base_url = (
-                os.environ.get("OPENAI_BASE_URL", "")
-                or os.environ.get("NODECHAIN_BASE_URL", "")
-                or lim_url
-            )
-            api_key = os.environ.get("OPENAI_API_KEY", "unused")
-            model_adapter = ModelAdapter(
-                provider="openai_compatible",
-                model=model_name,
-                api_key=api_key,
-                base_url=base_url,
-            )
-            console.print(f"[green]ok[/green] {provider} adapter ready (base_url={base_url})")
+            console.print(f"[green]ok[/green] {provider} adapter ready")
     except Exception as e:
         console.print(f"[red]X[/red] Failed to initialize model: {e}")
         return EXIT_RUN_VALIDATION

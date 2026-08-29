@@ -47,11 +47,22 @@ def research() -> None:
 @research.command("run")
 @click.argument("brief", required=True)
 @click.option(
+    "--profile",
+    "profile",
+    default="fixture",
+    type=click.Choice(["fixture", "live"]),
+    help="Acquisition profile: 'fixture' (default) runs the sealed corpus "
+         "path and requires --corpus; 'live' acquires sources through the "
+         "existing governed academic adapters and rejects --corpus.",
+)
+@click.option(
     "--corpus",
     "corpus_path",
-    required=True,
+    default=None,
+    required=False,
     type=click.Path(exists=True),
-    help="Path to the sealed fixture corpus YAML file.",
+    help="Path to the sealed fixture corpus YAML file "
+         "(required for --profile fixture).",
 )
 @click.option(
     "--workspace",
@@ -81,7 +92,8 @@ def research() -> None:
 )
 def research_run(
     brief: str,
-    corpus_path: str,
+    profile: str,
+    corpus_path: str | None,
     workspace_dir: str | None,
     db_path: str | None,
     trace_dir: str | None,
@@ -94,6 +106,21 @@ def research_run(
     """
     from nodechain.research.runner import ResearchBrief, WorkspaceRunner
 
+    # Fail-closed profile/corpus combination rules — no silent fallback in
+    # either direction.
+    if profile == "fixture" and corpus_path is None:
+        console.print(
+            "[red]Error:[/red] the fixture acquisition profile requires "
+            "--corpus"
+        )
+        sys.exit(EXIT_RUN_VALIDATION)
+    if profile == "live" and corpus_path is not None:
+        console.print(
+            "[red]Error:[/red] the live acquisition profile does not accept "
+            "--corpus"
+        )
+        sys.exit(EXIT_RUN_VALIDATION)
+
     # Load brief: file path or inline question.
     brief_path = Path(brief)
     if brief_path.exists():
@@ -101,22 +128,30 @@ def research_run(
     else:
         rb = ResearchBrief.from_question(brief)
 
+    acquisition_line = (
+        f"Corpus: {corpus_path}" if profile == "fixture"
+        else "Acquisition: live governed academic adapters"
+    )
     console.print(Panel(
         f"[bold blue]Phase 5 Research Workspace[/bold blue]\n\n"
         f"Question: {rb.question}\n"
-        f"Corpus: {corpus_path}",
-        title="Starting Sealed Run",
+        f"Profile: {profile}\n"
+        f"{acquisition_line}",
+        title="Starting Sealed Run" if profile == "fixture"
+        else "Starting Live Run",
     ))
 
     runner = WorkspaceRunner(
         brief=rb,
         corpus_path=corpus_path,
+        profile=profile,
         db_path=db_path,
         trace_dir=trace_dir,
         workspace_dir=workspace_dir,
     )
 
-    console.print(f"[dim]Corpus digest: {runner.corpus_digest[:16]}...[/dim]")
+    if profile == "fixture":
+        console.print(f"[dim]Corpus digest: {runner.corpus_digest[:16]}...[/dim]")
 
     result = runner.run()
 
@@ -141,6 +176,7 @@ def research_run(
             "run_id": result.run_id,
             "status": "paused",
             "paused_for_review": True,
+            "acquisition_profile": profile,
             "corpus_digest": result.corpus_digest,
         }
         if workspace_dir is not None:
@@ -158,6 +194,7 @@ def research_run(
             "run_id": result.run_id,
             "status": "completed",
             "final_status": result.trace.final_status,
+            "acquisition_profile": profile,
             "corpus_digest": result.corpus_digest,
         })
         sys.exit(EXIT_OK)
@@ -172,6 +209,7 @@ def research_run(
             "run_id": result.run_id,
             "status": "failed",
             "final_status": result.trace.final_status,
+            "acquisition_profile": profile,
             "corpus_digest": result.corpus_digest,
         })
         sys.exit(EXIT_RUN_FAILED)  # failed exit code
@@ -423,17 +461,20 @@ def research_open(workspace_dir: str, run_id: str | None, as_json: bool) -> None
     table = Table(title=f"Workspace: {snap.workspace_root}")
     table.add_column("Run ID", style="cyan")
     table.add_column("Status")
+    table.add_column("Profile")
     table.add_column("Revision")
     table.add_column("Bundle")
     for r in snap.runs:
         marker = " →" if r.run_id == snap.selected_run_id else ""
         table.add_row(r.run_id + marker, r.execution_status or "—",
-                      str(r.revision), r.bundle_status)
+                      r.acquisition_profile, str(r.revision), r.bundle_status)
     console.print(table)
     sel = next((r for r in snap.runs if r.run_id == snap.selected_run_id), None)
     if sel:
         console.print(f"\n[bold]Selected:[/bold] {sel.run_id}")
         console.print(f"  Execution: {sel.execution_status or '—'}")
+        console.print(f"  Acquisition profile: {snap.acquisition_profile}")
+        console.print(f"  Reproducibility: {snap.reproducibility_mode}")
         console.print(f"  Research outcome: {snap.research_outcome or '—'}")
         console.print(f"  Bundle: {snap.bundle_status}")
 
@@ -458,13 +499,15 @@ def research_runs(workspace_dir: str, as_json: bool) -> None:
     table = Table(title=f"Runs in {workspace_dir}")
     table.add_column("Run ID", style="cyan")
     table.add_column("Status")
+    table.add_column("Profile")
     table.add_column("Rev")
     table.add_column("Step")
     table.add_column("Current Node")
     table.add_column("Bundle")
     table.add_column("Updated")
     for r in snap.runs:
-        table.add_row(r.run_id, r.execution_status or "—", str(r.revision),
+        table.add_row(r.run_id, r.execution_status or "—",
+                      r.acquisition_profile, str(r.revision),
                       str(r.step), r.current_node or "—", r.bundle_status,
                       r.updated_at[:19] if r.updated_at else "—")
     console.print(table)
