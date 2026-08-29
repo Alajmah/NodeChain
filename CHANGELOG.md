@@ -118,6 +118,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   provisional preparation is not itself an authoritative transition. No
   H0.4 trace redesign, no RecoveryService redesign, no replay.
 
+- **H1.2 — Research operator experience.**
+  Adds the read-side operator CLI on top of the H1.1
+  ResearchWorkspaceSnapshot: `research open` (workspace overview),
+  `research runs` (listing with persistence time `updated_at`),
+  `research inspect` (per-section drill-down with availability states
+  and the governed recovery handoff; non-section concepts such as
+  faults/recovery/review serialize as structured JSON), `research
+  verify` (terminal-bundle integrity through BundleReader, including
+  the verified document inventory; exits nonzero on an invalid bundle
+  in both human and `--json` modes), `research compare` (side-by-side
+  run comparison), and `research export` (verified-bundle copy; never
+  regenerates). Every new command supports `--json`. `research run`
+  gains an additive `--workspace DIR` option making workspace
+  creation/targeting coherent (first run into DIR creates the
+  workspace; subsequent open/runs/inspect observe the same root
+  through the existing WorkspaceRunner composition path). When a
+  targeted run pauses for review, the printed review command
+  preserves `--workspace DIR` (and the paused JSON metadata carries
+  `workspace_dir`), so the advertised handoff searches the workspace
+  the run actually used.
+  All new commands are runtime-state read-only through
+  StateManager(read_only=True) — the DB-hash invariant proves zero
+  persistence writes across all observation commands — with
+  `research export` writing only its explicitly requested output
+  artifact. Existing `research run` and `research review`
+  authority paths remain unchanged and backward compatible. H1.2 is
+  scoped as CLI operator experience + stable machine-readable JSON
+  contract; API/UI product surfaces consume this contract in the
+  successor outcome (Roadmap H1.6).
+
 - **H1.1 — Workspace object model.**
   Introduces `nodechain.research.workspace` with a frozen,
   versioned `ResearchWorkspaceSnapshot` — the stable user/product model

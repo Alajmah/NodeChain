@@ -51,22 +51,6 @@ The canonical deployment-profile authority is `docs/deployment-profiles.md`. Hor
 
 **Objective:** turn the accepted research product-proof backend into a coherent user product without weakening the runtime/evidence contract.
 
-## H1.2 — Research operator experience
-
-Build a coherent CLI/API/UI flow for:
-
-- create/open workspace;
-- launch research run;
-- inspect progress;
-- review pending decisions;
-- inspect sources/evidence/claims;
-- understand faults/degraded completion;
-- resume/recover;
-- verify/download final bundle;
-- compare runs.
-
-The current `research run` / `research review` commands are the starting substrate, not the final UX.
-
 ## H1.3 — Live source acquisition profile
 
 Add a product profile that applies the Research Workspace evidence/bundle semantics to live source acquisition rather than the sealed fixture corpus.
@@ -98,6 +82,16 @@ Run structured product proof against real research tasks and evaluate:
 - perceived governance overhead vs value.
 
 This is product proof, not a new runtime gate.
+
+## H1.6 — Workspace API and UI surfaces
+
+H1.2 delivered the CLI operator experience and its stable machine-readable JSON contract; the API/UI product surfaces were explicitly deferred from H1.2 and are carried here.
+
+Required properties:
+
+- API/UI surfaces consume the H1.2 read-side JSON contract (`research open` / `runs` / `inspect` / `verify` / `compare` / `export --json`) rather than inventing a second observation path;
+- surfaces remain read-only projections over the H1.1 ResearchWorkspaceSnapshot authority map — no competing execution, state, or evidence truth;
+- write-path actions (run, review, recover) route through the existing governed CLI/runtime authorities, not new unsupervised entry points.
 
 ---
 
