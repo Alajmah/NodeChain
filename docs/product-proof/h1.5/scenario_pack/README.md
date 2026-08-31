@@ -22,16 +22,21 @@ edits; no invented evidence.
 
 ## Generating for a participant
 
+Run from any commit of the study branch whose PRODUCTION tree matches the
+H1.4 seal (the generator verifies this itself — it diffs `src/`, `schemas/`,
+and the packaging files against `5d54190` and refuses on any difference or
+uncommitted production change):
+
 ```bash
-git checkout 5d54190c87136ff217b0d2f4899d6a04ea1b486a   # frozen baseline
 python docs/product-proof/h1.5/scenario_pack/generate_scenario_pack.py \
     <study-workspace> P01
 ```
 
-The script refuses to run on any other product SHA. It prints
+No checkout dance is needed: the generator exists on the study branch, and
+what it pins is the product under test, not the repository HEAD. It prints
 `Scenario pack OK.` only when both scenarios validate; a manifest
-(`scenario-pack-<id>.json`) records run IDs and the product SHA for the
-sessions.csv provenance columns.
+(`scenario-pack-<id>.json`) records run IDs, the seal SHA, and the baseline
+check result for the sessions.csv provenance columns.
 
 Both runs deliberately remain paused: the participant must encounter the
 waiting decision and the real recovery state, not their resolutions. Do

@@ -35,7 +35,7 @@ nodechain research compare <run-id-a> <run-id-b> --workspace <workspace>
 
 ## How the session runs
 
-1. **Your own research task.** Bring a real question from your work or interests — something you actually want to know, answerable from public academic sources. We'll ask what a useful answer would look like for you and how you'd normally research it. Then you run the research yourself with the commands above and read the memo.
+1. **Your own research task.** Bring a real question from your work or interests — something you actually want to know, answerable from public academic sources. We'll ask what a useful answer would look like for you and how you'd normally research it. Then you run the research yourself with the commands above and read the memo. This first task has a 40-minute window; if you haven't gotten what you need by then we'll note that and move on together — you can keep the memo from however far it got.
 2. **Checking the evidence.** Pick one claim from your results and find out what backs it: the evidence, the sources, the citations, the confidence. We want to see how you investigate it using the tool.
 3. **Run it again.** You'll run the same question a second time and compare the two runs.
 4. **Two prepared scenarios.** We'll hand you two pre-made situations — one waiting for a human decision, one that hit a failure. For each: figure out what happened, what the system knows, and what the governed next action is.

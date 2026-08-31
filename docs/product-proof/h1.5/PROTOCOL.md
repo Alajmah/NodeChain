@@ -1,8 +1,10 @@
 # H1.5 Product-Proof Protocol (FROZEN)
 
 **Status:** FROZEN before the first scored participant. Do not edit after sessions begin.
-**Study baseline (product under test):** `master@5d54190c87136ff217b0d2f4899d6a04ea1b486a` (the H1.4 seal).
+**Study baseline (product under test):** the H1.4 seal `5d54190c87136ff217b0d2f4899d6a04ea1b486a` — the production tree (`src/`, `schemas/`, packaging) must be byte-identical to that seal for every scored session; the scenario generator enforces this by exact diff, not ancestry.
 **Governing invariant:** H1.5 measures the product we built. It does not modify the product until the measurement says why.
+
+*Revision 1 (pre-participant, reviewer-authorized): baseline verification by production-tree diff instead of HEAD equality; governance-friction scale corrected to 1 = negligible … 5 = very burdensome (removing the inverted "5 = effortless" anchor); condition 6 made computable via product-recorded `confidence_a`/`confidence_b`; Part A timebox frozen at 40 minutes with expiry semantics; provenance columns (task ID, acquisition profile, run timestamps) added to sessions.csv; scored-cohort selection rule frozen. No thresholds changed.*
 
 This protocol implements the frozen H1.5 plan verbatim. It is a bounded qualitative/product-evidence study, not a statistically representative market survey, and not a new runtime gate.
 
@@ -22,6 +24,8 @@ Coverage requirements:
 - At least 3 regularly perform research, analysis, technical investigation, or evidence synthesis.
 - At least 2 have genuine experience reviewing, approving, challenging, or making decisions from research.
 - Categories may overlap.
+
+**Scored-cohort selection (frozen):** when more than six sessions complete, the scored cohort is the earliest-completed six-session subset that satisfies the coverage requirements above (completion order is objective). If no six-session subset satisfies coverage, the cohort requirement was never met and replacement sessions must be run. All completed sessions appear in the evidence; the 5/6 and 4/6 bands evaluate only on the scored cohort.
 
 Participants are pseudonymous (`P01`, `P02`, …). Committed evidence excludes names, emails, employer identifiers, recordings, raw personal notes, credentials, private research questions, and full live workspaces.
 
@@ -49,6 +53,8 @@ nodechain research report <run-id> --workspace <study-workspace>
 
 They may use `research open`, `runs`, `inspect`, `verify`, `compare`, and `export` as needed. The facilitator gives the standard command cheat sheet (PARTICIPANT_INSTRUCTIONS.md) and nothing more during the scored portion.
 
+**Part A timebox (frozen): 40 minutes** from the first `research run` invocation. At expiry: criterion met before expiry → `useful_result_met=true`; not met at expiry → `useful_result_met=false` and `time_to_useful_elapsed_min` is recorded as 40. The participant may continue working past expiry for the remainder of the study (Parts B–D need a memo); the scored Part A outcome is frozen at expiry.
+
 Clocks: record elapsed time (first `research run` invocation → participant states their pre-declared usefulness criterion is met, or the allotted period ends) AND active operator time (participant actively working, excluding waiting on network/model latency), so latency is never confused with governance overhead.
 
 ### Part B — Evidence-inspection task (scored)
@@ -65,7 +71,7 @@ Success = they trace claim → evidence → source/citation through the product 
 
 ### Part C — Repeatability task (scored)
 
-The participant runs the same live brief a second time, then uses the existing comparison/read surfaces (`research compare`, `research inspect`, `research report`) to inspect both runs. The facilitator records:
+The participant runs the same live brief a second time, then uses the existing comparison/read surfaces (`research compare`, `research inspect`, `research report`) to inspect both runs. The facilitator records, for each run, the product-recorded report confidence level (from the verified memo's confidence statement) as `confidence_a` / `confidence_b`, plus:
 
 - Whether the overall answer is materially consistent.
 - Whether the recommendation/conclusion changed.
@@ -100,13 +106,15 @@ Both elapsed time and active operator time are recorded for every timed measure.
 
 `SUPPORTED` requires ALL of:
 
-1. ≥ 5/6 participants reach their pre-declared useful-result criterion during the allotted real-task period.
+1. ≥ 5/6 participants reach their pre-declared useful-result criterion before the 40-minute Part A timebox expires.
 2. ≥ 5/6 independently trace a substantive claim through the evidence/source/citation surfaces.
 3. ≥ 5/6 score at least 3/4 on the controlled governance-comprehension task.
 4. ≥ 5/6 correctly identify fault/recovery next-action truth in the controlled scenario.
-5. ≥ 4/6 judge governance value ≥ governance friction.
-6. No repeat-run pair produces an unexplained materially contradictory high-confidence conclusion.
+5. ≥ 4/6 judge governance value ≥ governance friction (friction: 1 = negligible … 5 = very burdensome; value: 1 = no value … 5 = very high value).
+6. No repeat-run pair produces an unexplained materially contradictory conclusion that is high-confidence, where **high-confidence** is deterministic from captured data: the product-recorded report confidence level of either run in the pair is "high" (`confidence_a == "high" OR confidence_b == "high"`).
 7. No study session demonstrates a product surface falsely representing runtime/evidence/review/recovery truth.
+
+All 5/6 and 4/6 counts evaluate on the scored cohort defined in the cohort rules (earliest-completed six-session subset satisfying coverage).
 
 `MIXED`: the core value proposition is observable, but one or more usability/comprehension dimensions materially miss those bands without a truth-integrity failure.
 
@@ -120,7 +128,7 @@ No product code changes between participants. Observed gaps are logged (BLOCKER 
 
 ## Provenance
 
-Every recorded run captures: participant ID, task ID, NodeChain SHA, run ID, bundle digest, acquisition profile, model provider/model identity, adapter set, start/end timestamps. Run IDs and bundle digests may be retained in committed evidence where they disclose nothing participant-sensitive.
+Every recorded run captures: participant ID, task ID, NodeChain SHA, run ID, bundle digest, acquisition profile, model provider/model identity, adapter set, start/end timestamps. In sessions.csv these are the `task_id`, `product_sha`, `run_id_*`, `bundle_digest_*`, `acquisition_profile`, `model_provider`/`model_name`, `adapters_used`, and `run_start_ts_*`/`run_end_ts_*` columns. Run IDs and bundle digests may be retained in committed evidence where they disclose nothing participant-sensitive.
 
 ## Analysis and closure
 

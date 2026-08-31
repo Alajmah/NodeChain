@@ -26,11 +26,15 @@ Normal time expectation: ____
 During/after:
 
 ```
+Task ID: T__   (sequential across the study; matches sessions.csv)
 Run ID: ____   Bundle digest: ____   Profile: live
+Run start ts: ____   Run end ts: ____
 Model provider/model: ____   Adapters used (from report): ____
-Elapsed start (first research run invoked): ____  End: ____
+TIMEBOX: 40 min from first research run invocation.
+Elapsed at criterion: ____ min   Criterion met before expiry: [ ] yes  [ ] no
+  (not met at expiry → useful_result_met=false, elapsed recorded as 40)
 Active operator time (exclude waiting on network/model): ____ min
-Usefulness criterion met: [ ] yes  [ ] no — their words on why: ____
+Usefulness criterion met: their words on why / why not: ____
 Facilitator interventions during A (count + what): ____
 Live run ID 2 (Part C pre-registration may reuse): ____
 ```
@@ -53,7 +57,9 @@ Trust rating BEFORE inspection (1–5): ____   AFTER: ____ (their explanation: _
 ## Part C — Repeatability task
 
 ```
-Second run ID: ____   Bundle digest: ____
+Second run ID: ____   Bundle digest: ____   Run start ts: ____  End ts: ____
+Confidence A (product-recorded level from run A's memo): ____
+Confidence B (product-recorded level from run B's memo): ____
 Answer materially consistent: [ ] yes  [ ] no
 Recommendation/conclusion changed: [ ] no  [ ] yes → how: ____
 Source overlap observed: ____   Important source differences: ____
@@ -92,8 +98,9 @@ Time: ____ min (active)
 ## Closing (post-survey debrief — one line each)
 
 ```
-Governance friction (1–5): ____   Active time on inspect/verify/review/recovery: ____ min
-Governance value (1–5): ____   Their explanation: ____
+Governance friction (1 = negligible, 5 = very burdensome): ____
+Active time on inspect/verify/review/recovery: ____ min
+Governance value (1 = no value, 5 = very high value): ____   Their explanation: ____
 Uncertainty comprehension: [ ] can explain a recorded limitation without converting it to certainty
 Verification comprehension: [ ] can state what verification establishes AND what it does not
 Adoption intent: [ ] yes  [ ] conditional  [ ] no — reason: ____

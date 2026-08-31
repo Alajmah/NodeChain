@@ -37,15 +37,54 @@ FIXTURES = REPO_ROOT / "tests" / "fixtures" / "research"
 REVIEW_CORPUS = FIXTURES / "corpus_conflicting_evidence.yaml"
 FAULT_CORPUS = FIXTURES / "corpus_timeout_after_dispatch.yaml"
 
+#: The product under test is sealed at the H1.4 seal. The generator may run
+#: from any study commit PROVIDED the production tree is byte-identical to
+#: that seal — requiring repository HEAD to equal the seal would be
+#: unsatisfiable from the committed study package itself (the generator
+#: does not exist at the seal commit).
 EXPECTED_SHA = "5d54190c87136ff217b0d2f4899d6a04ea1b486a"
 
+#: Paths whose content constitutes the product under test. Any difference
+#: from the seal in these trees refuses generation; docs/study-only diffs
+#: are irrelevant to the product being measured.
+PRODUCT_TREES = ("src", "schemas", "pyproject.toml", "setup.py",
+                  "setup.cfg")
 
-def _git_sha() -> str:
+
+def _production_tree_matches_seal() -> tuple[bool, str]:
+    """Verify the production code under test is identical to the seal.
+
+    Returns (ok, detail). Uses git diff between the seal and the working
+    tree HEAD restricted to the product trees — an exact content check,
+    not an ancestry test.
+    """
     import subprocess
-    return subprocess.run(
-        ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"],
+
+    try:
+        diff = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "diff", "--name-only",
+             EXPECTED_SHA, "HEAD", "--", *PRODUCT_TREES],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+    except subprocess.CalledProcessError as exc:
+        return False, f"git diff against the seal failed: {exc}"
+    if diff:
+        changed = diff.splitlines()
+        return False, (
+            f"production tree differs from the seal {EXPECTED_SHA[:12]} "
+            f"in: {', '.join(changed)}"
+        )
+    # Also catch uncommitted working-tree modifications to product paths.
+    dirty = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "status", "--porcelain", "--",
+         *PRODUCT_TREES],
         capture_output=True, text=True, check=True,
     ).stdout.strip()
+    if dirty:
+        return False, (
+            f"uncommitted production-tree changes: {dirty.splitlines()}"
+        )
+    return True, "production tree identical to the seal"
 
 
 def main() -> int:
@@ -56,14 +95,13 @@ def main() -> int:
     participant = sys.argv[2]
     workspace.mkdir(parents=True, exist_ok=True)
 
-    sha = _git_sha()
-    if sha != EXPECTED_SHA:
-        print(
-            f"REFUSING: product SHA {sha[:12]} is not the frozen study "
-            f"baseline {EXPECTED_SHA[:12]}. Check out the study baseline "
-            f"before generating scenarios."
-        )
+    ok, detail = _production_tree_matches_seal()
+    if not ok:
+        print(f"REFUSING: {detail}. The study baseline is the H1.4 seal "
+              f"{EXPECTED_SHA[:12]}; check out a study commit whose "
+              f"production tree matches it.")
         return 1
+    print(f"Baseline check: {detail}.")
 
     from nodechain.research.runner import WorkspaceRunner
     from nodechain.research.run_descriptor import (
@@ -102,7 +140,8 @@ def main() -> int:
 
     manifest = {
         "participant_id": participant,
-        "product_sha": sha,
+        "product_sha": EXPECTED_SHA,
+        "baseline_check": detail,
         "review_run_id": review_result.run_id,
         "review_state": review_result.state.status,
         "fault_run_id": fault_result.run_id,

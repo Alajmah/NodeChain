@@ -38,10 +38,10 @@ ______________________
 - Whether the system had actually contacted the outside service (1–5): ____
 - What the safe next action was (1–5): ____
 
-**8. Governance friction.** How burdensome were the governed steps (verification, review, recovery)? 1 = not worth it … 5 = effortless: ____
+**8. Governance friction.** How burdensome were the governed steps (verification, review, recovery)? 1 = negligible … 5 = very burdensome: ____
 What cost you the most time: ______________________
 
-**9. Governance value.** How valuable is it that evidence, decisions, and failures are recorded and verifiable? 1 = no value … 5 = high value: ____
+**9. Governance value.** How valuable is it that evidence, decisions, and failures are recorded and verifiable? 1 = no value … 5 = very high value: ____
 When would that value matter most to you: ______________________
 
 **10. Running it twice.** The same question run twice gave what relationship, in your judgment?
