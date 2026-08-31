@@ -6,6 +6,8 @@
 
 *Revision 1 (pre-participant, reviewer-authorized): baseline verification by production-tree diff instead of HEAD equality; governance-friction scale corrected to 1 = negligible … 5 = very burdensome (removing the inverted "5 = effortless" anchor); condition 6 made computable via product-recorded `confidence_a`/`confidence_b`; Part A timebox frozen at 40 minutes with expiry semantics; provenance columns (task ID, acquisition profile, run timestamps) added to sessions.csv; scored-cohort selection rule frozen. No thresholds changed.*
 
+*Revision 2 (pre-participant, reviewer-authorized): `session_end_ts` added to sessions.csv and the scored-cohort selection made exactly reproducible from the committed CSV (order by session_end_ts, ties by participant_id; enumerate six-session subsets by lexicographic completion-rank tuple; first valid subset wins; coverage fails outright if none exists within the authorized maximum of eight completed sessions — a ninth is never implicitly authorized). Confidence extraction pinned to each run's verified bundle `report.json["confidence_statement"]["level"]` (allowed values high / medium / low / not_recorded; not_recorded is not high-confidence; never derived by parsing the rendered memo). No thresholds changed.*
+
 This protocol implements the frozen H1.5 plan verbatim. It is a bounded qualitative/product-evidence study, not a statistically representative market survey, and not a new runtime gate.
 
 ## What H1.5 asks
@@ -25,7 +27,7 @@ Coverage requirements:
 - At least 2 have genuine experience reviewing, approving, challenging, or making decisions from research.
 - Categories may overlap.
 
-**Scored-cohort selection (frozen):** when more than six sessions complete, the scored cohort is the earliest-completed six-session subset that satisfies the coverage requirements above (completion order is objective). If no six-session subset satisfies coverage, the cohort requirement was never met and replacement sessions must be run. All completed sessions appear in the evidence; the 5/6 and 4/6 bands evaluate only on the scored cohort.
+**Scored-cohort selection (frozen, reproducible from the committed CSV):** order all completed sessions by `session_end_ts` ascending (ties by `participant_id` ascending); enumerate six-session subsets by lexicographic completion-rank tuple; the FIRST subset satisfying the coverage requirements above is the scored cohort. If no valid six-session subset exists among the authorized maximum of eight completed sessions, coverage FAILS — a ninth session is never implicitly authorized. All completed sessions appear in the evidence; the 5/6 and 4/6 bands evaluate only on the scored cohort.
 
 Participants are pseudonymous (`P01`, `P02`, …). Committed evidence excludes names, emails, employer identifiers, recordings, raw personal notes, credentials, private research questions, and full live workspaces.
 
@@ -71,7 +73,7 @@ Success = they trace claim → evidence → source/citation through the product 
 
 ### Part C — Repeatability task (scored)
 
-The participant runs the same live brief a second time, then uses the existing comparison/read surfaces (`research compare`, `research inspect`, `research report`) to inspect both runs. The facilitator records, for each run, the product-recorded report confidence level (from the verified memo's confidence statement) as `confidence_a` / `confidence_b`, plus:
+The participant runs the same live brief a second time, then uses the existing comparison/read surfaces (`research compare`, `research inspect`, `research report`) to inspect both runs. The facilitator records, for each run, `confidence_a` / `confidence_b` from the run's verified bundle `report.json["confidence_statement"]["level"]` (allowed values `high` / `medium` / `low` / `not_recorded` when the field is absent; never derived by parsing the rendered memo), plus:
 
 - Whether the overall answer is materially consistent.
 - Whether the recommendation/conclusion changed.
@@ -111,7 +113,7 @@ Both elapsed time and active operator time are recorded for every timed measure.
 3. ≥ 5/6 score at least 3/4 on the controlled governance-comprehension task.
 4. ≥ 5/6 correctly identify fault/recovery next-action truth in the controlled scenario.
 5. ≥ 4/6 judge governance value ≥ governance friction (friction: 1 = negligible … 5 = very burdensome; value: 1 = no value … 5 = very high value).
-6. No repeat-run pair produces an unexplained materially contradictory conclusion that is high-confidence, where **high-confidence** is deterministic from captured data: the product-recorded report confidence level of either run in the pair is "high" (`confidence_a == "high" OR confidence_b == "high"`).
+6. No repeat-run pair produces an unexplained materially contradictory conclusion that is high-confidence, where **high-confidence** is deterministic from captured data: `confidence_a == "high" OR confidence_b == "high"`, with both values taken from the runs' verified bundle `report.json["confidence_statement"]["level"]` (`not_recorded` is not high-confidence).
 7. No study session demonstrates a product surface falsely representing runtime/evidence/review/recovery truth.
 
 All 5/6 and 4/6 counts evaluate on the scored cohort defined in the cohort rules (earliest-completed six-session subset satisfying coverage).

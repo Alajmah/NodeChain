@@ -6,7 +6,7 @@ One sheet per participant. Transcribe de-identified measurements into `sessions.
 
 ```
 Participant ID: P__            Date: ____  Product SHA: 5d54190…
-Facilitator: ____              Session start / end: ____
+Facilitator: ____              Session start: ____  Session end (becomes sessions.csv session_end_ts): ____
 Role coverage: [ ] researcher/analyst  [ ] reviewer/decision-maker
 ```
 
@@ -58,8 +58,9 @@ Trust rating BEFORE inspection (1–5): ____   AFTER: ____ (their explanation: _
 
 ```
 Second run ID: ____   Bundle digest: ____   Run start ts: ____  End ts: ____
-Confidence A (product-recorded level from run A's memo): ____
-Confidence B (product-recorded level from run B's memo): ____
+Confidence A (verified bundle report.json confidence_statement.level): ____
+Confidence B (verified bundle report.json confidence_statement.level): ____
+  (high / medium / low / not_recorded if the field is absent — never parsed from the memo text)
 Answer materially consistent: [ ] yes  [ ] no
 Recommendation/conclusion changed: [ ] no  [ ] yes → how: ____
 Source overlap observed: ____   Important source differences: ____
