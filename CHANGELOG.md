@@ -118,6 +118,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   provisional preparation is not itself an authoritative transition. No
   H0.4 trace redesign, no RecoveryService redesign, no replay.
 
+- **H1.4 — Human-readable final research artifact.**
+  Any verified terminal bundle now renders as a readable research memo:
+  `nodechain research report <run-id> [--workspace DIR] [--output PATH]
+  [--json]` produces the answer, findings, citations, confidence and
+  uncertainty, review history, failures/degradation, methodology, and
+  governance evidence without another model call and without creating a
+  second source of research truth. The memo explains the evidence; it
+  never becomes evidence that did not already exist. Under this outcome
+  the terminal projection was first completed to carry the evidence it
+  already claimed: `report.json` preserves the final Response Generator's
+  recommendation, executive summary, key findings, confidence statement,
+  alternatives, and methodology plus the risk classifier's
+  level/confidence/factors/review reason (optional backward-compatible
+  schema fields; `executive_answer` now reflects the final response);
+  `uncertainties.json` projects actual risk disclosures without inferred
+  claim attribution; `review-decisions.json` carries ADMITTED runtime
+  review decisions only, with `review_completed` requiring completion
+  evidence rather than the negation of `review_required`;
+  `failures.json` normalizes immutable fault records into the published
+  failure-record contract; and citation/evidence/claim links are
+  completed from existing source/evidence relationships. The sealed
+  fixture model adapter emits the Response Generator's declared schema so
+  fixture runs preserve the same final-response shape as live runs.
+  `ResearchMemoV1` is the frozen presentation model, constructed only
+  from a `BundleReader`-verified bundle, with explicit
+  unavailable-field semantics for pre-H1.4 bundles ("not available in
+  this legacy bundle" is never equivalent to "no uncertainty was
+  recorded in this verified bundle"). Rendering is deterministic — the
+  same verified bundle produces byte-identical Markdown and structurally
+  identical JSON; the `.md` artifact lives outside the canonical bundle
+  (`BUNDLE_FILES` unchanged, no Bundle V2) and identifies the source
+  bundle digest inside the document. The command is runtime-state
+  read-only; its only side effect is the explicit `--output` artifact,
+  and absent/invalid bundles fail nonzero with no artifact created.
+  Live-run memos state artifact-bounded reproducibility and never claim
+  deterministic replay.
+
 - **H1.3 — Live source acquisition profile.**
   The Research Workspace gains a second acquisition profile alongside the
   sealed fixture default: `nodechain research run --profile live`

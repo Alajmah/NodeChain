@@ -49,6 +49,176 @@ def _parse_output(outputs: dict, node_id: str) -> dict:
     return out
 
 
+# --------------------------------------------------------------------------- #
+# H1.4: terminal evidence projection helpers
+# --------------------------------------------------------------------------- #
+
+#: Runtime chain-review decision types → BundleV1 review decision enum.
+_REVIEW_DECISION_MAP = {
+    "approve_chain_review": "approve",
+    "reject_chain_review": "reject",
+    "request_revision_chain_review": "revise",
+}
+
+
+def _admitted_review_decisions(
+    desc: RunDescriptor, workspace_dir: str | Path, run_id: str
+) -> list[dict[str, Any]]:
+    """Project ADMITTED runtime review decisions into BundleV1 records.
+
+    The durable review_decision_attempts table is the authority for what the
+    runtime actually admitted. A submitted-but-never-admitted decision is
+    not a completed review. Free-text reasons live only in the CLI
+    submission files; a reason is attached when the submission uniquely
+    matches the admitted attempt (same reviewer, same decision) — otherwise
+    an explicit no-reason-recorded placeholder states the truth.
+
+    Fail-closed: an unreadable/locked/corrupt authoritative runtime store
+    propagates and fails finalization — it must never be indistinguishable
+    from "no admitted review decisions", or a false review_completed=false
+    would be sealed into an immutable verified bundle. A runtime store that
+    was never persisted legitimately returns [] (the read-only StateManager
+    handles that case). Similarly, unexpected I/O or parse failures reading
+    the supporting submission records propagate; a genuinely absent
+    reviews directory returns [] normally inside the helper.
+    """
+    from nodechain.core.state import StateManager
+
+    sm = StateManager(desc.db_path, read_only=True)
+    attempts = sm.get_review_attempts(run_id=run_id, admitted=True) or []
+
+    from .run_descriptor import list_review_records
+    submissions = list_review_records(workspace_dir, run_id)
+
+    records: list[dict[str, Any]] = []
+    for attempt in attempts or []:
+        decision = _REVIEW_DECISION_MAP.get(
+            str(attempt.get("attempted_decision_type", "")))
+        if decision is None:
+            # Timeouts and non-operator outcomes are not operator decisions
+            # and must not be materialized as review records.
+            continue
+        reviewer = str(attempt.get("reviewer_identity", "") or "")
+        # A free-text reason attaches only when EXACTLY ONE CLI submission
+        # matches (same reviewer, same decision). With multiple matches —
+        # e.g. repeated revise/resume cycles by the same reviewer — the
+        # attribution is ambiguous and the explicit no-reason statement is
+        # used instead of guessing.
+        matching_reasons = [
+            str(sub.get("reason", "") or "")
+            for sub in submissions
+            if (str(sub.get("reviewer", "")) == reviewer
+                and _REVIEW_DECISION_MAP.get(
+                    str(sub.get("runtime_decision", "")) + "_chain_review"
+                ) == decision)
+        ]
+        reason = matching_reasons[0] if len(matching_reasons) == 1 else ""
+        records.append({
+            "review_id": str(attempt.get("review_attempt_id", "")),
+            "run_id": run_id,
+            "decision": decision,
+            "reason": reason or (
+                "Admitted runtime review decision; no free-text reason was "
+                "recorded in the durable attempt row."
+            ),
+            "reviewer_identity": reviewer or "unknown",
+            "decided_at": str(attempt.get("created_at", "")),
+        })
+    # Stable order: recorded timestamp, then stable ID.
+    records.sort(key=lambda r: (r["decided_at"], r["review_id"]))
+    return records
+
+
+def _uncertainty_markers(risk_out: dict) -> list[dict[str, Any]]:
+    """Project the risk classifier's uncertainty disclosures into BundleV1
+    uncertainty markers. Claim attribution is never inferred — the runtime
+    does not establish that linkage, so affected_claim_ids stays empty."""
+    markers: list[dict[str, Any]] = []
+    for i, ud in enumerate(
+            risk_out.get("uncertainty_disclosures", []) or [], start=1):
+        if not isinstance(ud, dict):
+            continue
+        area = str(ud.get("area", "") or "")
+        nature = str(ud.get("nature", "") or "")
+        impact = str(ud.get("impact", "") or "")
+        description = ": ".join(part for part in (area, nature) if part)
+        if impact:
+            description = (
+                f"{description} (impact: {impact})" if description
+                else f"Impact: {impact}"
+            )
+        markers.append({
+            "marker_id": f"unc-{i}",
+            "description": description or (
+                "Undisclosed uncertainty recorded by the risk classifier."),
+            "affected_claim_ids": [],
+        })
+    return markers
+
+
+def _fault_adapter_name(fault: dict) -> str:
+    """Derive the affected adapter (or step) from recorded fault evidence.
+
+    Prefers the adapter named in the proving event's side-effect
+    idempotency key (search:<adapter>:<digest>); falls back to the
+    operation's node component."""
+    for proving in fault.get("proving_events", []) or []:
+        meta = (proving.get("metadata", {}) or {}) if isinstance(
+            proving, dict) else {}
+        ikey = str(meta.get("idempotency_key", "") or "")
+        if ikey.startswith("search:"):
+            parts = ikey.split(":")
+            if len(parts) >= 3 and parts[1]:
+                return parts[1]
+    operation = str(fault.get("operation", "") or "")
+    if operation.startswith("search:"):
+        node = operation.split(":", 1)[1]
+        if node:
+            return node
+    return "search_tool"
+
+
+#: Downstream evidence availability per recorded fault semantics. This is
+#: about whether the failed operation left usable evidence for downstream
+#: research synthesis — NOT about whether proving events exist (those are
+#: evidence that the failure occurred, which the runtime always records
+#: for recognized faults). fail_before_dispatch never reached the wire
+#: (no evidence can exist); timeout_after_dispatch returned no result;
+#: malformed_provenance results were rejected at validation; only
+#: partial_result_set delivered (partial) usable evidence.
+_FAULT_EVIDENCE_UNAVAILABLE = {
+    "fail_before_dispatch": True,
+    "timeout_after_dispatch": True,
+    "malformed_provenance": True,
+    "partial_result_set": False,
+}
+
+
+def _normalized_failures(
+    fault_records: list[dict[str, Any]], fallback_ts: str
+) -> list[dict[str, Any]]:
+    """Normalize immutable fault records into the BundleV1 failure_record
+    contract. Downstream evidence availability derives from the recorded
+    fault semantics; claim impact is shown only when established — never
+    inferred from the mere occurrence of a fault."""
+    normalized: list[dict[str, Any]] = []
+    for f in fault_records:
+        fault_type = str(f.get("failure_type", ""))
+        normalized.append({
+            "failure_id": str(f.get("fault_id", "")),
+            "adapter_name": _fault_adapter_name(f),
+            "fault_type": fault_type,
+            "occurred_at": str(f.get("timestamp", "") or fallback_ts),
+            "dispatch_occurred": bool(f.get("dispatch_attempted", False)),
+            "evidence_unavailable": _FAULT_EVIDENCE_UNAVAILABLE.get(
+                fault_type, True),
+            "affected_claim_ids": list(
+                f.get("affected_claim_ids", []) or []),
+        })
+    normalized.sort(key=lambda r: (r["occurred_at"], r["failure_id"]))
+    return normalized
+
+
 def _determine_terminal_status(
     trace_final_status: str,
     min_sources: int,
@@ -152,6 +322,9 @@ def finalize_bundle(
     val_out = _parse_output(outputs, "claim_validator")
     validated = val_out.get("validated_claims", [])
     risk_out = _parse_output(outputs, "risk_classifier")
+    # H1.4: the final Response Generator output is authoritative terminal
+    # response evidence — preserve it rather than ignoring the final node.
+    resp_out = _parse_output(outputs, "response_generator")
 
     # Adapters ACTUALLY invoked during the run, derived from the
     # authoritative search_tool execution record. Permission is not
@@ -278,6 +451,65 @@ def finalize_bundle(
     if trace_final_status == "failed":
         current_step_node = getattr(state, "current_node", "") or "failed"
 
+    # H1.4 terminal evidence projection.
+    review_decisions = _admitted_review_decisions(desc, workspace_dir, run_id)
+    uncertainty_markers = _uncertainty_markers(risk_out)
+    normalized_failures = _normalized_failures(fault_records, ts)
+    # review_required reflects the RUNTIME review gate, not the risk
+    # classifier flag alone: the ReviewManager also gates runs on risk
+    # level and confidence regardless of the flag, and any admitted
+    # decision is itself proof the gate fired. Trace evidence of a
+    # requested human review is authoritative runtime gate evidence.
+    runtime_review_requested = False
+    for ev in getattr(trace, "events", []) or []:
+        event_type = getattr(ev, "event_type", None)
+        if event_type is None:
+            continue
+        if "human_review_requested" in str(event_type.value).lower():
+            runtime_review_requested = True
+            break
+    review_required = (
+        bool(risk_out.get("review_required"))
+        or runtime_review_requested
+        or bool(review_decisions)
+    )
+    # review_completed requires COMPLETION EVIDENCE (an admitted decision) —
+    # it is never merely the negation of review_required.
+    review_completed = bool(review_decisions)
+
+    # Citation/evidence/claim linkage over the canonical relationships:
+    # citation.evidence_ids from evidence records that reference the source;
+    # claim.citation_ids from citations reachable through the claim's own
+    # evidence. No link is created without an existing relationship.
+    evidence_ids_by_source: dict[str, list[str]] = {}
+    for e in evidence_list:
+        if not isinstance(e, dict):
+            continue
+        for sid in e.get("source_ids", []) or []:
+            evidence_ids_by_source.setdefault(str(sid), []).append(
+                str(e.get("evidence_id", "")))
+    sources_by_id = {str(s.get("source_id", "")): s for s in sources}
+    citation_ids_by_source = {
+        str(s.get("source_id", "")): f"cit-{s.get('source_id', '')}"
+        for s in sources
+    }
+
+    def _claim_citation_ids(claim: dict) -> list[str]:
+        # The claim's evidence ids as written into claims.json: the
+        # per-claim evidence record id for each side that has sources.
+        claim_evidence_ids: set[str] = set()
+        if claim.get("supporting_sources"):
+            claim_evidence_ids.add(f"ev-{claim.get('claim_id', '1')}")
+        if claim.get("contradicting_sources"):
+            claim_evidence_ids.add(f"ev-{claim.get('claim_id', '1')}")
+        cited_sources: list[str] = []
+        for s in sources:  # canonical bundle order
+            sid = str(s.get("source_id", ""))
+            if sid in citation_ids_by_source and set(
+                    evidence_ids_by_source.get(sid, [])) & claim_evidence_ids:
+                cited_sources.append(citation_ids_by_source[sid])
+        return cited_sources
+
     # Profile-derived acquisition truth (H1.3): required adapters from the
     # descriptor; coverage derived from the ACTUAL ingested records, used
     # adapters from ACTUAL dispatch evidence — never hardcoded, never the
@@ -392,7 +624,8 @@ def finalize_bundle(
         "mean_confidence": actual_confidence,
     })
 
-    # claims.json
+    # claims.json — citation links derived from canonical evidence
+    # relationships only.
     writer.write_document("claims.json", {
         "bundle_version": "1.0",
         "run_id": run_id,
@@ -404,7 +637,7 @@ def finalize_bundle(
                 "status": c.get("status", "supported"),
                 "supporting_evidence_ids": [f"ev-{c.get('claim_id', '1')}"] if c.get("supporting_sources") else [],
                 "contradicting_evidence_ids": [f"ev-{c.get('claim_id', '1')}"] if c.get("contradicting_sources") else [],
-                "citation_ids": [],
+                "citation_ids": _claim_citation_ids(c),
                 "confidence": c.get("confidence", 0.0),
                 "uncertainty_markers": [],
                 "validation_results": [],
@@ -415,16 +648,19 @@ def finalize_bundle(
         "executive_answer": ev_out.get("executive_answer", ""),
     })
 
-    # citations.json
+    # citations.json — evidence links from evidence records that actually
+    # reference each source.
     writer.write_document("citations.json", {
         "bundle_version": "1.0",
         "run_id": run_id,
         "formatted_at": ts,
         "citations": [
             {
-                "citation_id": f"cit-{s.get('source_id', '')}",
+                "citation_id": citation_ids_by_source.get(
+                    str(s.get("source_id", "")), f"cit-{s.get('source_id', '')}"),
                 "source_id": s.get("source_id", ""),
-                "evidence_ids": [],
+                "evidence_ids": evidence_ids_by_source.get(
+                    str(s.get("source_id", "")), []),
                 "formatted_citation": f"{', '.join(s.get('authors', ()))}. {s.get('title', '')}.",
             }
             for s in sources
@@ -432,12 +668,12 @@ def finalize_bundle(
         "style": "apa",
     })
 
-    # uncertainties.json
+    # uncertainties.json — actual risk-classifier uncertainty disclosures.
     writer.write_document("uncertainties.json", {
         "bundle_version": "1.0",
         "run_id": run_id,
         "recorded_at": ts,
-        "uncertainties": [],
+        "uncertainties": uncertainty_markers,
     })
 
     # validations.json
@@ -466,28 +702,27 @@ def finalize_bundle(
         "policy_decisions": [],
     })
 
-    # review-decisions.json
+    # review-decisions.json — ADMITTED runtime review evidence only.
     writer.write_document("review-decisions.json", {
         "bundle_version": "1.0",
         "run_id": run_id,
         "recorded_at": ts,
-        "review_decisions": [],
+        "review_decisions": review_decisions,
+        "review_required": review_required,
+        "review_completed": review_completed,
     })
 
-    # failures.json
+    # failures.json — normalized BundleV1 failure records from immutable
+    # fault evidence.
     writer.write_document("failures.json", {
         "bundle_version": "1.0",
         "run_id": run_id,
         "recorded_at": ts,
-        "failures": [
-            {
-                "failure_id": f.get("fault_id", ""),
-                "failure_type": f.get("failure_type", ""),
-                "affected_claim_ids": [],
-                "detail": f.get("reason_codes", []),
-            }
-            for f in fault_records
-        ],
+        "failures": normalized_failures,
+        "degraded_mode": terminal_status == "completed_degraded",
+        "affected_adapter_count": len({
+            f["adapter_name"] for f in normalized_failures
+        }),
     })
 
     # trace.json
@@ -505,21 +740,43 @@ def finalize_bundle(
         ],
     })
 
-    # report.json
-    writer.write_document("report.json", {
+    # report.json — final-response preservation (H1.4). The executive
+    # answer reflects the authoritative Response Generator output rather
+    # than silently ignoring the final node; the count/status fields keep
+    # their BundleV1 meanings.
+    report_doc: dict[str, Any] = {
         "run_id": run_id,
         "run_status": terminal_status,
-        "executive_answer": ev_out.get("executive_answer", ""),
+        "executive_answer": (
+            resp_out.get("recommendation", "")
+            or ev_out.get("executive_answer", "")
+        ),
         "claim_count": len(claims),
         "supported_claims": len([c for c in claims if isinstance(c, dict) and c.get("status") == "supported"]),
         "contested_claims": 0,
         "sources_cited": len(sources),
         "adapters_used": adapters_used,
         "failures_recorded": len(fault_records),
-        "review_required": risk_out.get("review_required", False),
-        "review_completed": risk_out.get("review_required", False) is False,
+        "review_required": review_required,
+        "review_completed": review_completed,
         "replay_eligible": replay_eligible,
-    })
+    }
+    # Final-response and risk fields are included only when the terminal
+    # run actually produced them (absent on legacy-shaped runs).
+    for field in ("recommendation", "executive_summary", "key_findings",
+                  "confidence_statement", "alternative_perspectives",
+                  "methodology_notes"):
+        if resp_out.get(field) not in (None, "", [], {}):
+            report_doc[field] = resp_out[field]
+    if risk_out.get("risk_level"):
+        report_doc["risk_level"] = risk_out["risk_level"]
+    if risk_out.get("confidence") is not None:
+        report_doc["overall_confidence"] = risk_out["confidence"]
+    if risk_out.get("risk_factors"):
+        report_doc["risk_factors"] = list(risk_out["risk_factors"])
+    if risk_out.get("review_reason"):
+        report_doc["review_reason"] = risk_out["review_reason"]
+    writer.write_document("report.json", report_doc)
 
     # Compute manifest.
     manifest = writer.compute_manifest(

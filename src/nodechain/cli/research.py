@@ -767,3 +767,85 @@ def research_export(run_id: str, output_path: str, workspace_dir: str,
         f"Digest: {result['bundle_digest'][:16]}...",
         title="Bundle Export",
     ))
+
+
+@research.command("report")
+@click.argument("run_id", required=True)
+@click.option("--workspace", "workspace_dir", default=_DEFAULT_WORKSPACE,
+              help="Workspace directory.")
+@click.option("--output", "output_path", default=None,
+              help="Write a UTF-8 Markdown memo to this path.")
+@click.option("--json", "as_json", is_flag=True,
+              help="Emit the structured ResearchMemoV1 JSON instead of the "
+                   "terminal presentation.")
+def research_report(run_id: str, workspace_dir: str, output_path: str | None,
+                    as_json: bool) -> None:
+    """Render a verified terminal bundle as a human-readable memo.
+
+    The memo is a deterministic view of evidence the governed run already
+    produced — no model call, no network, no re-research. Only a
+    BundleReader-verified terminal bundle may be reported; absent or
+    invalid bundles fail nonzero and create no artifact.
+    """
+    from nodechain.research.report import build_memo, render_markdown
+    bundle_dir = Path(workspace_dir) / "runs" / run_id / "bundle"
+    if not (bundle_dir / "manifest.json").exists():
+        console.print(
+            f"[red]Error:[/red] no terminal bundle for run {run_id}"
+        )
+        sys.exit(EXIT_NOT_FOUND)
+    try:
+        memo = build_memo(bundle_dir)
+    except FileNotFoundError:
+        console.print(f"[red]Error:[/red] no terminal bundle for run {run_id}")
+        sys.exit(EXIT_NOT_FOUND)
+    except Exception as exc:
+        # Integrity failure (or malformed bundle) — never render an
+        # unverified bundle, never create the output artifact.
+        console.print(
+            f"[red]Error:[/red] bundle failed verification for {run_id}: "
+            f"{exc}"
+        )
+        sys.exit(EXIT_RUN_VALIDATION)
+
+    if output_path is not None:
+        out = Path(output_path)
+        if out.exists():
+            console.print(f"[red]Error:[/red] output already exists: {out}")
+            sys.exit(EXIT_RUN_VALIDATION)
+        # A report artifact inside the canonical bundle would add a
+        # sixteenth physical member and invalidate the source bundle's
+        # integrity verification — reject containment, including through
+        # symlinked parents.
+        try:
+            out_resolved = out.resolve(strict=False)
+            bundle_resolved = bundle_dir.resolve(strict=False)
+            out_resolved.relative_to(bundle_resolved)
+        except ValueError:
+            pass  # not contained — safe
+        else:
+            console.print(
+                f"[red]Error:[/red] report output must not be written "
+                f"inside the canonical bundle: {out}"
+            )
+            sys.exit(EXIT_RUN_VALIDATION)
+        markdown = render_markdown(memo)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        # Bytes, not text: deterministic line endings on every platform.
+        out.write_bytes(markdown.encode("utf-8"))
+
+    if as_json:
+        click.echo(json.dumps(memo.model_dump(mode="json"), indent=2))
+        return
+
+    if output_path is not None:
+        console.print(Panel(
+            f"[green]REPORT WRITTEN[/green]\n\nRun: {run_id}\n"
+            f"Output: {output_path}\n"
+            f"Source bundle digest: {memo.bundle_digest[:16]}...",
+            title="Research Memo",
+        ))
+        return
+
+    from nodechain.research.report import render_rich
+    render_rich(memo, console)

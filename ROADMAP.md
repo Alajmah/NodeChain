@@ -51,12 +51,6 @@ The canonical deployment-profile authority is `docs/deployment-profiles.md`. Hor
 
 **Objective:** turn the accepted research product-proof backend into a coherent user product without weakening the runtime/evidence contract.
 
-## H1.4 — Human-readable final research artifact
-
-The terminal bundle should support a first-class user-facing report/memo view that is derived from the same claims, evidence, citations, risk, review, failure, and trace records.
-
-The product should make governance evidence understandable without requiring raw JSON inspection.
-
 ## H1.5 — Product proof with users
 
 Run structured product proof against real research tasks and evaluate:

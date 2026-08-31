@@ -201,10 +201,31 @@ class FixtureModelAdapter:
                 "reasoning": "Sealed corpus run — review required by policy.",
             })
         elif "response_generator" in lower or "response generator" in lower:
+            # H1.4: emit the Response Generator's declared output schema so
+            # sealed fixture runs preserve the same final-response evidence
+            # shape live runs produce. Deterministic sealed-corpus content —
+            # no second generation pass.
             content = json.dumps({
-                "answer": "Sealed corpus run completed. See evidence summary.",
-                "confidence": "low",
-                "caveats": ["Results based on sealed fixture corpus."],
+                "recommendation": (
+                    "Sealed corpus run completed. See evidence summary."
+                ),
+                "executive_summary": (
+                    "The sealed fixture corpus run produced a deterministic "
+                    "evidence base; see key findings."
+                ),
+                "key_findings": [
+                    "Sealed corpus run completed with deterministic evidence.",
+                ],
+                "confidence_statement": {
+                    "level": "low",
+                    "numeric": 0.4,
+                    "explanation": "Results based on sealed fixture corpus.",
+                },
+                "alternative_perspectives": [],
+                "methodology_notes": (
+                    "Governed execution over the sealed fixture corpus "
+                    "(deterministic qualification profile)."
+                ),
             })
         else:
             content = json.dumps({"result": user_message.strip()})
